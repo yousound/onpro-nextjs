@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OnPro — Desktop (Next.js)
 
-## Getting Started
+UI-only desktop shell for **OnPro**: dark chrome + light canvas, **Projects** overview with field-backed KPIs and cards, **Production** board (TanStack Table + inspector), **project detail** modules backed by the same `Project` shape as the iOS app (`OnPro/Models/Project.swift`). Mock data lives under `src/lib/mock/`.
 
-First, run the development server:
+## Scripts
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run build
+npm run lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) — `/` redirects to `/projects`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Node version
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The app builds on **Node 18.18+**. **Node 20 LTS** is recommended for parity with current Next.js and tooling releases.
 
-## Learn More
+## Security baseline
 
-To learn more about Next.js, take a look at the following resources:
+- **Framework**: Next.js **15.5.18** (patched 15.x line). Re-run `npm audit` before releases and upgrade when advisories require it.
+- **Secrets**: use `.env.local` only (see `.env.example`). Never expose service keys to the client bundle.
+- **Headers**: `next.config.ts` sets `X-Frame-Options: DENY` and `Referrer-Policy: strict-origin-when-cross-origin` on all routes.
+- **Dependencies**: Dependabot or Renovate on the repo is recommended.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Layout reference
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Visual structure follows the internal dashboard reference (dark top bar, KPI header, light content). Metrics on Projects are derived only from mock `Project` fields (status, due dates, milestone fill), not placeholder domains like generic tasks or budget.

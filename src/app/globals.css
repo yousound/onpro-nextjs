@@ -19,8 +19,46 @@
   --health-bad: #ef4444;
 }
 
+@keyframes invite-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 body {
   @apply bg-surface-body text-text-primary antialiased;
+}
+
+/** Very light gray scrollbar thumb/track (WebKit + Firefox). Use on horizontal strips. */
+@layer utilities {
+  .scrollbar-light-gray {
+    scrollbar-width: thin;
+    scrollbar-color: #e4e6ea #f6f7f9;
+  }
+
+  .scrollbar-light-gray::-webkit-scrollbar {
+    width: 8px;
+    height: 7px;
+  }
+
+  .scrollbar-light-gray::-webkit-scrollbar-track {
+    background: #f6f7f9;
+    border-radius: 9999px;
+  }
+
+  .scrollbar-light-gray::-webkit-scrollbar-thumb {
+    background: #e4e6ea;
+    border-radius: 9999px;
+  }
+
+  .scrollbar-light-gray::-webkit-scrollbar-thumb:hover {
+    background: #d9dce2;
+  }
 }
 
 :focus-visible {

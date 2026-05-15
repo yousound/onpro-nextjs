@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
 import type { Conversation } from "@/lib/types/messages";
 import {
   attachmentsForConversation,
@@ -9,6 +9,12 @@ import {
   type ThreadSmartAttachment,
 } from "@/lib/mock/message-threads";
 import { formatDateTime } from "@/lib/format";
+import { AttachmentReaderModal } from "@/components/attachment-reader-modal";
+import {
+  AttachmentsOnboardingModal,
+  hasSeenAttachmentsOnboarding,
+  markAttachmentsOnboardingSeen,
+} from "@/components/attachments-onboarding-modal";
 import { MessageAttachmentComposer } from "@/components/message-attachment-composer";
 import type { AttachmentComposerDraft } from "@/lib/attachment-composer-draft";
 import { fallbackDraftFromSmartAttachment } from "@/lib/attachment-composer-draft";
@@ -90,11 +96,32 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   const [composerSessionKey, setComposerSessionKey] = useState(0);
   const [composerInitialDraft, setComposerInitialDraft] = useState<AttachmentComposerDraft | null>(null);
   const [composerMode, setComposerMode] = useState<"new" | "edit">("new");
+  const [composerLayout, setComposerLayout] = useState<"workspace" | "document">("workspace");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [overrideById, setOverrideById] = useState<Record<string, Partial<ThreadMessage>>>({});
   const [extraMessages, setExtraMessages] = useState<ThreadMessage[]>([]);
   const [newMessageOpen, setNewMessageOpen] = useState(false);
+  const [attachOnboardingOpen, setAttachOnboardingOpen] = useState(false);
+  const [readerOpen, setReaderOpen] = useState(false);
+  const [readerAttachment, setReaderAttachment] = useState<ThreadSmartAttachment | null>(null);
+  const [draftMessage, setDraftMessage] = useState("");
+  const [inboxPeekOpen, setInboxPeekOpen] = useState(false);
+  const [inboxSearchQuery, setInboxSearchQuery] = useState("");
   const active = conversations.find((c) => c.id === activeId) ?? conversations[0];
+
+  useEffect(() => {
+    if (hasSeenAttachmentsOnboarding()) return;
+    setAttachOnboardingOpen(true);
+  }, []);
+
+  useEffect(() => {
+    setDraftMessage("");
+  }, [activeId]);
+
+  function dismissAttachOnboarding() {
+    markAttachmentsOnboardingSeen();
+    setAttachOnboardingOpen(false);
+  }
 
   const thread = useMemo(() => {
     if (!active) return [];
@@ -107,10 +134,31 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   }, [active, extraMessages, overrideById]);
   const attachments = active ? attachmentsForConversation(active.id) : [];
 
+  const filteredConversations = useMemo(() => {
+    const needle = inboxSearchQuery.trim().toLowerCase();
+    if (!needle) return conversations;
+    return conversations.filter((c) => {
+      const participantNames = c.participants.map((p) => p.name).join(" ");
+      const blob = `${c.name} ${c.last_message_preview ?? ""} ${participantNames}`.toLowerCase();
+      return blob.includes(needle);
+    });
+  }, [conversations, inboxSearchQuery]);
+
   const peerName = active?.name ?? "—";
   const handle = `@${peerName.replace(/\s+/g, "").toLowerCase()}`;
 
+  /** Choosing a thread should dismiss the expanded inbox rail (focus was keeping it stuck open). */
+  function pickConversation(conversationId: number) {
+    if (typeof document !== "undefined") {
+      const ae = document.activeElement;
+      if (ae instanceof HTMLElement) ae.blur();
+    }
+    setActiveId(conversationId);
+    setInboxPeekOpen(false);
+  }
+
   function openNewComposer() {
+    setComposerLayout("workspace");
     setComposerMode("new");
     setEditingMessageId(null);
     setComposerInitialDraft(null);
@@ -119,13 +167,78 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   }
 
   function startNewMessageTo(conversationId: number) {
-    setActiveId(conversationId);
+    pickConversation(conversationId);
     setNewMessageOpen(false);
     openNewComposer();
   }
 
+  function sendDraftMessage() {
+    if (!active) return;
+    const trimmed = draftMessage.trim();
+    if (!trimmed) return;
+    const id = `local-${Date.now()}`;
+    const timeLabel = new Date().toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    setExtraMessages((prev) => [
+      ...prev,
+      {
+        id,
+        conversation_id: active.id,
+        side: "outgoing",
+        body: trimmed,
+        time_label: timeLabel,
+      },
+    ]);
+    setDraftMessage("");
+  }
+
+  function handleInboxBlur(e: FocusEvent<HTMLElement>) {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setInboxPeekOpen(false);
+  }
+
+  function handleInboxMouseLeave(e: MouseEvent<HTMLElement>) {
+    const root = e.currentTarget;
+    queueMicrotask(() => {
+      if (!root.contains(document.activeElement)) setInboxPeekOpen(false);
+    });
+  }
+
+  /** Desktop inbox rail: collapsed → thread column gets wider max-width (must animate with aside width). */
+  const threadShellMax = inboxPeekOpen
+    ? "max-w-2xl"
+    : "max-w-2xl md:max-w-[min(100%,48rem)] xl:max-w-[min(100%,56rem)]";
+  const threadShellTransition =
+    "transition-[max-width] duration-300 ease-out motion-reduce:transition-none";
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-slate-50">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-slate-50">
+      <AttachmentsOnboardingModal open={attachOnboardingOpen} onDismiss={dismissAttachOnboarding} />
+      <AttachmentReaderModal
+        open={readerOpen}
+        attachment={readerAttachment}
+        onClose={() => {
+          setReaderOpen(false);
+          setReaderAttachment(null);
+          setEditingMessageId(null);
+        }}
+        onEdit={() => {
+          if (!readerAttachment) return;
+          const draft =
+            readerAttachment.composer_draft ??
+            fallbackDraftFromSmartAttachment(readerAttachment, peerName);
+          setReaderOpen(false);
+          setReaderAttachment(null);
+          setComposerLayout("workspace");
+          setComposerMode("edit");
+          setComposerInitialDraft(draft);
+          setComposerSessionKey((k) => k + 1);
+          setComposerOpen(true);
+        }}
+      />
       {/* App-style sub-header (light, under global nav) */}
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 shadow-sm md:px-6">
         <h1 className="text-lg font-semibold text-slate-900">Messages</h1>
@@ -189,70 +302,149 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
       ) : null}
 
       <div className="flex min-h-0 flex-1 divide-x divide-slate-200">
-        {/* Left: inbox */}
-        <aside className="flex w-full min-w-0 flex-col border-slate-200 bg-white md:w-[min(100%,320px)] md:max-w-[360px] md:shrink-0">
-          <div className="border-b border-slate-100 p-3">
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <SearchIcon />
-              </span>
-              <input
-                readOnly
-                placeholder="People, chat, keywords"
-                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm"
-              />
+        {/* Left: inbox — md+: narrow strip with search + avatars; hover expands full panel */}
+        <aside
+          className={`flex shrink-0 flex-col overflow-hidden border-slate-200 bg-white transition-[width,box-shadow] duration-300 ease-out md:z-[5] md:border-r md:border-slate-200 ${
+            inboxPeekOpen
+              ? "w-full min-w-0 md:w-[min(100%,320px)] md:max-w-[360px] md:shadow-[6px_0_28px_-14px_rgba(15,23,42,0.18)]"
+              : "w-full min-w-0 md:w-[60px] md:min-w-[60px]"
+          }`}
+          title={inboxPeekOpen ? undefined : "Hover to expand inbox"}
+          onMouseEnter={() => setInboxPeekOpen(true)}
+          onMouseLeave={handleInboxMouseLeave}
+          onFocusCapture={() => setInboxPeekOpen(true)}
+          onBlurCapture={handleInboxBlur}
+        >
+          {/* Expanded inbox — always on small screens; desktop when hovered */}
+          <div
+            className={`flex min-h-0 flex-1 flex-col overflow-hidden max-md:flex ${inboxPeekOpen ? "md:flex" : "md:hidden"}`}
+          >
+            <div className="border-b border-slate-100 px-3 pb-3.5 pt-3">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                  <SearchIcon className="size-[18px] shrink-0 text-slate-400" />
+                </span>
+                <input
+                  value={inboxSearchQuery}
+                  onChange={(e) => setInboxSearchQuery(e.target.value)}
+                  placeholder="People, chat, keywords"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-11 pr-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-400/25"
+                  aria-label="Search conversations"
+                />
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <p className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Yesterday
+              </p>
+              <ul>
+                {filteredConversations.length === 0 ? (
+                  <li className="px-4 py-8 text-center text-sm text-slate-500">
+                    {inboxSearchQuery.trim()
+                      ? `No conversations match "${inboxSearchQuery.trim()}".`
+                      : "No conversations yet."}
+                  </li>
+                ) : (
+                  filteredConversations.map((c) => {
+                  const isActive = c.id === active?.id;
+                  return (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => pickConversation(c.id)}
+                        className={`flex w-full gap-3 border-l-4 px-3 py-3 text-left transition ${
+                          isActive
+                            ? "border-violet-500 bg-violet-50/90"
+                            : "border-transparent hover:bg-slate-50"
+                        }`}
+                      >
+                        <span className="relative shrink-0">
+                          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
+                            {initials(c.name)}
+                          </span>
+                          <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-baseline justify-between gap-2">
+                            <span className="truncate font-semibold text-slate-900">{c.name}</span>
+                            <span className="shrink-0 text-[11px] text-slate-400">
+                              {c.last_message_date
+                                ? new Date(c.last_message_date).toLocaleTimeString(undefined, {
+                                    hour: "numeric",
+                                    minute: "2-digit",
+                                  })
+                                : ""}
+                            </span>
+                          </span>
+                          <span className="line-clamp-1 text-sm text-slate-500">
+                            {c.last_message_preview ?? "—"}
+                          </span>
+                        </span>
+                        {c.unread_count > 0 ? (
+                          <span className="mt-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-600 px-1 text-[10px] font-bold text-white">
+                            {c.unread_count}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                  })
+                )}
+              </ul>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <p className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              Yesterday
-            </p>
-            <ul>
+
+          {/* Collapsed rail — desktop only */}
+          <div
+            className={
+              inboxPeekOpen
+                ? "hidden"
+                : "hidden min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto overscroll-contain pl-0 pr-2 pb-6 pt-5 md:flex"
+            }
+          >
+            <button
+              type="button"
+              className="mx-auto flex size-[46px] shrink-0 items-center justify-center rounded-2xl border border-slate-100 bg-white text-slate-500 shadow-sm ring-1 ring-slate-100/90 transition hover:border-violet-100 hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:ring-violet-100 active:scale-[0.98]"
+              aria-label="Search conversations"
+              title="Search"
+            >
+              <SearchIcon className="size-[26px] shrink-0 text-slate-600" />
+            </button>
+            <div className="mx-auto h-px w-10 shrink-0 rounded-full bg-gradient-to-r from-transparent via-slate-200 to-transparent" aria-hidden />
+            <ul className="flex w-full flex-col gap-1 px-0">
               {conversations.map((c) => {
                 const isActive = c.id === active?.id;
                 return (
-                  <li key={c.id}>
+                  <li key={`rail-${c.id}`} className="w-full">
                     <button
                       type="button"
-                      onClick={() => setActiveId(c.id)}
-                      className={`flex w-full gap-3 border-l-4 px-3 py-3 text-left transition ${
+                      title={c.name}
+                      onClick={() => pickConversation(c.id)}
+                      className={`flex w-full items-center justify-center border-l-4 py-2 transition ${
                         isActive
                           ? "border-violet-500 bg-violet-50/90"
-                          : "border-transparent hover:bg-slate-50"
+                          : "border-transparent hover:bg-slate-50/90"
                       }`}
                     >
-                      <span className="relative shrink-0">
-                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
-                          {initials(c.name)}
-                        </span>
-                        <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-baseline justify-between gap-2">
-                          <span className="truncate font-semibold text-slate-900">{c.name}</span>
-                          <span className="shrink-0 text-[11px] text-slate-400">
-                            {c.last_message_date
-                              ? new Date(c.last_message_date).toLocaleTimeString(undefined, {
-                                  hour: "numeric",
-                                  minute: "2-digit",
-                                })
-                              : ""}
+                      <span
+                        className={`relative flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-[11px] font-bold text-slate-700 shadow-sm ring-1 ring-white transition hover:shadow-md hover:ring-2 hover:ring-violet-300 active:scale-[0.97]`}
+                      >
+                        {initials(c.name)}
+                        <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-white bg-emerald-500" />
+                        {c.unread_count > 0 ? (
+                          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-600 px-0.5 text-[9px] font-bold leading-none text-white">
+                            {c.unread_count > 9 ? "9+" : c.unread_count}
                           </span>
-                        </span>
-                        <span className="line-clamp-1 text-sm text-slate-500">
-                          {c.last_message_preview ?? "—"}
-                        </span>
+                        ) : null}
                       </span>
-                      {c.unread_count > 0 ? (
-                        <span className="mt-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-600 px-1 text-[10px] font-bold text-white">
-                          {c.unread_count}
-                        </span>
-                      ) : null}
                     </button>
                   </li>
                 );
               })}
             </ul>
+            <div className="mt-auto hidden shrink-0 pb-3 pt-7 text-xs tracking-wide text-slate-300 md:block" aria-hidden>
+              ›
+            </div>
           </div>
         </aside>
 
@@ -270,7 +462,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-                <div className="mx-auto max-w-2xl">
+                <div className={`mx-auto w-full ${threadShellTransition} ${threadShellMax}`}>
                   <div className="mb-6 flex items-center gap-3">
                     <span className="h-px flex-1 bg-slate-200" />
                     <span className="text-xs text-slate-400">
@@ -290,7 +482,11 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                               <span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-600">
                                 {initials(peerName)}
                               </span>
-                              <div className="max-w-[85%]">
+                              <div
+                                className={
+                                  inboxPeekOpen ? "max-w-[85%]" : "max-w-[85%] md:max-w-[min(92%,40rem)]"
+                                }
+                              >
                                 {m.image_slots ? (
                                   <div className="flex gap-2">
                                     {Array.from({ length: m.image_slots }).map((_, i) => (
@@ -309,20 +505,32 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                             </div>
                           ) : (
                             <div className="flex justify-end gap-2">
-                              <div className="max-w-[min(100%,20rem)] space-y-2 text-right">
+                              <div
+                                className={
+                                  inboxPeekOpen
+                                    ? "max-w-[min(100%,20rem)] space-y-2 text-right"
+                                    : "max-w-[min(100%,20rem)] space-y-2 text-right md:max-w-[min(100%,34rem)] xl:max-w-[min(100%,40rem)]"
+                                }
+                              >
                                 {m.smart_attachment ? (
                                   <SmartAttachmentCard
                                     attachment={m.smart_attachment}
                                     onOpen={() => {
-                                      if (!m.smart_attachment) return;
-                                      setComposerMode("edit");
+                                      const att = m.smart_attachment;
+                                      if (!att) return;
                                       setEditingMessageId(m.id);
-                                      setComposerInitialDraft(
-                                        m.smart_attachment.composer_draft ??
-                                          fallbackDraftFromSmartAttachment(m.smart_attachment, peerName),
-                                      );
-                                      setComposerSessionKey((k) => k + 1);
-                                      setComposerOpen(true);
+                                      const draft =
+                                        att.composer_draft ?? fallbackDraftFromSmartAttachment(att, peerName);
+                                      if (att.kind === "invoice") {
+                                        setComposerLayout("document");
+                                        setComposerMode("edit");
+                                        setComposerInitialDraft(draft);
+                                        setComposerSessionKey((k) => k + 1);
+                                        setComposerOpen(true);
+                                        return;
+                                      }
+                                      setReaderAttachment(att);
+                                      setReaderOpen(true);
                                     }}
                                   />
                                 ) : null}
@@ -343,34 +551,74 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                   </div>
                 </div>
               </div>
-              <div className="shrink-0 border-t border-slate-200 bg-white p-3">
-                <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <button type="button" className="shrink-0 text-slate-400" aria-label="Voice">
-                    <MicIcon />
-                  </button>
-                  <input
-                    readOnly
+              <div className="shrink-0 border-t border-slate-200 bg-white p-4">
+                <div
+                  className={`mx-auto flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-[max-width,box-shadow,border-color] duration-300 ease-out focus-within:border-violet-400/70 focus-within:shadow-md focus-within:shadow-violet-500/10 motion-reduce:transition-none ${threadShellMax}`}
+                >
+                  <textarea
+                    value={draftMessage}
+                    onChange={(e) => setDraftMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        sendDraftMessage();
+                      }
+                    }}
+                    rows={2}
                     placeholder="Type your message here"
-                    className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none"
+                    title="⌘↵ or Ctrl+Enter to send"
+                    aria-label="Message text"
+                    className="min-h-[2.25rem] w-full resize-y border-0 bg-transparent px-4 py-2 text-base leading-relaxed text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
                   />
-                  <button
-                    type="button"
-                    onClick={openNewComposer}
-                    className="shrink-0 rounded-lg px-2 py-1 text-lg font-semibold leading-none text-violet-600 hover:bg-violet-100"
-                    aria-label="Add to chat"
-                    title="Add document or attachment"
-                  >
-                    +
-                  </button>
-                  <button type="button" className="text-slate-400 hover:text-violet-600" aria-label="Image">
-                    <ImageIcon />
-                  </button>
-                  <button type="button" className="text-slate-400 hover:text-violet-600" aria-label="Emoji">
-                    <SmileIcon />
-                  </button>
-                  <button type="button" className="text-slate-400 hover:text-violet-600" aria-label="Location">
-                    <PinIcon />
-                  </button>
+                  <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50/95 px-2 py-2">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-0.5 gap-y-1">
+                      <button
+                        type="button"
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-200/80 hover:text-violet-600"
+                        aria-label="Voice"
+                      >
+                        <MicIcon />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openNewComposer}
+                        className="rounded-lg px-2.5 py-2 text-lg font-semibold leading-none text-violet-600 transition hover:bg-violet-100"
+                        aria-label="Add to chat"
+                        title="Add document or attachment"
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-200/80 hover:text-violet-600"
+                        aria-label="Image"
+                      >
+                        <ImageIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-200/80 hover:text-violet-600"
+                        aria-label="Emoji"
+                      >
+                        <SmileIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-200/80 hover:text-violet-600"
+                        aria-label="Location"
+                      >
+                        <PinIcon />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={sendDraftMessage}
+                      disabled={!draftMessage.trim()}
+                      className="shrink-0 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      Send
+                    </button>
+                  </div>
                 </div>
               </div>
               <MessageAttachmentComposer
@@ -378,6 +626,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                 sessionKey={composerSessionKey}
                 initialDraft={composerInitialDraft}
                 mode={composerMode}
+                layout={composerLayout}
                 onClose={() => {
                   setComposerOpen(false);
                   setEditingMessageId(null);
@@ -506,11 +755,18 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   );
 }
 
-function SearchIcon() {
+function SearchIcon({ className }: { className?: string }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg
+      className={className ?? "size-4 shrink-0"}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden
+    >
       <circle cx="11" cy="11" r="7" />
-      <path d="M20 20l-3-3" />
+      <path d="M20 20l-3-3" strokeLinecap="round" />
     </svg>
   );
 }

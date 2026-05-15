@@ -105,6 +105,10 @@ export function ProductionBoard({ projects }: { projects: Project[] }) {
     router.replace(`/production?inspect=${id}`, { scroll: false });
   };
 
+  const openProjectDetail = (id: number) => {
+    router.push(`/projects/${id}`);
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-white p-4 lg:p-6">
@@ -131,6 +135,10 @@ export function ProductionBoard({ projects }: { projects: Project[] }) {
                 <tr
                   key={row.id}
                   onClick={() => onPickRow(row.original.id)}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    openProjectDetail(row.original.id);
+                  }}
                   className={`cursor-pointer border-b border-border-light bg-white ${
                     active ? "bg-slate-50 ring-1 ring-inset ring-accent/25" : "hover:bg-slate-50"
                   }`}
@@ -154,7 +162,7 @@ export function ProductionBoard({ projects }: { projects: Project[] }) {
         <Inspector project={selected} />
       ) : (
         <aside className="flex shrink-0 items-center justify-center border-t border-border-light bg-white px-6 py-4 text-sm text-text-secondary">
-          Select a row to inspect. Add{" "}
+          Select a row to inspect, or double-click a row to open project details. Add{" "}
           <code className="mx-1 rounded bg-surface-body px-1">?inspect=1</code> to the URL to deep-link.
         </aside>
       )}

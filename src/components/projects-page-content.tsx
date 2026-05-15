@@ -246,7 +246,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       <div className="shrink-0">
         <PageHeader
           title="Projects"
-          subtitle="Track progress and manage production projects (mock data, field-backed metrics)."
+          subtitle="Track progress and manage production projects."
           action={
             <button
               type="button"

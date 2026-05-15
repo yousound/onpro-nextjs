@@ -11,7 +11,7 @@ export default function ProductionPage() {
       <div className="shrink-0">
         <PageHeader
           title="Jobs"
-          subtitle="Production WIP board — columns map to `Project` fields (Connect Dots–style dates)."
+          subtitle="See where each job stands across your pipeline—columns follow each project’s dates and milestones."
         />
       </div>
       <Suspense

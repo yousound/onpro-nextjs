@@ -10,7 +10,7 @@ export default function DocumentsPage() {
       <div className="shrink-0">
         <PageHeader
           title="Documents"
-          subtitle="Project-linked library: pick a project from the menu, filter by document type (iOS-style pills), then browse recent files and the grouped index."
+          subtitle="Choose a project to see its files. Filter by type, skim what changed lately, or browse the full list—all in one place."
         />
       </div>
       <DocumentsView documents={documents} />

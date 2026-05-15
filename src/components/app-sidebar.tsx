@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { OnProLogoIntroModal } from "@/components/onpro-logo-intro-modal";
 
 type NavItem = {
   href: string;
@@ -13,17 +14,16 @@ type NavItem = {
 };
 
 /**
- * Desktop default: Projects first. OnPro iOS uses Messages as the first tab; this web shell
- * keeps production workflow primary.
+ * Messages first, then projects and the rest of the desktop shell.
  */
 const NAV: NavItem[] = [
-  { href: "/projects", label: "Projects", icon: "projects" },
   { href: "/messages", label: "Messages", icon: "messages" },
+  { href: "/projects", label: "Projects", icon: "projects" },
   { href: "/production", label: "Jobs", icon: "jobs" },
   { href: "/calendar", label: "Calendar", icon: "calendar" },
   { href: "/documents", label: "Documents", icon: "documents" },
   { href: "/settings", label: "Settings", icon: "settings" },
-  { href: "#", label: "Team", icon: "team", disabled: true },
+  { href: "/people", label: "People", icon: "team" },
   { href: "#", label: "Reports", icon: "reports", disabled: true },
 ];
 
@@ -31,6 +31,7 @@ function isNavActive(pathname: string, href: string): boolean {
   if (href === "#") return false;
   if (href === "/messages") return pathname === "/messages" || pathname.startsWith("/messages/");
   if (href === "/settings") return pathname === "/settings";
+  if (href === "/people") return pathname === "/people";
   if (href === "/production") return pathname === "/production";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -99,35 +100,43 @@ function NavIcon({ kind }: { kind: NavItem["icon"] }) {
 export function AppSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [introOpen, setIntroOpen] = useState(false);
 
   return (
     <aside
-      className={`flex shrink-0 flex-col border-r border-border-light bg-surface-card transition-[width] ${
+      className={`flex h-svh min-h-0 shrink-0 flex-col border-r border-border-light bg-surface-card transition-[width] ${
         collapsed ? "w-[4.5rem]" : "w-56"
       }`}
     >
       <div className="flex h-14 items-center gap-2 border-b border-border-light px-3">
-        <Link href="/projects" className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setIntroOpen(true)}
+          className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out hover:bg-slate-200/95 hover:text-slate-900"
+          aria-label="About OnPro"
+        >
           <Image
             src="/onpro-logo.png"
-            alt="OnPro"
+            alt=""
             width={32}
             height={32}
             className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-border-light"
             priority
           />
           {!collapsed ? <span className="truncate font-semibold text-text-primary">OnPro</span> : null}
-        </Link>
+        </button>
       </div>
 
-      <nav className="flex-1 space-y-0.5 p-2" aria-label="Main">
+      <OnProLogoIntroModal open={introOpen} onDismiss={() => setIntroOpen(false)} />
+
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain p-2" aria-label="Main">
         {NAV.map((item) => {
           const active = isNavActive(pathname, item.href);
           const base =
-            "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition";
+            "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-200 ease-out";
           const activeCls = active
-            ? "bg-violet-50 text-accent ring-1 ring-violet-100"
-            : "text-text-secondary hover:bg-surface-body hover:text-text-primary";
+            ? "bg-violet-50 text-accent shadow-sm ring-1 ring-violet-100/90 hover:bg-violet-100 hover:text-violet-800 hover:ring-violet-200"
+            : "text-text-secondary hover:bg-slate-200/95 hover:text-slate-900 hover:shadow-sm active:bg-slate-300/80";
           const disabledCls = "cursor-not-allowed opacity-45";
 
           if (item.disabled) {
@@ -161,7 +170,7 @@ export function AppSidebar() {
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-text-secondary hover:bg-surface-body"
+          className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-text-secondary transition-colors duration-200 ease-out hover:bg-slate-200/95 hover:text-slate-900 hover:shadow-sm active:bg-slate-300/80"
           aria-expanded={!collapsed}
         >
           <span className={collapsed ? "rotate-180" : ""}>‹</span>

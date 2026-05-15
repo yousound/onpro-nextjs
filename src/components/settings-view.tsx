@@ -101,7 +101,7 @@ export function SettingsView() {
 
           <button
             type="button"
-            className="w-full rounded-2xl bg-red-600 py-3.5 text-center text-sm font-semibold text-white hover:bg-red-700"
+            className="w-full rounded-2xl border border-border-light bg-white py-3.5 text-center text-sm font-semibold text-text-primary shadow-sm hover:bg-surface-body"
             onClick={() => {
               alert("Sign out is mock-only (iOS posts userDidSignOut + Supabase).");
             }}

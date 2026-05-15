@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Project } from "@/lib/types/project";
@@ -34,7 +35,15 @@ export function ProjectDetailGate({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-white">
-      <ProjectJobsView project={project} />
+      <Suspense
+        fallback={
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white text-sm text-text-secondary">
+            Loading…
+          </div>
+        }
+      >
+        <ProjectJobsView project={project} />
+      </Suspense>
     </div>
   );
 }

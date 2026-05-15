@@ -63,6 +63,7 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
   const [addDesc, setAddDesc] = useState("");
   const [addPo, setAddPo] = useState("");
   const [addBlock, setAddBlock] = useState(false);
+  const [slotHover, setSlotHover] = useState<{ x: number; y: number; label: string } | null>(null);
 
   useEffect(() => {
     const saved = readMockLs<CalendarEvent[]>(MOCK_LS.calendarEvents);
@@ -111,13 +112,39 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
     return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   }, []);
 
-  const openAddModalAt = useCallback(
-    (colName: string, offsetYInGrid: number) => {
+  const clockLabel = useCallback((totalMin: number) => {
+    const h = Math.floor(totalMin / 60) % 24;
+    const mm = totalMin % 60;
+    return new Date(2000, 0, 1, h, mm).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }, []);
+
+  const computeSlotRangeAtOffset = useCallback(
+    (offsetYInGrid: number) => {
       const rel = Math.max(0, Math.min(gridHeight - 1, offsetYInGrid));
       const raw = viewStartMin + (rel / ROW_PX) * SLOT_MINUTES;
       const rounded = Math.round(raw / SLOT_MINUTES) * SLOT_MINUTES;
       const startM = Math.max(viewStartMin, Math.min(rounded, viewEndMin - SLOT_MINUTES));
       const endM = Math.min(startM + 60, viewEndMin);
+      return { startM, endM };
+    },
+    [gridHeight, viewStartMin, viewEndMin],
+  );
+
+  const slotHoverLabel = useCallback(
+    (colName: string, offsetYInGrid: number) => {
+      const { startM, endM } = computeSlotRangeAtOffset(offsetYInGrid);
+      const datePart = formatShortDate(`${ymd}T12:00:00`);
+      return `${datePart} · ${colName} · ${clockLabel(startM)}–${clockLabel(endM)}`;
+    },
+    [ymd, computeSlotRangeAtOffset, clockLabel],
+  );
+
+  const openAddModalAt = useCallback(
+    (colName: string, offsetYInGrid: number) => {
+      const { startM, endM } = computeSlotRangeAtOffset(offsetYInGrid);
       setAddDept(colName);
       setAddDate(ymd);
       setAddStart(fmtHM(startM));
@@ -125,7 +152,7 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
       setAddOpen(true);
       setSelectedId(null);
     },
-    [ymd, viewStartMin, viewEndMin, gridHeight, fmtHM],
+    [ymd, computeSlotRangeAtOffset, fmtHM],
   );
 
   const layoutEvent = useCallback(
@@ -294,8 +321,19 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
                   aria-label="Add event — pick time; lane defaults to first column"
                   className="absolute left-0 right-0 z-0 cursor-crosshair border-0 bg-transparent hover:bg-blue-500/[0.06]"
                   style={{ top: 24, height: gridHeight }}
+                  onMouseMove={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const y = e.clientY - rect.top;
+                    setSlotHover({
+                      x: e.clientX,
+                      y: e.clientY,
+                      label: slotHoverLabel(columns[0] ?? "Receiving", y),
+                    });
+                  }}
+                  onMouseLeave={() => setSlotHover(null)}
                   onClick={(e) => {
                     const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
+                    setSlotHover(null);
                     openAddModalAt(columns[0] ?? "Receiving", y);
                   }}
                 />
@@ -335,8 +373,19 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
                         aria-label={`Add event in ${colName}`}
                         className="absolute left-0 right-0 z-0 cursor-crosshair border-0 bg-transparent hover:bg-blue-500/[0.06]"
                         style={{ top: 24, height: gridHeight }}
+                        onMouseMove={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const y = e.clientY - rect.top;
+                          setSlotHover({
+                            x: e.clientX,
+                            y: e.clientY,
+                            label: slotHoverLabel(colName, y),
+                          });
+                        }}
+                        onMouseLeave={() => setSlotHover(null)}
                         onClick={(e) => {
                           const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
+                          setSlotHover(null);
                           openAddModalAt(colName, y);
                         }}
                       />
@@ -355,6 +404,7 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
                           <button
                             key={ev.id}
                             type="button"
+                            title={`${formatShortDate(`${ev.date}T12:00:00`)} · ${formatTimeRange(ev.start_time, ev.end_time)} · ${ev.name}`}
                             onClick={() => setSelectedId(ev.id)}
                             className={`absolute left-1 right-1 z-[1] flex min-h-[3.25rem] flex-col overflow-hidden rounded-lg border text-left shadow-sm transition-[box-shadow,border-color] ${
                               blocked
@@ -474,6 +524,18 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
           </aside>
         </div>
       </div>
+
+      {slotHover ? (
+        <div
+          className="pointer-events-none fixed z-[190] max-w-[min(calc(100vw-2rem),18rem)] rounded-lg bg-slate-900 px-2.5 py-2 text-xs font-medium leading-snug text-white shadow-xl ring-1 ring-white/10"
+          style={{ left: slotHover.x + 14, top: slotHover.y + 14 }}
+          role="tooltip"
+        >
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-white/70">New event slot</span>
+          <span className="mt-0.5 block">{slotHover.label}</span>
+          <span className="mt-1 block text-[10px] font-normal text-white/75">Click to create</span>
+        </div>
+      ) : null}
 
       {addOpen ? (
         <div

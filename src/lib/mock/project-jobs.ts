@@ -48,6 +48,7 @@ const jobsByProject: Record<number, ProjectJob[]> = {
       due_date: "2026-06-20T12:00:00.000Z",
       updated_at: "2026-05-12T12:00:00.000Z",
       timeline: oliveJobTimeline(),
+      scope_kind: "original",
     },
     {
       id: "job-1-indigo",
@@ -62,11 +63,12 @@ const jobsByProject: Record<number, ProjectJob[]> = {
       due_date: "2026-07-01T12:00:00.000Z",
       updated_at: "2026-05-08T12:00:00.000Z",
       timeline: upcomingJobTimeline(),
+      scope_kind: "original",
     },
     {
       id: "job-1-black",
       project_id: 1,
-      name: "Washed black denim",
+      name: "Washed black denim — rush add-on",
       subtitle: "Print / Decoration on blanks",
       type: "PRINT / DECORATION ON BLANKS",
       lead_vendor: "CA",
@@ -76,6 +78,8 @@ const jobsByProject: Record<number, ProjectJob[]> = {
       due_date: "2026-07-08T12:00:00.000Z",
       updated_at: "2026-05-08T12:00:00.000Z",
       timeline: upcomingJobTimeline(),
+      scope_kind: "addon",
+      scope_note: "+50 units after initial invoice — keep on same build",
     },
   ],
 };

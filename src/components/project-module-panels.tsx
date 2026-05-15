@@ -1,9 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import type { ApprovalStatus, Project, Sample } from "@/lib/types/project";
+import { PermissionsEditor } from "@/components/permissions-editor";
 import { clientInitials, formatShortDate } from "@/lib/format";
+import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
+import type { PeopleSegment } from "@/lib/mock/people";
+import { segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
 import type { ProjectModuleId } from "@/lib/project-modules";
+import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
 
 function PanelShell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
@@ -419,6 +425,128 @@ function ShippingModulePanel({ project }: { project: Project }) {
   );
 }
 
+const PEOPLE_SEGMENTS: PeopleSegment[] = ["team", "vendor", "client"];
+
+function mergeRoleDrafts(
+  raw: Partial<Record<PeopleSegment, Partial<ProjectPermissionFlags>>> | null,
+): Record<PeopleSegment, ProjectPermissionFlags> {
+  const base = {
+    team: defaultPermissionsForSegment("team"),
+    vendor: defaultPermissionsForSegment("vendor"),
+    client: defaultPermissionsForSegment("client"),
+  };
+  if (!raw) return base;
+  return {
+    team: { ...base.team, ...raw.team },
+    vendor: { ...base.vendor, ...raw.vendor },
+    client: { ...base.client, ...raw.client },
+  };
+}
+
+export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
+  const [segment, setSegment] = useState<PeopleSegment>("team");
+  const [drafts, setDrafts] = useState<Record<PeopleSegment, ProjectPermissionFlags>>(() => mergeRoleDrafts(null));
+  const [hydrated, setHydrated] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => {
+    const raw = readMockLs<Partial<Record<PeopleSegment, Partial<ProjectPermissionFlags>>>>(
+      MOCK_LS.projectRolePermissions(project.id),
+    );
+    setDrafts(mergeRoleDrafts(raw));
+    setHydrated(true);
+  }, [project.id]);
+
+  function save() {
+    writeMockLs(MOCK_LS.projectRolePermissions(project.id), drafts);
+    setSavedFlash(true);
+    window.setTimeout(() => setSavedFlash(false), 2000);
+  }
+
+  const flags = drafts[segment];
+
+  return (
+    <PanelShell>
+      <section className="rounded-2xl border border-border-light bg-white p-6 shadow-sm">
+        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">People &amp; access</h3>
+        <p className="mt-2 max-w-2xl text-sm text-text-secondary">
+          Default capabilities for each workspace segment on{" "}
+          <span className="font-semibold text-text-primary">{project.name}</span>. Invites from People let you tune permissions for that
+          email. Stored in this browser only (mock).
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {PEOPLE_SEGMENTS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSegment(s)}
+              className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                segment === s
+                  ? segmentPillSelectedClass(s)
+                  : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
+              }`}
+            >
+              {segmentLabel(s)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <SectionCard title={`Defaults · ${segmentLabel(segment)}`}>
+        {!hydrated ? (
+          <p className="text-sm text-text-secondary">Loading…</p>
+        ) : (
+          <>
+            <PermissionsEditor
+              segment={segment}
+              flags={flags}
+              onChange={(next) =>
+                setDrafts((prev) => ({
+                  ...prev,
+                  [segment]: next,
+                }))
+              }
+            />
+            <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border-light pt-4">
+              <button
+                type="button"
+                onClick={save}
+                className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+              >
+                Save role defaults
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setDrafts((prev) => ({
+                    ...prev,
+                    [segment]: defaultPermissionsForSegment(segment),
+                  }))
+                }
+                className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+              >
+                Reset to OnPro defaults
+              </button>
+              {savedFlash ? <span className="text-sm font-medium text-emerald-700">Saved for this project.</span> : null}
+            </div>
+          </>
+        )}
+      </SectionCard>
+
+      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <p className="text-sm font-semibold text-text-primary">Per-person invites</p>
+        <p className="mt-1 text-sm text-text-secondary">
+          Open{" "}
+          <Link href="/people" className="font-semibold text-accent hover:underline">
+            People
+          </Link>{" "}
+          to invite by email and set that person&apos;s permissions before they accept.
+        </p>
+      </div>
+    </PanelShell>
+  );
+}
+
 export function ProjectModuleRouter({ moduleId, project }: { moduleId: ProjectModuleId; project: Project }) {
   switch (moduleId) {
     case "details":
@@ -438,6 +566,8 @@ export function ProjectModuleRouter({ moduleId, project }: { moduleId: ProjectMo
       return <BulkProductionPanel project={project} />;
     case "shipping":
       return <ShippingModulePanel project={project} />;
+    case "people_access":
+      return <ProjectPeopleAccessPanel project={project} />;
     default:
       return null;
   }

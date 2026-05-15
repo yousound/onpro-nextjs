@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Project, ProjectStatus } from "@/lib/types/project";
-import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
+import type { ProjectJob, JobScopeKind, WipStep, WipStepState } from "@/lib/types/wip";
 import { dateInputToIso, formatShortDate, isoToDateInput, normalizeDurationShort } from "@/lib/format";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import {
@@ -16,7 +17,7 @@ import {
   saveProjectTimelineSteps,
 } from "@/lib/project-wip-edits";
 import type { ProjectModuleId } from "@/lib/project-modules";
-import { PROJECT_MODULE_TABS } from "@/lib/project-modules";
+import { parseProjectModuleTab, PROJECT_MODULE_TABS } from "@/lib/project-modules";
 import { ContentHeader } from "@/components/content-header";
 import {
   InternalDevelopmentPanel,
@@ -70,14 +71,6 @@ function MetaItem({ label, value }: { label: string; value: string }) {
       <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
       <p className="mt-1 text-sm font-medium text-text-primary">{value}</p>
     </div>
-  );
-}
-
-function FilterIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
-    </svg>
   );
 }
 
@@ -153,6 +146,21 @@ function ModalShell({
 
 const JOB_COL_COUNT = 9;
 
+type JobScopeFilter = "all" | JobScopeKind;
+
+function effectiveJobScope(job: ProjectJob): JobScopeKind {
+  return job.scope_kind ?? "original";
+}
+
+function JobScopeBadge({ kind }: { kind: JobScopeKind }) {
+  if (kind === "original") return null;
+  return (
+    <span className="inline-flex shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 ring-1 ring-amber-400/55">
+      Add-on
+    </span>
+  );
+}
+
 function JobTableRow({ job, onOpen }: { job: ProjectJob; onOpen: () => void }) {
   return (
     <tr
@@ -168,8 +176,14 @@ function JobTableRow({ job, onOpen }: { job: ProjectJob; onOpen: () => void }) {
       className="cursor-pointer border-b border-border-light bg-white transition hover:bg-slate-50/80"
     >
       <td className="px-4 py-3">
-        <div className="font-semibold text-text-primary">{job.name}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-text-primary">{job.name}</span>
+          <JobScopeBadge kind={effectiveJobScope(job)} />
+        </div>
         <p className="mt-0.5 text-xs text-text-secondary">{job.subtitle}</p>
+        {effectiveJobScope(job) === "addon" && job.scope_note ? (
+          <p className="mt-1 line-clamp-2 text-[11px] text-amber-900/85">{job.scope_note}</p>
+        ) : null}
       </td>
       <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{job.type}</td>
       <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{job.lead_vendor}</td>
@@ -204,6 +218,10 @@ function cloneJob(job: ProjectJob): ProjectJob {
 }
 
 export function ProjectJobsView({ project }: { project: Project }) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [projectPatch, setProjectPatch] = useState<Partial<Project>>({});
   const [jobs, setJobs] = useState<ProjectJob[]>([]);
   const [projectTimeline, setProjectTimeline] = useState<WipStep[]>([]);
@@ -222,6 +240,27 @@ export function ProjectJobsView({ project }: { project: Project }) {
   });
   const [draftTimeline, setDraftTimeline] = useState<WipStep[]>([]);
   const [draftJob, setDraftJob] = useState<ProjectJob | null>(null);
+  const [jobScopeFilter, setJobScopeFilter] = useState<JobScopeFilter>("all");
+
+  useEffect(() => {
+    const mod = searchParams.get("module");
+    setActiveModule(parseProjectModuleTab(mod));
+  }, [searchParams]);
+
+  const navigateToModule = useCallback(
+    (id: ProjectModuleId) => {
+      setActiveModule(id);
+      const params = new URLSearchParams(searchParams.toString());
+      if (id === "details") {
+        params.delete("module");
+      } else {
+        params.set("module", id);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   useEffect(() => {
     const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
@@ -313,6 +352,8 @@ export function ProjectJobsView({ project }: { project: Project }) {
         status: "Upcoming",
         due_date: null,
         updated_at: new Date().toISOString(),
+        scope_kind: "original",
+        scope_note: "",
         timeline: cloneSteps(template),
       });
     }
@@ -353,7 +394,13 @@ export function ProjectJobsView({ project }: { project: Project }) {
   function saveJobModal(e: FormEvent) {
     e.preventDefault();
     if (!draftJob) return;
-    const saved = { ...draftJob, updated_at: new Date().toISOString() };
+    const note = draftJob.scope_note?.trim();
+    const saved: ProjectJob = {
+      ...draftJob,
+      scope_kind: draftJob.scope_kind ?? "original",
+      scope_note: note ? note : undefined,
+      updated_at: new Date().toISOString(),
+    };
     if (editModal?.kind === "job-new") {
       persistJobs((prev) => [...prev, saved]);
     } else {
@@ -373,6 +420,40 @@ export function ProjectJobsView({ project }: { project: Project }) {
     );
   }
 
+  function updateDraftJobStepLabel(stepId: string, label: string) {
+    setDraftJob((prev) =>
+      prev
+        ? {
+            ...prev,
+            timeline: prev.timeline.map((s) => (s.id === stepId ? { ...s, label } : s)),
+          }
+        : null,
+    );
+  }
+
+  function addDraftJobStep() {
+    setDraftJob((prev) => {
+      if (!prev) return null;
+      const id = `wip-${project.id}-${Date.now()}`;
+      return {
+        ...prev,
+        timeline: [...prev.timeline, { id, label: "New step", state: "upcoming" as const }],
+      };
+    });
+  }
+
+  function removeDraftJobStep(stepId: string) {
+    setDraftJob((prev) => {
+      if (!prev || prev.timeline.length <= 1) return prev;
+      return { ...prev, timeline: prev.timeline.filter((s) => s.id !== stepId) };
+    });
+  }
+
+  const filteredJobs = useMemo(() => {
+    if (jobScopeFilter === "all") return jobs;
+    return jobs.filter((j) => effectiveJobScope(j) === jobScopeFilter);
+  }, [jobs, jobScopeFilter]);
+
   if (!hydrated) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
@@ -391,6 +472,104 @@ export function ProjectJobsView({ project }: { project: Project }) {
       </div>
     );
   }
+
+  const jobsTableSection = (
+    <section className="flex min-h-0 flex-col pb-4 pt-2">
+      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
+            Jobs ({filteredJobs.length}
+            {jobScopeFilter !== "all" ? (
+              <span className="font-normal normal-case text-text-secondary">
+                {" "}
+                · {jobs.length} total
+              </span>
+            ) : null}
+            )
+          </h2>
+          <p className="text-xs text-text-secondary">
+            Scope filters separate original deliverables from add-ons on the same project. Click a row to edit.
+          </p>
+        </div>
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label="Filter jobs by scope"
+        >
+          {(
+            [
+              { id: "all" as const, label: "All" },
+              { id: "original" as const, label: "Original" },
+              { id: "addon" as const, label: "Add-ons" },
+            ] satisfies { id: JobScopeFilter; label: string }[]
+          ).map((opt) => {
+            const on = jobScopeFilter === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setJobScopeFilter(opt.id)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
+                  on
+                    ? "bg-accent text-white shadow-sm"
+                    : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
+        <div className="min-h-0 max-h-[min(560px,50vh)] overflow-auto bg-white sm:max-h-none sm:flex-1">
+          <table className="min-w-full bg-white text-left text-sm">
+            <thead className="sticky top-0 z-10 border-b border-border-light bg-white text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+              <tr>
+                <th className="px-4 py-3">Job</th>
+                <th className="hidden px-4 py-3 md:table-cell">Type</th>
+                <th className="hidden px-4 py-3 lg:table-cell">Lead vendor</th>
+                <th className="hidden px-4 py-3 lg:table-cell">Category</th>
+                <th className="hidden px-4 py-3 xl:table-cell">Style #</th>
+                <th className="whitespace-nowrap px-4 py-3">Status</th>
+                <th className="w-28 max-w-[7rem] px-4 py-3">Progress</th>
+                <th className="hidden px-4 py-3 sm:table-cell">Due date</th>
+                <th className="hidden px-4 py-3 md:table-cell">Updated</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white">
+              {jobs.length === 0 ? (
+                <tr>
+                  <td colSpan={JOB_COL_COUNT} className="px-4 py-12 text-center text-text-secondary">
+                    No jobs yet for this project (mock).
+                  </td>
+                </tr>
+              ) : filteredJobs.length === 0 ? (
+                <tr>
+                  <td colSpan={JOB_COL_COUNT} className="px-4 py-12 text-center text-text-secondary">
+                    No jobs match this scope filter.
+                  </td>
+                </tr>
+              ) : (
+                filteredJobs.map((job) => (
+                  <JobTableRow key={job.id} job={job} onOpen={() => openJobEdit(job.id)} />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="shrink-0 border-t border-border-light bg-white py-3 text-center">
+          <button
+            type="button"
+            onClick={openNewJob}
+            className="text-sm font-semibold text-accent hover:underline"
+          >
+            + Add job
+          </button>
+        </div>
+      </div>
+    </section>
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
@@ -428,7 +607,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
         </header>
 
         <div
-          className="-mx-1 shrink-0 overflow-x-auto pb-2"
+          className="scrollbar-light-gray -mx-1 shrink-0 overflow-x-auto pb-2"
           role="tablist"
           aria-label="Project modules"
         >
@@ -441,7 +620,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
                   type="button"
                   role="tab"
                   aria-selected={on}
-                  onClick={() => setActiveModule(t.id)}
+                  onClick={() => navigateToModule(t.id)}
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
                     on
                       ? "bg-accent text-white shadow-sm"
@@ -475,75 +654,13 @@ export function ProjectJobsView({ project }: { project: Project }) {
                   onDurationChange={handleTimelineDurationChange}
                 />
               </section>
+              {jobsTableSection}
             </div>
           ) : null}
 
           {activeModule === "internal" ? (
             <div className="space-y-6">
               <InternalDevelopmentPanel project={merged} />
-              <section className="flex min-h-0 flex-col pb-4">
-                <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
-                      Jobs ({jobs.length})
-                    </h2>
-                    <p className="text-xs text-text-secondary">Click a row to edit a job.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-lg border border-border-light bg-white px-3 py-1.5 text-xs font-medium text-text-secondary">
-                      Group by ▾
-                    </span>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-border-light bg-white p-1.5 text-text-secondary"
-                      aria-label="Filter"
-                    >
-                      <FilterIcon />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
-                  <div className="min-h-0 max-h-[min(560px,50vh)] overflow-auto bg-white sm:max-h-none sm:flex-1">
-                    <table className="min-w-full bg-white text-left text-sm">
-                      <thead className="sticky top-0 z-10 border-b border-border-light bg-white text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        <tr>
-                          <th className="px-4 py-3">Job</th>
-                          <th className="hidden px-4 py-3 md:table-cell">Type</th>
-                          <th className="hidden px-4 py-3 lg:table-cell">Lead vendor</th>
-                          <th className="hidden px-4 py-3 lg:table-cell">Category</th>
-                          <th className="hidden px-4 py-3 xl:table-cell">Style #</th>
-                          <th className="whitespace-nowrap px-4 py-3">Status</th>
-                          <th className="w-28 max-w-[7rem] px-4 py-3">Progress</th>
-                          <th className="hidden px-4 py-3 sm:table-cell">Due date</th>
-                          <th className="hidden px-4 py-3 md:table-cell">Updated</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white">
-                        {jobs.length === 0 ? (
-                          <tr>
-                            <td colSpan={JOB_COL_COUNT} className="px-4 py-12 text-center text-text-secondary">
-                              No jobs yet for this project (mock).
-                            </td>
-                          </tr>
-                        ) : (
-                          jobs.map((job) => (
-                            <JobTableRow key={job.id} job={job} onOpen={() => openJobEdit(job.id)} />
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="shrink-0 border-t border-border-light bg-white py-3 text-center">
-                    <button
-                      type="button"
-                      onClick={openNewJob}
-                      className="text-sm font-semibold text-accent hover:underline"
-                    >
-                      + Add job
-                    </button>
-                  </div>
-                </div>
-              </section>
             </div>
           ) : null}
 
@@ -728,6 +845,41 @@ export function ProjectJobsView({ project }: { project: Project }) {
                   onChange={(e) => setDraftJob((j) => (j ? { ...j, subtitle: e.target.value } : j))}
                 />
               </label>
+              <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  Scope on project
+                </p>
+                <p className="mt-1 text-[11px] text-text-secondary">
+                  Mark add-ons when extra work lands after invoicing but stays on the same commercial storyline (mock —
+                  no invoice wiring yet).
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className={labelClass}>
+                    Kind
+                    <select
+                      className={fieldClass}
+                      value={draftJob.scope_kind ?? "original"}
+                      onChange={(e) =>
+                        setDraftJob((j) =>
+                          j ? { ...j, scope_kind: e.target.value as JobScopeKind } : j,
+                        )
+                      }
+                    >
+                      <option value="original">Original scope</option>
+                      <option value="addon">Add-on / change order</option>
+                    </select>
+                  </label>
+                  <label className={`${labelClass} sm:col-span-2`}>
+                    Scope note (optional)
+                    <input
+                      className={fieldClass}
+                      placeholder="e.g. +50 units — same invoice bucket"
+                      value={draftJob.scope_note ?? ""}
+                      onChange={(e) => setDraftJob((j) => (j ? { ...j, scope_note: e.target.value } : j))}
+                    />
+                  </label>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className={labelClass}>
                   Type
@@ -797,14 +949,44 @@ export function ProjectJobsView({ project }: { project: Project }) {
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
                   Job timeline steps
                 </h3>
-                <ul className="mt-2 space-y-2">
+                <p className="mt-1 text-[11px] text-text-secondary">
+                  Rename steps, set status, add rows, or remove extras — Save writes to this browser (mock).
+                </p>
+                <ul className="mt-3 space-y-2">
                   {draftJob.timeline.map((s) => (
-                    <li key={s.id} className="flex items-center justify-between gap-3 text-sm">
-                      <span className="min-w-0 truncate text-text-primary">{s.label}</span>
-                      <StepStateSelect value={s.state} onChange={(state) => updateDraftJobStep(s.id, state)} />
+                    <li
+                      key={s.id}
+                      className="flex flex-wrap items-center gap-2 rounded-xl border border-border-light bg-surface-body/40 px-3 py-2 sm:flex-nowrap"
+                    >
+                      <input
+                        type="text"
+                        aria-label={`Step name: ${s.label}`}
+                        className="min-w-0 flex-1 rounded-lg border border-border-light bg-white px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                        value={s.label}
+                        onChange={(e) => updateDraftJobStepLabel(s.id, e.target.value)}
+                      />
+                      <div className="flex shrink-0 items-center gap-2">
+                        <StepStateSelect value={s.state} onChange={(state) => updateDraftJobStep(s.id, state)} />
+                        <button
+                          type="button"
+                          disabled={draftJob.timeline.length <= 1}
+                          onClick={() => removeDraftJobStep(s.id)}
+                          className="rounded-lg px-2 py-1 text-xs font-semibold text-text-secondary hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          aria-label={`Remove step ${s.label}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
+                <button
+                  type="button"
+                  onClick={addDraftJobStep}
+                  className="mt-3 text-sm font-semibold text-accent hover:underline"
+                >
+                  + Add WIP step
+                </button>
               </div>
             </div>
             <div className="flex shrink-0 justify-end gap-2 border-t border-border-light px-5 py-4">

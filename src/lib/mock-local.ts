@@ -8,6 +8,7 @@ export const MOCK_LS = {
   project: (id: number) => `onpro.mock.v1.project.${id}`,
   projectJobs: (id: number) => `onpro.mock.v1.projectJobs.${id}`,
   projectTimeline: (id: number) => `onpro.mock.v1.projectTimeline.${id}`,
+  projectRolePermissions: (id: number) => `onpro.mock.v1.projectRolePermissions.${id}`,
 } as const;
 
 export function readMockLs<T>(key: string): T | null {

@@ -12,6 +12,102 @@ export type { AttachmentComposerDraft, ChatAttachmentKind } from "@/lib/attachme
 
 type Line = ComposerLineDraft;
 
+function KindIcon({ kind, className }: { kind: ChatAttachmentKind; className?: string }) {
+  const cls = className ?? "size-6";
+  switch (kind) {
+    case "job":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M9 7h6M9 12h6M9 17h4" />
+          <rect x="4" y="3" width="16" height="18" rx="2" />
+        </svg>
+      );
+    case "estimate":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M9 7h6M9 11h6M9 15h4" />
+          <path d="M7 3h8l4 4v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+        </svg>
+      );
+    case "quote":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+        </svg>
+      );
+    case "approval":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+      );
+    case "purchase_order":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <path d="M16 10a4 4 0 0 1-8 0" />
+        </svg>
+      );
+    case "payment":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <rect x="2" y="5" width="20" height="14" rx="2" />
+          <line x1="2" y1="10" x2="22" y2="10" />
+        </svg>
+      );
+    case "invoice":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M9 15h6M9 11h2" />
+        </svg>
+      );
+    case "receiving":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+          <line x1="12" y1="22.08" x2="12" y2="12" />
+        </svg>
+      );
+    case "tracking":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <rect x="1" y="3" width="15" height="13" />
+          <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+          <circle cx="5.5" cy="18.5" r="2.5" />
+          <circle cx="18.5" cy="18.5" r="2.5" />
+        </svg>
+      );
+    case "task":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+      );
+    case "calendar_event":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+      );
+    default:
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+        </svg>
+      );
+  }
+}
+
 const KIND_META: {
   id: ChatAttachmentKind;
   title: string;
@@ -52,10 +148,10 @@ function Field({
   ...inputProps
 }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <label className="block text-xs font-medium text-slate-600">
+    <label className="block text-sm font-medium text-slate-600">
       {label}
       <input
-        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-violet-500/25"
+        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base text-slate-900 outline-none focus:ring-2 focus:ring-violet-500/25"
         {...inputProps}
       />
     </label>
@@ -67,11 +163,11 @@ function TextAreaField({
   ...taProps
 }: { label: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
-    <label className="block text-xs font-medium text-slate-600">
+    <label className="block text-sm font-medium text-slate-600">
       {label}
       <textarea
-        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-violet-500/25"
-        rows={3}
+        className="mt-1.5 min-h-[6.5rem] w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-base leading-relaxed text-slate-900 outline-none focus:ring-2 focus:ring-violet-500/25"
+        rows={5}
         {...taProps}
       />
     </label>
@@ -109,8 +205,19 @@ export function MessageAttachmentComposer(props: {
   onClose: () => void;
   roomTitle: string;
   onSend: (attachment: ThreadSmartAttachment, timeLabel: string) => void;
+  /** `document` = paper-style inline edit (from thread tap). `workspace` = full builder (+ menu). */
+  layout?: "workspace" | "document";
 }) {
-  const { open, sessionKey, initialDraft, mode, onClose, roomTitle, onSend } = props;
+  const {
+    open,
+    sessionKey,
+    initialDraft,
+    mode,
+    onClose,
+    roomTitle,
+    onSend,
+    layout = "workspace",
+  } = props;
   const [kind, setKind] = useState<ChatAttachmentKind>("invoice");
 
   const [invoiceNo, setInvoiceNo] = useState("INV-2026-0142");
@@ -384,6 +491,234 @@ export function MessageAttachmentComposer(props: {
   }
 
   if (!open) return null;
+
+  /** Fillable “PDF” fields — minimal chrome, dotted underlines */
+  const docIn =
+    "w-full rounded-none border-0 border-b border-dotted border-slate-300 bg-transparent text-slate-900 placeholder:text-slate-400 focus:border-slate-700 focus:outline-none focus:ring-0";
+  const docInSm = `${docIn} text-sm`;
+
+  if (layout === "document" && kind === "invoice") {
+    const displayTitle = mode === "edit" ? "Edit invoice" : "New invoice";
+    return (
+      <div className="fixed inset-0 z-[200] flex items-stretch justify-center bg-black/50 p-0 sm:p-4">
+        <button type="button" className="absolute inset-0 z-0 cursor-default" aria-label="Close" onClick={onClose} />
+        <div className="relative z-10 flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-none bg-slate-200/95 shadow-2xl sm:max-h-[92vh] sm:rounded-2xl">
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Invoice</p>
+              <h2 className="text-lg font-bold text-slate-900">{displayTitle}</h2>
+              <p className="text-xs text-slate-500">Room: {roomTitle}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+                onClick={onClose}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700"
+                onClick={send}
+              >
+                Save to chat
+              </button>
+            </div>
+          </header>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
+            <div className="mx-auto max-w-2xl rounded-sm bg-white p-6 shadow-[0_2px_24px_-4px_rgba(0,0,0,0.12)] ring-1 ring-slate-900/10 sm:p-10">
+              <div className="mb-6 rounded-lg border border-emerald-100 bg-emerald-50/90 px-4 py-3 text-left">
+                <p className="text-sm font-semibold text-emerald-900">Recipient view</p>
+                <p className="mt-1 text-xs leading-relaxed text-emerald-800/90">
+                  You&apos;re seeing this as your client would in the thread. Tap any line to edit — like markup on
+                  a PDF. Use <span className="font-medium">Save to chat</span> when done.
+                </p>
+              </div>
+
+              <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <p className="text-2xl font-bold text-slate-900">Invoice</p>
+                  <label className="mt-1 block text-sm text-slate-500">
+                    <span className="sr-only">Invoice number</span>
+                    <span className="text-slate-400">#</span>
+                    <input
+                      value={invoiceNo}
+                      onChange={(e) => setInvoiceNo(e.target.value)}
+                      className={`${docIn} inline-block min-w-[10rem] font-medium`}
+                      aria-label="Invoice number"
+                    />
+                  </label>
+                </div>
+                <div className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white">
+                  OnPro
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <p className="text-[11px] font-semibold uppercase text-slate-400">Project</p>
+                <input
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  className={`${docIn} font-medium`}
+                  aria-label="Project name"
+                />
+                <div className="flex flex-wrap gap-4 text-xs text-slate-600">
+                  <label className="flex items-center gap-2">
+                    Issued
+                    <input
+                      type="date"
+                      value={issued}
+                      onChange={(e) => setIssued(e.target.value)}
+                      className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-800"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2">
+                    Due
+                    <input
+                      type="date"
+                      value={due}
+                      onChange={(e) => setDue(e.target.value)}
+                      className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-800"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-6 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase text-slate-400">From</p>
+                  <input
+                    value={fromName}
+                    onChange={(e) => setFromName(e.target.value)}
+                    className={`${docIn} mt-2 font-medium`}
+                    aria-label="From name"
+                  />
+                  <input
+                    value={fromAddr}
+                    onChange={(e) => setFromAddr(e.target.value)}
+                    className={`${docInSm} mt-2 text-slate-700`}
+                    aria-label="From address"
+                  />
+                  <input
+                    value={fromEmail}
+                    onChange={(e) => setFromEmail(e.target.value)}
+                    className={`${docInSm} mt-2 text-slate-700`}
+                    aria-label="From email"
+                  />
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase text-slate-400">Bill to</p>
+                  <input
+                    value={toName}
+                    onChange={(e) => setToName(e.target.value)}
+                    className={`${docIn} mt-2 font-medium`}
+                    aria-label="Bill to name"
+                  />
+                  <textarea
+                    value={toAddr}
+                    onChange={(e) => setToAddr(e.target.value)}
+                    rows={3}
+                    className={`${docInSm} mt-2 min-h-[3.5rem] resize-y text-slate-700`}
+                    aria-label="Bill to address"
+                  />
+                </div>
+              </div>
+
+              <table className="mt-6 w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="py-2 pr-2 font-semibold">Description</th>
+                    <th className="py-2 pr-2 font-semibold">Units</th>
+                    <th className="py-2 pr-2 font-semibold">Price</th>
+                    <th className="py-2 text-right font-semibold">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={l.id} className="border-b border-slate-100">
+                      <td className="py-2 pr-2 align-top">
+                        <input
+                          value={l.description}
+                          onChange={(e) => {
+                            const next = [...lines];
+                            next[i] = { ...l, description: e.target.value };
+                            setLines(next);
+                          }}
+                          className={`${docInSm} text-slate-800`}
+                          aria-label={`Line ${i + 1} description`}
+                        />
+                      </td>
+                      <td className="py-2 pr-2 align-top">
+                        <input
+                          value={l.units}
+                          onChange={(e) => {
+                            const next = [...lines];
+                            next[i] = { ...l, units: e.target.value };
+                            setLines(next);
+                          }}
+                          className={`${docInSm} w-16 text-slate-800`}
+                          aria-label={`Line ${i + 1} units`}
+                        />
+                      </td>
+                      <td className="py-2 pr-2 align-top">
+                        <input
+                          value={l.price}
+                          onChange={(e) => {
+                            const next = [...lines];
+                            next[i] = { ...l, price: e.target.value };
+                            setLines(next);
+                          }}
+                          className={`${docInSm} w-24 text-slate-800`}
+                          aria-label={`Line ${i + 1} price`}
+                        />
+                      </td>
+                      <td className="py-2 text-right align-top font-medium text-slate-900">
+                        ${((Number(l.price) || 0) * (Number(l.units) || 0)).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button
+                type="button"
+                onClick={() => setLines((prev) => [...prev, { id: String(Date.now()), description: "", units: "1", price: "0" }])}
+                className="mt-2 text-xs font-semibold text-violet-600 hover:underline"
+              >
+                + Add line
+              </button>
+
+              <p className="mt-4 text-right text-lg font-bold text-slate-900">
+                Total ${invoiceTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </p>
+
+              <div className="mt-4">
+                <p className="text-[11px] font-semibold uppercase text-slate-400">Notes</p>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className={`${docInSm} mt-2 min-h-[4rem] resize-y`}
+                  aria-label="Invoice notes"
+                />
+              </div>
+              <div className="mt-4">
+                <p className="text-[11px] font-semibold uppercase text-slate-400">Payment</p>
+                <textarea
+                  value={bank}
+                  onChange={(e) => setBank(e.target.value)}
+                  rows={2}
+                  className={`${docInSm} mt-2 resize-y text-slate-700`}
+                  aria-label="Payment details"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const previewInvoice = (
     <PreviewShell docLabel="Invoice" docNumber={`#${invoiceNo.replace(/^INV-?/i, "")}`}>
@@ -751,18 +1086,33 @@ export function MessageAttachmentComposer(props: {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-          <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 lg:w-56 lg:flex-col lg:overflow-y-auto lg:border-b-0 lg:border-r lg:px-0 lg:py-3">
+          <nav
+            aria-label="Attachment types"
+            className="group/nav flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 lg:w-14 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:border-b-0 lg:border-r lg:px-0 lg:py-2 lg:transition-[width,box-shadow] lg:duration-200 lg:ease-out lg:hover:w-64 lg:hover:shadow-[4px_0_24px_-4px_rgba(0,0,0,0.12)]"
+          >
             {KIND_META.map((k) => (
               <button
                 key={k.id}
                 type="button"
                 onClick={() => setKind(k.id)}
-                className={`shrink-0 rounded-lg px-3 py-2.5 text-left text-sm transition lg:rounded-none lg:px-4 ${
-                  kind === k.id ? "bg-white font-semibold text-violet-700 shadow-sm ring-1 ring-violet-200 lg:shadow-none lg:ring-0 lg:ring-l-4 lg:ring-violet-600" : "text-slate-600 hover:bg-white/80"
+                title={k.title}
+                className={`flex w-full shrink-0 items-center gap-0 rounded-lg py-2.5 transition-colors lg:justify-center lg:gap-0 lg:px-0 lg:group-hover/nav:justify-start lg:group-hover/nav:gap-3 lg:group-hover/nav:px-3 ${
+                  kind === k.id
+                    ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 lg:ring-0 lg:ring-l-4 lg:ring-violet-600"
+                    : "text-slate-600 hover:bg-white/80"
                 }`}
               >
-                <span className="block">{k.title}</span>
-                <span className="mt-0.5 hidden text-[11px] font-normal text-slate-500 lg:block">{k.description}</span>
+                <span
+                  className={`flex size-11 shrink-0 items-center justify-center lg:size-12 ${
+                    kind === k.id ? "text-violet-700" : "text-slate-500"
+                  }`}
+                >
+                  <KindIcon kind={k.id} className="size-6" />
+                </span>
+                <span className="hidden min-w-0 flex-1 flex-col text-left lg:flex lg:max-w-0 lg:overflow-hidden lg:opacity-0 lg:transition-[max-width,opacity] lg:duration-200 lg:group-hover/nav:max-w-[min(14rem,calc(100vw-8rem))] lg:group-hover/nav:opacity-100">
+                  <span className="truncate text-sm font-semibold">{k.title}</span>
+                  <span className="line-clamp-2 text-[11px] font-normal text-slate-500">{k.description}</span>
+                </span>
               </button>
             ))}
           </nav>

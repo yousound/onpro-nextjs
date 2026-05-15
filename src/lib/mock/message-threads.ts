@@ -38,6 +38,32 @@ export const mockThreadMessages: ThreadMessage[] = [
     time_label: "10:14 AM",
   },
   {
+    id: "m2a-job",
+    conversation_id: 1,
+    side: "outgoing",
+    body: "",
+    time_label: "10:15 AM",
+    smart_attachment: {
+      kind: "job",
+      title: "Cut & sew batch #12",
+      subtitle: "Due · Apr 2 · Factory floor",
+      badge: "In progress",
+    },
+  },
+  {
+    id: "m2b-inv",
+    conversation_id: 1,
+    side: "outgoing",
+    body: "",
+    time_label: "10:16 AM",
+    smart_attachment: {
+      kind: "invoice",
+      title: "Invoice INV-2026-0142",
+      subtitle: "Fillo Product Design",
+      badge: "$3,000.00",
+    },
+  },
+  {
     id: "m3",
     conversation_id: 1,
     side: "incoming",

@@ -48,6 +48,51 @@ export interface Colorway {
   samples: Sample[];
 }
 
+/** Repeatable dye workflow rows (persists on project when set). */
+export interface DyeCostingTrack {
+  id: string;
+  dye_vendor: string | null;
+  lab_dip_request_date: ISODate;
+  lab_dip_due_date: ISODate;
+  lab_dip_received_date: ISODate;
+  lab_dip_approval_status: ApprovalStatus | null;
+}
+
+/** Repeatable print / embroidery / decoration rows. */
+export interface PrintEmbroideryCostingTrack {
+  id: string;
+  print_embroidery_vendor: string | null;
+  strike_off_request_date: ISODate;
+  strike_off_due_date: ISODate;
+  strike_off_received_date: ISODate;
+  strike_off_approval_status: ApprovalStatus | null;
+}
+
+/** Flexible extra costing blocks (trims, freight quotes, etc.). */
+export interface CostingExtraTrack {
+  id: string;
+  section_title: string;
+  vendor_name: string | null;
+  milestone_1_date: ISODate;
+  milestone_2_date: ISODate;
+  milestone_3_date: ISODate;
+  approval_status: ApprovalStatus | null;
+}
+
+/** Repeatable bulk production schedules on one project. */
+export interface BulkProductionTrack {
+  id: string;
+  title: string;
+  bulk_fabric_approval_date: ISODate;
+  bulk_trim_approval_date: ISODate;
+  new_product_request_date: ISODate;
+  barcodes_sent_to_vendor_date: ISODate;
+  top_due_date: ISODate;
+  top_approved_date: ISODate;
+  bulk_target_delivery_date: ISODate;
+  ex_factory_date: ISODate;
+}
+
 export interface DevelopmentUpdate {
   id: number;
   date: ISODate;
@@ -119,4 +164,10 @@ export interface Project {
   tracking_bol_number: string | null;
   packing_list_sent_to_client_date: ISODate;
   client_received_date: ISODate;
+
+  /** When set, overrides legacy single-row dye / lab dip fields for UI + persistence. */
+  dye_costing_tracks?: DyeCostingTrack[] | null;
+  print_embroidery_costing_tracks?: PrintEmbroideryCostingTrack[] | null;
+  costing_extra_tracks?: CostingExtraTrack[] | null;
+  bulk_production_tracks?: BulkProductionTrack[] | null;
 }

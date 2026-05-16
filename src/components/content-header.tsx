@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { NotificationsPopover } from "@/components/notifications-popover";
 
 export function ContentHeader({
   breadcrumbs,
@@ -14,13 +15,7 @@ export function ContentHeader({
       <div className="min-w-0 flex-1">{breadcrumbs}</div>
       <div className="flex shrink-0 items-center gap-2">
         {actions}
-        <button
-          type="button"
-          className="rounded-full p-2 text-text-secondary hover:bg-surface-body"
-          aria-label="Notifications"
-        >
-          <BellIcon />
-        </button>
+        <NotificationsPopover buttonClassName="relative rounded-full p-2 text-text-secondary hover:bg-surface-body" />
         <div className="flex items-center gap-2 pl-1">
           <span className="hidden text-sm text-text-secondary sm:inline">Demo user</span>
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-xs font-bold text-white">
@@ -32,11 +27,3 @@ export function ContentHeader({
   );
 }
 
-function BellIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  );
-}

@@ -7,6 +7,7 @@ import { mockProjects } from "@/lib/mock/projects";
 type Item = { id: string; label: string; href: string; group: string };
 
 const NAV_ITEMS: Item[] = [
+  { id: "nav-overview", label: "Overview", href: "/", group: "Go to" },
   { id: "nav-messages", label: "Messages", href: "/messages", group: "Go to" },
   { id: "nav-projects", label: "Projects", href: "/projects", group: "Go to" },
   { id: "nav-calendar", label: "Calendar", href: "/calendar", group: "Go to" },

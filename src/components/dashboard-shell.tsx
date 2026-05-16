@@ -8,7 +8,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-svh min-h-0 overflow-hidden bg-surface-body">
       <AppSidebar />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">{children}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-contain">{children}</div>
       <CommandPalette />
     </div>
   );

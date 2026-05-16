@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
 import type { Conversation } from "@/lib/types/messages";
 import {
   attachmentsForConversation,
@@ -91,6 +91,7 @@ function extIcon(ext: string) {
 }
 
 export function MessagesView({ conversations }: { conversations: Conversation[] }) {
+  const [extraConversations, setExtraConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState(conversations[0]?.id ?? 0);
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerSessionKey, setComposerSessionKey] = useState(0);
@@ -101,13 +102,21 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   const [overrideById, setOverrideById] = useState<Record<string, Partial<ThreadMessage>>>({});
   const [extraMessages, setExtraMessages] = useState<ThreadMessage[]>([]);
   const [newMessageOpen, setNewMessageOpen] = useState(false);
+  const [newRecipientName, setNewRecipientName] = useState("");
   const [attachOnboardingOpen, setAttachOnboardingOpen] = useState(false);
   const [readerOpen, setReaderOpen] = useState(false);
   const [readerAttachment, setReaderAttachment] = useState<ThreadSmartAttachment | null>(null);
   const [draftMessage, setDraftMessage] = useState("");
   const [inboxPeekOpen, setInboxPeekOpen] = useState(false);
   const [inboxSearchQuery, setInboxSearchQuery] = useState("");
-  const active = conversations.find((c) => c.id === activeId) ?? conversations[0];
+  const threadInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const allConversations = useMemo(
+    () => [...conversations, ...extraConversations],
+    [conversations, extraConversations],
+  );
+
+  const active = allConversations.find((c) => c.id === activeId) ?? allConversations[0];
 
   useEffect(() => {
     if (hasSeenAttachmentsOnboarding()) return;
@@ -117,6 +126,16 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   useEffect(() => {
     setDraftMessage("");
   }, [activeId]);
+
+  useEffect(() => {
+    if (!newMessageOpen) setNewRecipientName("");
+  }, [newMessageOpen]);
+
+  function focusThreadInput() {
+    requestAnimationFrame(() => {
+      threadInputRef.current?.focus();
+    });
+  }
 
   function dismissAttachOnboarding() {
     markAttachmentsOnboardingSeen();
@@ -136,13 +155,13 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
 
   const filteredConversations = useMemo(() => {
     const needle = inboxSearchQuery.trim().toLowerCase();
-    if (!needle) return conversations;
-    return conversations.filter((c) => {
+    if (!needle) return allConversations;
+    return allConversations.filter((c) => {
       const participantNames = c.participants.map((p) => p.name).join(" ");
       const blob = `${c.name} ${c.last_message_preview ?? ""} ${participantNames}`.toLowerCase();
       return blob.includes(needle);
     });
-  }, [conversations, inboxSearchQuery]);
+  }, [allConversations, inboxSearchQuery]);
 
   const peerName = active?.name ?? "—";
   const handle = `@${peerName.replace(/\s+/g, "").toLowerCase()}`;
@@ -166,10 +185,44 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
     setComposerOpen(true);
   }
 
-  function startNewMessageTo(conversationId: number) {
+  function nextIds(): { convId: number; participantId: number } {
+    const merged = [...conversations, ...extraConversations];
+    const convId = (merged.length ? Math.max(...merged.map((c) => c.id)) : 0) + 1;
+    const participantId =
+      (merged.length ? Math.max(...merged.flatMap((c) => c.participants.map((p) => p.id))) : 0) + 1;
+    return { convId, participantId };
+  }
+
+  function createConversationAndOpen() {
+    const name = newRecipientName.trim();
+    if (!name) return;
+    const { convId, participantId } = nextIds();
+    const row: Conversation = {
+      id: convId,
+      name,
+      avatar_url: null,
+      last_message_preview: null,
+      last_message_date: new Date().toISOString(),
+      unread_count: 0,
+      participants: [
+        { id: participantId, name, avatar_url: null },
+        { id: 2, name: "Jerry M", avatar_url: null },
+      ],
+      is_group: false,
+      project_id: null,
+    };
+    setExtraConversations((prev) => [...prev, row]);
+    setActiveId(convId);
+    setNewRecipientName("");
+    setNewMessageOpen(false);
+    focusThreadInput();
+  }
+
+  /** Pick an existing thread from the New message sheet — opens the composer only for typing, not attachments. */
+  function openExistingChatFromModal(conversationId: number) {
     pickConversation(conversationId);
     setNewMessageOpen(false);
-    openNewComposer();
+    focusThreadInput();
   }
 
   function sendDraftMessage() {
@@ -191,6 +244,17 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
         time_label: timeLabel,
       },
     ]);
+    setExtraConversations((prev) =>
+      prev.map((c) =>
+        c.id === active.id
+          ? {
+              ...c,
+              last_message_preview: trimmed.slice(0, 140),
+              last_message_date: new Date().toISOString(),
+            }
+          : c,
+      ),
+    );
     setDraftMessage("");
   }
 
@@ -276,12 +340,43 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                 ×
               </button>
             </div>
-            <ul className="max-h-[min(60vh,320px)] overflow-y-auto py-1">
-              {conversations.map((c) => (
+            <div className="border-b border-slate-100 px-4 py-3">
+              <p className="text-xs font-medium text-slate-500">New conversation</p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={newRecipientName}
+                  onChange={(e) => setNewRecipientName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      createConversationAndOpen();
+                    }
+                  }}
+                  placeholder="Client, vendor, or chat name"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-400/20"
+                  aria-label="New conversation name"
+                />
+                <button
+                  type="button"
+                  disabled={!newRecipientName.trim()}
+                  onClick={() => createConversationAndOpen()}
+                  className="shrink-0 rounded-lg bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 disabled:pointer-events-none disabled:opacity-40"
+                >
+                  Start
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-slate-400">Creates a direct thread (browser-only mock).</p>
+            </div>
+            <div className="border-b border-slate-100 px-4 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Existing chats</p>
+            </div>
+            <ul className="max-h-[min(60vh,280px)] overflow-y-auto py-1">
+              {allConversations.map((c) => (
                 <li key={c.id}>
                   <button
                     type="button"
-                    onClick={() => startNewMessageTo(c.id)}
+                    onClick={() => openExistingChatFromModal(c.id)}
                     className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
                   >
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
@@ -334,9 +429,6 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              <p className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Yesterday
-              </p>
               <ul>
                 {filteredConversations.length === 0 ? (
                   <li className="px-4 py-8 text-center text-sm text-slate-500">
@@ -394,25 +486,28 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
             </div>
           </div>
 
-          {/* Collapsed rail — desktop only */}
+          {/* Collapsed rail — desktop only; header height matches expanded search row so list aligns */}
           <div
             className={
               inboxPeekOpen
                 ? "hidden"
-                : "hidden min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto overscroll-contain pl-0 pr-2 pb-6 pt-5 md:flex"
+                : "hidden min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain md:flex"
             }
           >
-            <button
-              type="button"
-              className="mx-auto flex size-[46px] shrink-0 items-center justify-center rounded-2xl border border-slate-100 bg-white text-slate-500 shadow-sm ring-1 ring-slate-100/90 transition hover:border-violet-100 hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:ring-violet-100 active:scale-[0.98]"
-              aria-label="Search conversations"
-              title="Search"
-            >
-              <SearchIcon className="size-[26px] shrink-0 text-slate-600" />
-            </button>
-            <div className="mx-auto h-px w-10 shrink-0 rounded-full bg-gradient-to-r from-transparent via-slate-200 to-transparent" aria-hidden />
+            <div className="shrink-0 border-b border-slate-100 px-3 pb-3.5 pt-3">
+              <div className="flex h-11 items-center justify-center">
+                <button
+                  type="button"
+                  className="flex size-[46px] shrink-0 items-center justify-center rounded-2xl border border-slate-100 bg-white text-slate-500 shadow-sm ring-1 ring-slate-100/90 transition hover:border-violet-100 hover:bg-violet-50 hover:text-violet-700 hover:shadow-md hover:ring-violet-100 active:scale-[0.98]"
+                  aria-label="Search conversations"
+                  title="Search"
+                >
+                  <SearchIcon className="size-[26px] shrink-0 text-slate-600" />
+                </button>
+              </div>
+            </div>
             <ul className="flex w-full flex-col gap-1 px-0">
-              {conversations.map((c) => {
+              {allConversations.map((c) => {
                 const isActive = c.id === active?.id;
                 return (
                   <li key={`rail-${c.id}`} className="w-full">
@@ -420,7 +515,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                       type="button"
                       title={c.name}
                       onClick={() => pickConversation(c.id)}
-                      className={`flex w-full items-center justify-center border-l-4 py-2 transition ${
+                      className={`flex w-full items-center justify-center border-l-4 py-3 transition ${
                         isActive
                           ? "border-violet-500 bg-violet-50/90"
                           : "border-transparent hover:bg-slate-50/90"
@@ -556,6 +651,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                   className={`mx-auto flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-[max-width,box-shadow,border-color] duration-300 ease-out focus-within:border-violet-400/70 focus-within:shadow-md focus-within:shadow-violet-500/10 motion-reduce:transition-none ${threadShellMax}`}
                 >
                   <textarea
+                    ref={threadInputRef}
                     value={draftMessage}
                     onChange={(e) => setDraftMessage(e.target.value)}
                     onKeyDown={(e) => {

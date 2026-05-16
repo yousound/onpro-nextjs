@@ -3,34 +3,49 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { OnProLogoIntroModal } from "@/components/onpro-logo-intro-modal";
+import { getSidebarNavAlertMap } from "@/lib/mock/overview-digest";
+
+const SIDEBAR_USER = {
+  name: "Jerry M",
+  org: "Fillio Design",
+  avatarSrc: "/user-avatar-demo.png",
+};
 
 type NavItem = {
   href: string;
   label: string;
-  icon: "projects" | "jobs" | "calendar" | "messages" | "documents" | "team" | "reports" | "settings";
+  icon:
+    | "overview"
+    | "projects"
+    | "jobs"
+    | "calendar"
+    | "messages"
+    | "documents"
+    | "team"
+    | "reports";
   disabled?: boolean;
 };
 
 /**
- * Messages first, then projects and the rest of the desktop shell.
+ * Overview first (default home), then the rest of the desktop shell.
  */
 const NAV: NavItem[] = [
+  { href: "/", label: "Overview", icon: "overview" },
   { href: "/messages", label: "Messages", icon: "messages" },
   { href: "/projects", label: "Projects", icon: "projects" },
   { href: "/production", label: "Jobs", icon: "jobs" },
   { href: "/calendar", label: "Calendar", icon: "calendar" },
   { href: "/documents", label: "Documents", icon: "documents" },
-  { href: "/settings", label: "Settings", icon: "settings" },
   { href: "/people", label: "People", icon: "team" },
   { href: "#", label: "Reports", icon: "reports", disabled: true },
 ];
 
 function isNavActive(pathname: string, href: string): boolean {
   if (href === "#") return false;
+  if (href === "/") return pathname === "/";
   if (href === "/messages") return pathname === "/messages" || pathname.startsWith("/messages/");
-  if (href === "/settings") return pathname === "/settings";
   if (href === "/people") return pathname === "/people";
   if (href === "/production") return pathname === "/production";
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -39,6 +54,15 @@ function isNavActive(pathname: string, href: string): boolean {
 function NavIcon({ kind }: { kind: NavItem["icon"] }) {
   const cls = "h-5 w-5 shrink-0";
   switch (kind) {
+    case "overview":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <rect x="3" y="3" width="7" height="9" rx="1" />
+          <rect x="14" y="3" width="7" height="5" rx="1" />
+          <rect x="14" y="11" width="7" height="10" rx="1" />
+          <rect x="3" y="15" width="7" height="6" rx="1" />
+        </svg>
+      );
     case "projects":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
@@ -102,6 +126,11 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [introOpen, setIntroOpen] = useState(false);
 
+  const navAlerts = useMemo(() => {
+    const ymd = new Date().toISOString().slice(0, 10);
+    return getSidebarNavAlertMap(ymd);
+  }, []);
+
   return (
     <aside
       className={`flex h-svh min-h-0 shrink-0 flex-col border-r border-border-light bg-surface-card transition-[width] ${
@@ -156,15 +185,64 @@ export function AppSidebar() {
             <Link
               key={item.label}
               href={item.href}
-              title={collapsed ? item.label : undefined}
-              className={`${base} ${activeCls}`}
+              title={
+                collapsed
+                  ? `${item.label}${navAlerts[item.href] ? " · Has alerts" : ""}`
+                  : undefined
+              }
+              {...(collapsed
+                ? {
+                    "aria-label": `${item.label}${navAlerts[item.href] ? ", has alerts" : ""}`,
+                  }
+                : {})}
+              className={`${base} ${activeCls} ${collapsed ? "justify-center px-2" : ""}`}
             >
-              <NavIcon kind={item.icon} />
-              {!collapsed ? item.label : null}
+              <span className="relative shrink-0">
+                <NavIcon kind={item.icon} />
+                {navAlerts[item.href] ? (
+                  <span
+                    className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-500 ring-2 ring-surface-card"
+                    aria-hidden
+                  />
+                ) : null}
+              </span>
+              {!collapsed ? (
+                <span className="truncate">
+                  {item.label}
+                  {navAlerts[item.href] ? <span className="sr-only">, has alerts</span> : null}
+                </span>
+              ) : null}
             </Link>
           );
         })}
       </nav>
+
+      <div className="border-t border-border-light p-2">
+        <Link
+          href="/settings"
+          title={collapsed ? `${SIDEBAR_USER.name} — ${SIDEBAR_USER.org}` : undefined}
+          className={`flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-200/90 ${
+            collapsed ? "justify-center" : ""
+          }`}
+        >
+          <Image
+            src={SIDEBAR_USER.avatarSrc}
+            alt=""
+            width={40}
+            height={40}
+            className="size-10 shrink-0 rounded-full object-cover ring-2 ring-white shadow-md ring-slate-200/80"
+          />
+          {!collapsed ? (
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center justify-between gap-1">
+                <span className="truncate text-sm font-semibold text-text-primary">{SIDEBAR_USER.name}</span>
+                <ChevronDownGlyph className="shrink-0 text-text-secondary" />
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-text-secondary">{SIDEBAR_USER.org}</span>
+            </span>
+          ) : null}
+        </Link>
+      </div>
 
       <div className="border-t border-border-light p-2">
         <button
@@ -178,5 +256,13 @@ export function AppSidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+function ChevronDownGlyph({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
   );
 }

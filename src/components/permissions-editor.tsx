@@ -74,11 +74,14 @@ export function PermissionsEditor({
   flags,
   onChange,
   dense,
+  readOnly,
 }: {
   segment: PeopleSegment;
   flags: ProjectPermissionFlags;
   onChange: (next: ProjectPermissionFlags) => void;
   dense?: boolean;
+  /** When true, toggles are not editable (e.g. viewing a sent invite). */
+  readOnly?: boolean;
 }) {
   function patch(key: keyof ProjectPermissionFlags, value: boolean) {
     onChange({ ...flags, [key]: value });
@@ -88,7 +91,7 @@ export function PermissionsEditor({
     return rows.map(({ key, label }) => {
       const applies = permissionKeyApplies(segment, key);
       const checked = flags[key];
-      const disabled = !applies;
+      const disabled = !applies || Boolean(readOnly);
       return (
         <ToggleRow
           key={key}

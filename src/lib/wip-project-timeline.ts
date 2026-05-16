@@ -1,5 +1,5 @@
 import type { Project } from "@/lib/types/project";
-import type { WipStep, WipStepState } from "@/lib/types/wip";
+import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
 
 type StepDef = {
   id: string;
@@ -121,6 +121,39 @@ export function deriveProjectTimelineStates(project: Project): WipStepState[] {
     }
     return "upcoming";
   });
+}
+
+/**
+ * Project timeline = ordered Connect Dots steps where each step is complete only when **every**
+ * job that carries that step is `completed`. Jobs without a step id fall back to project date logic
+ * for that step only. First incomplete step in order is `in_progress` (covers partial roll-ups);
+ * later steps are `upcoming`.
+ */
+export function deriveProjectTimelineStatesFromJobs(project: Project, jobs: ProjectJob[]): WipStepState[] {
+  if (!jobs.length) return deriveProjectTimelineStates(project);
+
+  const allDone = CONNECT_DOTS_PROJECT_WIP_STEPS.map((def) => {
+    const jobsWithStep = jobs.filter((j) => j.timeline.some((t) => t.id === def.id));
+    if (jobsWithStep.length === 0) return isStepDone(project, def.id);
+    return jobsWithStep.every((j) => {
+      const st = j.timeline.find((t) => t.id === def.id)?.state;
+      return st === "completed";
+    });
+  });
+
+  const firstIncomplete = allDone.findIndex((d) => !d);
+  const frontier = firstIncomplete === -1 ? CONNECT_DOTS_PROJECT_WIP_STEPS.length : firstIncomplete;
+
+  return CONNECT_DOTS_PROJECT_WIP_STEPS.map((_, i) => {
+    if (allDone[i]) return "completed";
+    if (i === frontier) return "in_progress";
+    return "upcoming";
+  });
+}
+
+export function buildProjectTimelineFromJobs(project: Project, jobs: ProjectJob[]): WipStep[] {
+  const states = deriveProjectTimelineStatesFromJobs(project, jobs);
+  return CONNECT_DOTS_PROJECT_WIP_STEPS.map((def, i) => toWipStep(def, states[i] ?? "upcoming"));
 }
 
 function toWipStep(def: StepDef, state: WipStepState): WipStep {

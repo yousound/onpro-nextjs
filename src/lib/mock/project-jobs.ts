@@ -1,36 +1,51 @@
 import type { Project } from "@/lib/types/project";
-import type { ProjectJob, WipStep } from "@/lib/types/wip";
+import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
 import { getProjectById } from "@/lib/mock/projects";
-import { buildEmptyProjectTimeline, buildProjectTimeline } from "@/lib/wip-project-timeline";
+import { CONNECT_DOTS_PROJECT_WIP_STEPS, buildEmptyProjectTimeline, buildProjectTimeline, buildProjectTimelineFromJobs } from "@/lib/wip-project-timeline";
 
-function oliveJobTimeline(): WipStep[] {
-  return [
-    { id: "tp_setup", label: "Tech pack", state: "completed" },
-    { id: "blanks", label: "Blanks", state: "completed" },
-    { id: "trims", label: "Trims", state: "completed" },
-    { id: "tp_done", label: "TP complete", state: "completed" },
-    { id: "quote", label: "Quote / costing", state: "completed" },
-    { id: "lab_dip", label: "Lab dip", state: "completed" },
-    { id: "strike", label: "Strike-off", state: "in_progress" },
-    { id: "bulk_fabric", label: "Bulk fabric", state: "upcoming" },
-    { id: "top", label: "TOP", state: "upcoming" },
-    { id: "ex_factory", label: "Ex-factory", state: "upcoming" },
-  ];
+function jobTimelineFromStates(stepStatesById: Partial<Record<string, WipStepState>>): WipStep[] {
+  return CONNECT_DOTS_PROJECT_WIP_STEPS.map((def) => ({
+    id: def.id,
+    label: def.label,
+    durationShort: def.durationShort,
+    durationLabel: def.durationLabel,
+    state: stepStatesById[def.id] ?? "upcoming",
+  }));
 }
 
-function upcomingJobTimeline(): WipStep[] {
-  return [
-    { id: "tp_setup", label: "Tech pack", state: "completed" },
-    { id: "blanks", label: "Blanks", state: "completed" },
-    { id: "trims", label: "Trims", state: "upcoming" },
-    { id: "tp_done", label: "TP complete", state: "upcoming" },
-    { id: "quote", label: "Quote / costing", state: "upcoming" },
-    { id: "lab_dip", label: "Lab dip", state: "upcoming" },
-    { id: "strike", label: "Strike-off", state: "upcoming" },
-    { id: "bulk_fabric", label: "Bulk fabric", state: "upcoming" },
-    { id: "top", label: "TOP", state: "upcoming" },
-    { id: "ex_factory", label: "Ex-factory", state: "upcoming" },
-  ];
+/** Lead style — far along; used with lagging jobs to demo roll-up. */
+function oliveJobTimeline(): WipStep[] {
+  const doneThrough = new Set([
+    "vendor_inquiries",
+    "mock_up",
+    "cost_sheets",
+    "costing_summary",
+    "deposit_payment",
+    "tp_setup",
+    "blanks_lab_dip",
+    "order_trims",
+    "tp_completion",
+    "sent_to_contractors",
+    "strike_off",
+  ]);
+  const m: Partial<Record<string, WipStepState>> = {};
+  doneThrough.forEach((id) => {
+    m[id] = "completed";
+  });
+  m["trimming"] = "in_progress";
+  return jobTimelineFromStates(m);
+}
+
+/** Slower lines — still before blanks / lab dip so project frontier sits earlier. */
+function laggingJobTimeline(): WipStep[] {
+  return jobTimelineFromStates({
+    vendor_inquiries: "completed",
+    mock_up: "completed",
+    cost_sheets: "completed",
+    costing_summary: "completed",
+    deposit_payment: "completed",
+    tp_setup: "completed",
+  });
 }
 
 const jobsByProject: Record<number, ProjectJob[]> = {
@@ -62,7 +77,7 @@ const jobsByProject: Record<number, ProjectJob[]> = {
       status: "Upcoming",
       due_date: "2026-07-01T12:00:00.000Z",
       updated_at: "2026-05-08T12:00:00.000Z",
-      timeline: upcomingJobTimeline(),
+      timeline: laggingJobTimeline(),
       scope_kind: "original",
     },
     {
@@ -77,7 +92,7 @@ const jobsByProject: Record<number, ProjectJob[]> = {
       status: "Upcoming",
       due_date: "2026-07-08T12:00:00.000Z",
       updated_at: "2026-05-08T12:00:00.000Z",
-      timeline: upcomingJobTimeline(),
+      timeline: laggingJobTimeline(),
       scope_kind: "addon",
       scope_note: "+50 units after initial invoice — keep on same build",
     },
@@ -88,9 +103,10 @@ export function getJobsForProject(projectId: number): ProjectJob[] {
   return jobsByProject[projectId] ?? [];
 }
 
-/** Full Connect Dots project WIP strip; states derived from `Project` date fields when possible. */
-export function getProjectTimeline(projectId: number, project?: Project): WipStep[] {
+/** Project WIP strip: from all jobs when present, else from `Project` date fields. */
+export function getProjectTimeline(projectId: number, project?: Project, jobs?: ProjectJob[]): WipStep[] {
   const p = project ?? getProjectById(projectId);
   if (!p) return buildEmptyProjectTimeline();
+  if (jobs?.length) return buildProjectTimelineFromJobs(p, jobs);
   return buildProjectTimeline(p);
 }

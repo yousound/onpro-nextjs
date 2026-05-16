@@ -1123,7 +1123,7 @@ export function MessageAttachmentComposer(props: {
               {formBody}
             </div>
 
-            <aside className="flex min-h-[40vh] w-full shrink-0 flex-col border-t border-slate-200 bg-slate-100 lg:w-[min(100%,420px)] lg:border-t-0">
+            <aside className="flex w-full min-h-[40vh] shrink-0 flex-col border-t border-slate-200 bg-slate-100 lg:min-h-0 lg:w-[min(100%,420px)] lg:border-t-0">
               <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-4 py-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</span>
                 <div className="flex gap-2">

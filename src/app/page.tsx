@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { OverviewView } from "@/components/overview-view";
 
 export default function Home() {
-  redirect("/messages");
+  return <OverviewView />;
 }

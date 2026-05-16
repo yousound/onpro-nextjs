@@ -1,28 +1,96 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import type { ApprovalStatus, Project, Sample } from "@/lib/types/project";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type {
+  ApprovalStatus,
+  Project,
+  Sample,
+  SampleStatus,
+} from "@/lib/types/project";
 import { PermissionsEditor } from "@/components/permissions-editor";
-import { clientInitials, formatShortDate } from "@/lib/format";
+import { clientInitials, dateInputToIso, formatShortDate, isoToDateInput } from "@/lib/format";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
+import {
+  addInternalTeamMemberToProject,
+  mergedInternalTeamRoster,
+} from "@/lib/internal-team-roster";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
+import {
+  defaultBulkProductionTrack,
+  defaultCostingExtraTrack,
+  defaultDyeCostingTrack,
+  defaultPrintEmbroideryTrack,
+  resolveBulkProductionTracks,
+  resolveCostingExtraTracks,
+  resolveDyeCostingTracks,
+  resolvePrintEmbroideryTracks,
+  updateBulkTrack,
+  updateCostingExtraTrack,
+  updateDyeTrack,
+  updatePrintEmbTrack,
+} from "@/lib/project-repeatable-tracks";
 
-function PanelShell({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+/** Shared chrome for stealth controls (width varies by control type — wide date inputs break native picker anchoring). */
+const stealthControlBase =
+  "min-h-[1.75rem] rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-semibold text-text-primary outline-none transition hover:bg-white/75 hover:shadow-sm focus:border-accent focus:bg-white focus:shadow-sm focus:ring-2 focus:ring-accent/20";
+
+/** Full-width value column (text fields). */
+const stealthValueClass =
+  `${stealthControlBase} min-w-0 w-full flex-1 text-right placeholder-shown:font-normal placeholder:text-text-secondary/55 sm:min-w-[10rem]`;
+
+/** Narrow date field so the calendar popup stays beside the control you clicked (not far left). */
+const stealthDateInputClass =
+  `${stealthControlBase} w-[10.75rem] max-w-full shrink-0 text-right tabular-nums [color-scheme:light]`;
+
+const stealthSelectClass = `${stealthControlBase} w-auto min-w-[9rem] max-w-[13rem] shrink-0 cursor-pointer pr-6 text-right`;
+
+const stealthTextareaClass =
+  "mt-1 min-h-[4rem] w-full rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm font-medium text-text-primary outline-none transition placeholder:text-text-secondary/55 hover:bg-white/75 focus:border-accent focus:bg-white focus:ring-2 focus:ring-accent/20";
+
+function PanelShell({
+  children,
+  className = "",
+  hint,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  hint?: React.ReactNode;
+}) {
   return (
     <div className={`mx-auto w-full max-w-[1600px] space-y-5 pb-8 ${className}`}>
+      {hint}
       {children}
     </div>
   );
 }
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+function MockPersistHint() {
+  return (
+    <p className="text-[11px] leading-snug text-text-secondary">
+      Tap or focus a value to edit. Saves in this browser only for this project (mock).
+    </p>
+  );
+}
+
+function SectionCard({
+  title,
+  headerExtra,
+  children,
+}: {
+  title: string;
+  headerExtra?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="rounded-2xl border border-border-light bg-white p-6 shadow-sm">
-      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">{title}</h3>
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">{title}</h3>
+        {headerExtra ? <div className="shrink-0">{headerExtra}</div> : null}
+      </div>
       <div className="mt-4 space-y-3">{children}</div>
     </section>
   );
@@ -52,6 +120,21 @@ function VendorRow({ label, name }: { label: string; name: string }) {
   );
 }
 
+/** iOS CostingModule empty-state parity — hook up when vendor CRUD exists. */
+function AddVendorPlaceholder() {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200/90 bg-blue-50 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/80"
+    >
+      <span className="text-lg leading-none" aria-hidden>
+        +
+      </span>
+      Add vendor
+    </button>
+  );
+}
+
 function approvalPill(status: ApprovalStatus | null) {
   const s = status ?? "PENDING";
   const cls =
@@ -72,13 +155,742 @@ function costingToggleRow(approved: boolean | null) {
         <span className="text-sm font-medium text-text-primary">Costing approved</span>
         <span
           className={`rounded-full px-3 py-1 text-xs font-bold ${
-            approved ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"
+            approved === null
+              ? "bg-slate-100 text-slate-600"
+              : approved
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-slate-200 text-slate-600"
           }`}
         >
-          {approved ? "Yes" : "No"}
+          {approved === null ? "Not set" : approved ? "Yes" : "No"}
         </span>
       </div>
     </GrayRow>
+  );
+}
+
+function StealthDateRow({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: string | null;
+  onCommit: (iso: string | null) => void;
+}) {
+  return (
+    <GrayRow>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1 text-sm font-medium text-text-secondary">{label}</span>
+        <input
+          type="date"
+          value={isoToDateInput(value)}
+          onChange={(e) => {
+            const ymd = e.target.value;
+            onCommit(ymd ? dateInputToIso(ymd) : null);
+          }}
+          className={stealthDateInputClass}
+        />
+      </div>
+    </GrayRow>
+  );
+}
+
+function StealthTextRow({
+  label,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  label: string;
+  value: string | null;
+  placeholder?: string;
+  onCommit: (next: string | null) => void;
+}) {
+  return (
+    <GrayRow>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1 text-sm font-medium text-text-secondary">{label}</span>
+        <input
+          type="text"
+          value={value ?? ""}
+          placeholder={placeholder ?? "—"}
+          onChange={(e) => {
+            const v = e.target.value;
+            onCommit(v === "" ? null : v);
+          }}
+          className={stealthValueClass}
+        />
+      </div>
+    </GrayRow>
+  );
+}
+
+function StealthMetaField({
+  label,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  label: string;
+  value: string | null;
+  placeholder?: string;
+  onCommit: (next: string | null) => void;
+}) {
+  return (
+    <GrayRow>
+      <p className="text-xs font-medium text-text-secondary">{label}</p>
+      <input
+        type="text"
+        value={value ?? ""}
+        placeholder={placeholder ?? "—"}
+        onChange={(e) => {
+          const v = e.target.value;
+          onCommit(v === "" ? null : v);
+        }}
+        className={`mt-1 w-full text-left ${stealthValueClass}`}
+      />
+    </GrayRow>
+  );
+}
+
+function StealthApprovalSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: ApprovalStatus | null;
+  onChange: (next: ApprovalStatus) => void;
+}) {
+  const sel = value ?? "PENDING";
+  return (
+    <GrayRow>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1 text-sm font-medium text-text-primary">{label}</span>
+        <select
+          value={sel}
+          onChange={(e) => onChange(e.target.value as ApprovalStatus)}
+          className={stealthSelectClass}
+        >
+          {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </div>
+    </GrayRow>
+  );
+}
+
+function StealthCostingApprovedRow({
+  value,
+  onChange,
+}: {
+  value: boolean | null;
+  onChange: (next: boolean | null) => void;
+}) {
+  return (
+    <GrayRow>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1 text-sm font-medium text-text-primary">Costing approved</span>
+        <select
+          value={value === null ? "unset" : value ? "yes" : "no"}
+          onChange={(e) => {
+            const x = e.target.value;
+            onChange(x === "unset" ? null : x === "yes");
+          }}
+          className={stealthSelectClass}
+        >
+          <option value="unset">Not set</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+    </GrayRow>
+  );
+}
+
+function useInternalTeamRoster(projectId: number): {
+  roster: string[];
+  addMember: (rawName: string) => void;
+} {
+  const [bump, setBump] = useState(0);
+
+  const roster = useMemo(() => mergedInternalTeamRoster(projectId), [projectId, bump]);
+
+  const addMember = useCallback(
+    (rawName: string) => {
+      if (!addInternalTeamMemberToProject(projectId, rawName)) return;
+      setBump((b) => b + 1);
+    },
+    [projectId],
+  );
+
+  return { roster, addMember };
+}
+
+function TeamMemberStealthSelect({
+  label,
+  value,
+  onCommit,
+  roster,
+}: {
+  label: string;
+  value: string | null;
+  onCommit: (next: string | null) => void;
+  roster: string[];
+}) {
+  const current = value ?? "";
+  const match = roster.find((r) => r.toLowerCase() === current.toLowerCase());
+  const inRoster = Boolean(match);
+  const selectValue = inRoster ? match! : current ? `__saved:${current}` : "";
+
+  return (
+    <GrayRow>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="min-w-0 flex-1 text-sm font-medium text-text-secondary">{label}</span>
+        <select
+          value={selectValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "") {
+              onCommit(null);
+              return;
+            }
+            if (v.startsWith("__saved:")) return;
+            onCommit(v);
+          }}
+          className={stealthSelectClass}
+        >
+          <option value="">Unassigned</option>
+          {roster.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+          {!inRoster && current ? (
+            <option value={`__saved:${current}`}>{current} (saved)</option>
+          ) : null}
+        </select>
+      </div>
+    </GrayRow>
+  );
+}
+
+function patchSampleOnProject(
+  project: Project,
+  colorwayId: number,
+  sampleId: number,
+  partial: Partial<Sample>,
+): Partial<Project> {
+  return {
+    colorways: project.colorways.map((cw) =>
+      cw.id !== colorwayId
+        ? cw
+        : {
+            ...cw,
+            samples: cw.samples.map((s) => (s.id === sampleId ? { ...s, ...partial } : s)),
+          },
+    ),
+  };
+}
+
+const SAMPLE_STATUS_OPTIONS: SampleStatus[] = [
+  "PENDING",
+  "RECEIVED",
+  "APPROVED",
+  "REJECTED",
+  "IN REVIEW",
+];
+
+export type ProjectPatchFn = (patch: Partial<Project>) => void;
+
+function CostingOverviewSection({
+  title,
+  project,
+  patch,
+}: {
+  title: string;
+  project: Project;
+  patch?: ProjectPatchFn;
+}) {
+  if (!patch) {
+    return (
+      <SectionCard title={title}>
+        <DateRow label="Quote requested" value={formatShortDate(project.quote_requested_date)} />
+        <DateRow label="Vendor costing received" value={formatShortDate(project.vendor_costing_received_date)} />
+        <DateRow label="Cost sheet prepared" value={formatShortDate(project.cost_sheet_prepared_date)} />
+        <DateRow label="Estimate sent" value={formatShortDate(project.estimate_sent_date)} />
+        {costingToggleRow(project.costing_approved)}
+      </SectionCard>
+    );
+  }
+  const save = patch;
+  return (
+    <SectionCard title={title}>
+      <StealthDateRow
+        label="Quote requested"
+        value={project.quote_requested_date}
+        onCommit={(iso) => save({ quote_requested_date: iso })}
+      />
+      <StealthDateRow
+        label="Vendor costing received"
+        value={project.vendor_costing_received_date}
+        onCommit={(iso) => save({ vendor_costing_received_date: iso })}
+      />
+      <StealthDateRow
+        label="Cost sheet prepared"
+        value={project.cost_sheet_prepared_date}
+        onCommit={(iso) => save({ cost_sheet_prepared_date: iso })}
+      />
+      <StealthDateRow
+        label="Estimate sent"
+        value={project.estimate_sent_date}
+        onCommit={(iso) => save({ estimate_sent_date: iso })}
+      />
+      <StealthCostingApprovedRow value={project.costing_approved} onChange={(v) => save({ costing_approved: v })} />
+    </SectionCard>
+  );
+}
+
+function AddRepeatSectionButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-xl border border-dashed border-accent/45 bg-white py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
+    >
+      {children}
+    </button>
+  );
+}
+
+function RepeatableDyeCostingSections({
+  headingBase,
+  project,
+  patch,
+}: {
+  headingBase: string;
+  project: Project;
+  patch?: ProjectPatchFn;
+}) {
+  const tracks = resolveDyeCostingTracks(project);
+  const save = patch;
+
+  if (!save) {
+    return (
+      <>
+        {tracks.map((t, i) => (
+          <SectionCard key={t.id} title={tracks.length > 1 ? `${headingBase} · Line ${i + 1}` : headingBase}>
+            {t.dye_vendor ? <VendorRow label="Vendor" name={t.dye_vendor} /> : <AddVendorPlaceholder />}
+            <DateRow label="Lab dip requested" value={formatShortDate(t.lab_dip_request_date)} />
+            <DateRow label="Lab dip due" value={formatShortDate(t.lab_dip_due_date)} />
+            <DateRow label="Lab dip received" value={formatShortDate(t.lab_dip_received_date)} />
+            <GrayRow>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-text-primary">Lab dip status</span>
+                {approvalPill(t.lab_dip_approval_status)}
+              </div>
+            </GrayRow>
+          </SectionCard>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {tracks.map((t, i) => (
+        <SectionCard
+          key={t.id}
+          title={tracks.length > 1 ? `${headingBase} · Line ${i + 1}` : headingBase}
+          headerExtra={
+            tracks.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => save({ dye_costing_tracks: tracks.filter((x) => x.id !== t.id) })}
+                className="text-[11px] font-semibold text-red-600 hover:underline"
+              >
+                Remove
+              </button>
+            ) : undefined
+          }
+        >
+          <StealthMetaField
+            label="Vendor"
+            value={t.dye_vendor}
+            placeholder="Add dye vendor…"
+            onCommit={(v) => save({ dye_costing_tracks: updateDyeTrack(tracks, t.id, { dye_vendor: v }) })}
+          />
+          <StealthDateRow
+            label="Lab dip requested"
+            value={t.lab_dip_request_date}
+            onCommit={(iso) =>
+              save({ dye_costing_tracks: updateDyeTrack(tracks, t.id, { lab_dip_request_date: iso }) })
+            }
+          />
+          <StealthDateRow
+            label="Lab dip due"
+            value={t.lab_dip_due_date}
+            onCommit={(iso) => save({ dye_costing_tracks: updateDyeTrack(tracks, t.id, { lab_dip_due_date: iso }) })}
+          />
+          <StealthDateRow
+            label="Lab dip received"
+            value={t.lab_dip_received_date}
+            onCommit={(iso) =>
+              save({ dye_costing_tracks: updateDyeTrack(tracks, t.id, { lab_dip_received_date: iso }) })
+            }
+          />
+          <StealthApprovalSelect
+            label="Lab dip status"
+            value={t.lab_dip_approval_status}
+            onChange={(next) =>
+              save({ dye_costing_tracks: updateDyeTrack(tracks, t.id, { lab_dip_approval_status: next }) })
+            }
+          />
+        </SectionCard>
+      ))}
+      <AddRepeatSectionButton onClick={() => save({ dye_costing_tracks: [...tracks, defaultDyeCostingTrack()] })}>
+        + Add dye line
+      </AddRepeatSectionButton>
+    </>
+  );
+}
+
+function RepeatablePrintEmbroiderySections({
+  headingBase,
+  project,
+  patch,
+}: {
+  headingBase: string;
+  project: Project;
+  patch?: ProjectPatchFn;
+}) {
+  const tracks = resolvePrintEmbroideryTracks(project);
+  const save = patch;
+
+  if (!save) {
+    return (
+      <>
+        {tracks.map((t, i) => (
+          <SectionCard key={t.id} title={tracks.length > 1 ? `${headingBase} · Line ${i + 1}` : headingBase}>
+            {t.print_embroidery_vendor ? (
+              <VendorRow label="Vendor" name={t.print_embroidery_vendor} />
+            ) : (
+              <AddVendorPlaceholder />
+            )}
+            <DateRow label="Strike off requested" value={formatShortDate(t.strike_off_request_date)} />
+            <DateRow label="Strike off due" value={formatShortDate(t.strike_off_due_date)} />
+            <DateRow label="Strike off received" value={formatShortDate(t.strike_off_received_date)} />
+            <GrayRow>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-text-primary">Strike off status</span>
+                {approvalPill(t.strike_off_approval_status)}
+              </div>
+            </GrayRow>
+          </SectionCard>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {tracks.map((t, i) => (
+        <SectionCard
+          key={t.id}
+          title={tracks.length > 1 ? `${headingBase} · Line ${i + 1}` : headingBase}
+          headerExtra={
+            tracks.length > 1 ? (
+              <button
+                type="button"
+                onClick={() =>
+                  save({ print_embroidery_costing_tracks: tracks.filter((x) => x.id !== t.id) })
+                }
+                className="text-[11px] font-semibold text-red-600 hover:underline"
+              >
+                Remove
+              </button>
+            ) : undefined
+          }
+        >
+          <StealthMetaField
+            label="Vendor"
+            value={t.print_embroidery_vendor}
+            placeholder="Add print / embroidery vendor…"
+            onCommit={(v) =>
+              save({
+                print_embroidery_costing_tracks: updatePrintEmbTrack(tracks, t.id, {
+                  print_embroidery_vendor: v,
+                }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="Strike off requested"
+            value={t.strike_off_request_date}
+            onCommit={(iso) =>
+              save({
+                print_embroidery_costing_tracks: updatePrintEmbTrack(tracks, t.id, {
+                  strike_off_request_date: iso,
+                }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="Strike off due"
+            value={t.strike_off_due_date}
+            onCommit={(iso) =>
+              save({
+                print_embroidery_costing_tracks: updatePrintEmbTrack(tracks, t.id, { strike_off_due_date: iso }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="Strike off received"
+            value={t.strike_off_received_date}
+            onCommit={(iso) =>
+              save({
+                print_embroidery_costing_tracks: updatePrintEmbTrack(tracks, t.id, {
+                  strike_off_received_date: iso,
+                }),
+              })
+            }
+          />
+          <StealthApprovalSelect
+            label="Strike off status"
+            value={t.strike_off_approval_status}
+            onChange={(next) =>
+              save({
+                print_embroidery_costing_tracks: updatePrintEmbTrack(tracks, t.id, {
+                  strike_off_approval_status: next,
+                }),
+              })
+            }
+          />
+        </SectionCard>
+      ))}
+      <AddRepeatSectionButton
+        onClick={() =>
+          save({ print_embroidery_costing_tracks: [...tracks, defaultPrintEmbroideryTrack()] })
+        }
+      >
+        + Add print / embroidery line
+      </AddRepeatSectionButton>
+    </>
+  );
+}
+
+function RepeatableCostingExtraSections({ project, patch }: { project: Project; patch?: ProjectPatchFn }) {
+  const tracks = resolveCostingExtraTracks(project);
+  const save = patch;
+
+  if (!save && tracks.length === 0) return null;
+
+  if (!save) {
+    return (
+      <>
+        {tracks.map((t) => (
+          <SectionCard key={t.id} title={t.section_title}>
+            {t.vendor_name ? <VendorRow label="Vendor" name={t.vendor_name} /> : null}
+            <DateRow label="Milestone 1" value={formatShortDate(t.milestone_1_date)} />
+            <DateRow label="Milestone 2" value={formatShortDate(t.milestone_2_date)} />
+            <DateRow label="Milestone 3" value={formatShortDate(t.milestone_3_date)} />
+            <GrayRow>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-text-primary">Approval</span>
+                {approvalPill(t.approval_status)}
+              </div>
+            </GrayRow>
+          </SectionCard>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {tracks.map((t, i) => (
+        <SectionCard
+          key={t.id}
+          title={tracks.length > 1 ? `Extra costing · ${i + 1}` : "Extra costing"}
+          headerExtra={
+            <button
+              type="button"
+              onClick={() => save({ costing_extra_tracks: tracks.filter((x) => x.id !== t.id) })}
+              className="text-[11px] font-semibold text-red-600 hover:underline"
+            >
+              Remove
+            </button>
+          }
+        >
+          <StealthMetaField
+            label="Section heading"
+            value={t.section_title}
+            placeholder="e.g. Trims / Freight quote"
+            onCommit={(v) =>
+              save({
+                costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, {
+                  section_title: v?.trim() ? v.trim() : "Additional costing",
+                }),
+              })
+            }
+          />
+          <StealthMetaField
+            label="Vendor"
+            value={t.vendor_name}
+            placeholder="Vendor optional"
+            onCommit={(v) =>
+              save({ costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, { vendor_name: v }) })
+            }
+          />
+          <StealthDateRow
+            label="Milestone 1"
+            value={t.milestone_1_date}
+            onCommit={(iso) =>
+              save({ costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, { milestone_1_date: iso }) })
+            }
+          />
+          <StealthDateRow
+            label="Milestone 2"
+            value={t.milestone_2_date}
+            onCommit={(iso) =>
+              save({ costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, { milestone_2_date: iso }) })
+            }
+          />
+          <StealthDateRow
+            label="Milestone 3"
+            value={t.milestone_3_date}
+            onCommit={(iso) =>
+              save({ costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, { milestone_3_date: iso }) })
+            }
+          />
+          <StealthApprovalSelect
+            label="Approval"
+            value={t.approval_status}
+            onChange={(next) =>
+              save({ costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, { approval_status: next }) })
+            }
+          />
+        </SectionCard>
+      ))}
+      <AddRepeatSectionButton
+        onClick={() => save({ costing_extra_tracks: [...tracks, defaultCostingExtraTrack()] })}
+      >
+        + Add costing section
+      </AddRepeatSectionButton>
+    </>
+  );
+}
+
+function RepeatableBulkApprovalSections({
+  title,
+  project,
+  patch,
+}: {
+  title: string;
+  project: Project;
+  patch?: ProjectPatchFn;
+}) {
+  const tracks = resolveBulkProductionTracks(project);
+  const save = patch;
+
+  if (!save) {
+    return (
+      <>
+        {tracks.map((t, i) => (
+          <SectionCard key={t.id} title={tracks.length > 1 ? `${title} · ${t.title}` : title}>
+            <DateRow label="Bulk fabric approved" value={formatShortDate(t.bulk_fabric_approval_date)} />
+            <DateRow label="Bulk trim approved" value={formatShortDate(t.bulk_trim_approval_date)} />
+            <DateRow label="TOP due" value={formatShortDate(t.top_due_date)} />
+            <DateRow label="TOP approved" value={formatShortDate(t.top_approved_date)} />
+          </SectionCard>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {tracks.map((t, i) => (
+        <SectionCard
+          key={t.id}
+          title={tracks.length > 1 ? `${title} · ${t.title}` : title}
+          headerExtra={
+            tracks.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => save({ bulk_production_tracks: tracks.filter((x) => x.id !== t.id) })}
+                className="text-[11px] font-semibold text-red-600 hover:underline"
+              >
+                Remove schedule
+              </button>
+            ) : undefined
+          }
+        >
+          <StealthMetaField
+            label="Schedule name"
+            value={t.title}
+            placeholder="e.g. Bulk drop 2"
+            onCommit={(v) =>
+              save({
+                bulk_production_tracks: updateBulkTrack(tracks, t.id, {
+                  title: v?.trim() ? v.trim() : `Schedule ${i + 1}`,
+                }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="Bulk fabric approved"
+            value={t.bulk_fabric_approval_date}
+            onCommit={(iso) =>
+              save({
+                bulk_production_tracks: updateBulkTrack(tracks, t.id, { bulk_fabric_approval_date: iso }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="Bulk trim approved"
+            value={t.bulk_trim_approval_date}
+            onCommit={(iso) =>
+              save({
+                bulk_production_tracks: updateBulkTrack(tracks, t.id, { bulk_trim_approval_date: iso }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="TOP due"
+            value={t.top_due_date}
+            onCommit={(iso) =>
+              save({
+                bulk_production_tracks: updateBulkTrack(tracks, t.id, { top_due_date: iso }),
+              })
+            }
+          />
+          <StealthDateRow
+            label="TOP approved"
+            value={t.top_approved_date}
+            onCommit={(iso) =>
+              save({
+                bulk_production_tracks: updateBulkTrack(tracks, t.id, { top_approved_date: iso }),
+              })
+            }
+          />
+        </SectionCard>
+      ))}
+      <AddRepeatSectionButton
+        onClick={() => {
+          const n = tracks.length + 1;
+          save({
+            bulk_production_tracks: [...tracks, defaultBulkProductionTrack(`Production schedule ${n}`)],
+          });
+        }}
+      >
+        + Add bulk approval schedule
+      </AddRepeatSectionButton>
+    </>
   );
 }
 
@@ -105,6 +917,43 @@ export function ProjectDetailsClientCard({ project }: { project: Project }) {
   );
 }
 
+function InternalTeamRosterEditor({ onAdd }: { onAdd: (name: string) => void }) {
+  const [draft, setDraft] = useState("");
+  return (
+    <SectionCard title="Team roster">
+      <p className="text-xs text-text-secondary">
+        Add teammates for this project — they appear in every Internal assignment menu below. You can also add people from{" "}
+        <strong className="font-semibold text-text-primary">People → Team</strong>. Saved in this browser only (mock).
+      </p>
+      <form
+        className="mt-3 flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onAdd(draft);
+          setDraft("");
+        }}
+      >
+        <label className="min-w-[12rem] flex-1">
+          <span className="text-xs font-medium text-text-secondary">New team member</span>
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="e.g. Jamie Chen"
+            className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+        </label>
+        <button
+          type="submit"
+          className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
+        >
+          Add to roster
+        </button>
+      </form>
+    </SectionCard>
+  );
+}
+
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
     <GrayRow>
@@ -116,31 +965,147 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function InternalDevelopmentPanel({ project }: { project: Project }) {
+export function InternalDevelopmentPanel({
+  project,
+  onPatchProject,
+}: {
+  project: Project;
+  onPatchProject?: ProjectPatchFn;
+}) {
+  const p = onPatchProject;
+  const { roster, addMember } = useInternalTeamRoster(project.id);
   return (
-    <PanelShell>
+    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+      {p ? <InternalTeamRosterEditor onAdd={addMember} /> : null}
       <SectionCard title="Team assignments">
-        <MetaRow label="Lead team member" value={project.lead_team_member ?? "—"} />
-        <MetaRow label="Dev & prod assigned" value={project.dev_prod_assigned_team_member ?? "—"} />
+        {!p ? (
+          <>
+            <MetaRow label="Lead team member" value={project.lead_team_member ?? "—"} />
+            <MetaRow label="Dev & prod assigned" value={project.dev_prod_assigned_team_member ?? "—"} />
+          </>
+        ) : (
+          <>
+            <TeamMemberStealthSelect
+              roster={roster}
+              label="Lead team member"
+              value={project.lead_team_member}
+              onCommit={(v) => p({ lead_team_member: v })}
+            />
+            <TeamMemberStealthSelect
+              roster={roster}
+              label="Dev & prod assigned"
+              value={project.dev_prod_assigned_team_member}
+              onCommit={(v) => p({ dev_prod_assigned_team_member: v })}
+            />
+          </>
+        )}
       </SectionCard>
       <SectionCard title="Project timeline">
-        <DateRow label="Client meeting / handover" value={formatShortDate(project.client_meeting_date)} />
-        <DateRow label="Client assets received" value={formatShortDate(project.client_assets_received_date)} />
-        <DateRow label="TP sent to factory" value={formatShortDate(project.tp_sent_date)} />
-        <DateRow label="References sent to factory" value={formatShortDate(project.references_sent_date)} />
+        {!p ? (
+          <>
+            <DateRow label="Client meeting / handover" value={formatShortDate(project.client_meeting_date)} />
+            <DateRow label="Client assets received" value={formatShortDate(project.client_assets_received_date)} />
+            <DateRow label="TP sent to factory" value={formatShortDate(project.tp_sent_date)} />
+            <DateRow label="References sent to factory" value={formatShortDate(project.references_sent_date)} />
+          </>
+        ) : (
+          <>
+            <StealthDateRow
+              label="Client meeting / handover"
+              value={project.client_meeting_date}
+              onCommit={(iso) => p({ client_meeting_date: iso })}
+            />
+            <StealthDateRow
+              label="Client assets received"
+              value={project.client_assets_received_date}
+              onCommit={(iso) => p({ client_assets_received_date: iso })}
+            />
+            <StealthDateRow
+              label="TP sent to factory"
+              value={project.tp_sent_date}
+              onCommit={(iso) => p({ tp_sent_date: iso })}
+            />
+            <StealthDateRow
+              label="References sent to factory"
+              value={project.references_sent_date}
+              onCommit={(iso) => p({ references_sent_date: iso })}
+            />
+          </>
+        )}
       </SectionCard>
       <SectionCard title="C&S tech pack">
-        <MetaRow label="Assigned to" value={project.cs_tech_pack_assigned_member ?? "—"} />
-        <DateRow label="Request date" value={formatShortDate(project.cs_tech_pack_request_date)} />
-        <DateRow label="Due date" value={formatShortDate(project.cs_tech_pack_due_date)} />
-        <DateRow label="Complete date" value={formatShortDate(project.cs_tech_pack_complete_date)} />
+        {!p ? (
+          <>
+            <MetaRow label="Assigned to" value={project.cs_tech_pack_assigned_member ?? "—"} />
+            <DateRow label="Request date" value={formatShortDate(project.cs_tech_pack_request_date)} />
+            <DateRow label="Due date" value={formatShortDate(project.cs_tech_pack_due_date)} />
+            <DateRow label="Complete date" value={formatShortDate(project.cs_tech_pack_complete_date)} />
+          </>
+        ) : (
+          <>
+            <TeamMemberStealthSelect
+              roster={roster}
+              label="Assigned to"
+              value={project.cs_tech_pack_assigned_member}
+              onCommit={(v) => p({ cs_tech_pack_assigned_member: v })}
+            />
+            <StealthDateRow
+              label="Request date"
+              value={project.cs_tech_pack_request_date}
+              onCommit={(iso) => p({ cs_tech_pack_request_date: iso })}
+            />
+            <StealthDateRow
+              label="Due date"
+              value={project.cs_tech_pack_due_date}
+              onCommit={(iso) => p({ cs_tech_pack_due_date: iso })}
+            />
+            <StealthDateRow
+              label="Complete date"
+              value={project.cs_tech_pack_complete_date}
+              onCommit={(iso) => p({ cs_tech_pack_complete_date: iso })}
+            />
+          </>
+        )}
       </SectionCard>
       <SectionCard title="Artwork tech pack">
-        <MetaRow label="Assigned to" value={project.artwork_tech_pack_assigned_member ?? "—"} />
-        <DateRow label="Request date" value={formatShortDate(project.artwork_tech_pack_request_date)} />
-        <DateRow label="Due date" value={formatShortDate(project.artwork_tech_pack_due_date)} />
-        <DateRow label="Complete date" value={formatShortDate(project.artwork_tech_pack_complete_date)} />
-        <DateRow label="Client approval" value={formatShortDate(project.artwork_design_client_approval_date)} />
+        {!p ? (
+          <>
+            <MetaRow label="Assigned to" value={project.artwork_tech_pack_assigned_member ?? "—"} />
+            <DateRow label="Request date" value={formatShortDate(project.artwork_tech_pack_request_date)} />
+            <DateRow label="Due date" value={formatShortDate(project.artwork_tech_pack_due_date)} />
+            <DateRow label="Complete date" value={formatShortDate(project.artwork_tech_pack_complete_date)} />
+            <DateRow label="Client approval" value={formatShortDate(project.artwork_design_client_approval_date)} />
+          </>
+        ) : (
+          <>
+            <TeamMemberStealthSelect
+              roster={roster}
+              label="Assigned to"
+              value={project.artwork_tech_pack_assigned_member}
+              onCommit={(v) => p({ artwork_tech_pack_assigned_member: v })}
+            />
+            <StealthDateRow
+              label="Request date"
+              value={project.artwork_tech_pack_request_date}
+              onCommit={(iso) => p({ artwork_tech_pack_request_date: iso })}
+            />
+            <StealthDateRow
+              label="Due date"
+              value={project.artwork_tech_pack_due_date}
+              onCommit={(iso) => p({ artwork_tech_pack_due_date: iso })}
+            />
+            <StealthDateRow
+              label="Complete date"
+              value={project.artwork_tech_pack_complete_date}
+              onCommit={(iso) => p({ artwork_tech_pack_complete_date: iso })}
+            />
+            <StealthDateRow
+              label="Client approval"
+              value={project.artwork_design_client_approval_date}
+              onCommit={(iso) => p({ artwork_design_client_approval_date: iso })}
+            />
+          </>
+        )}
       </SectionCard>
     </PanelShell>
   );
@@ -209,7 +1174,7 @@ function InvoicesPanel({ project }: { project: Project }) {
           <p className="text-sm text-text-secondary">No invoices yet for {project.name}.</p>
           <button
             type="button"
-            className="mt-4 w-full rounded-xl bg-accent py-2.5 text-sm font-semibold text-white hover:opacity-90"
+            className="mt-4 w-full rounded-xl border-2 border-dashed border-accent/40 py-3 text-sm font-semibold text-accent hover:bg-violet-50"
           >
             + Create invoice
           </button>
@@ -219,68 +1184,26 @@ function InvoicesPanel({ project }: { project: Project }) {
   );
 }
 
-function ApprovalsPanel({ project }: { project: Project }) {
+function ApprovalsPanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
+  const p = onPatchProject;
   return (
-    <PanelShell>
-      <SectionCard title="Costing approvals">
-        <DateRow label="Quote requested" value={formatShortDate(project.quote_requested_date)} />
-        <DateRow label="Vendor costing received" value={formatShortDate(project.vendor_costing_received_date)} />
-        <DateRow label="Cost sheet prepared" value={formatShortDate(project.cost_sheet_prepared_date)} />
-        <DateRow label="Estimate sent" value={formatShortDate(project.estimate_sent_date)} />
-        {costingToggleRow(project.costing_approved)}
-      </SectionCard>
-      <SectionCard title="Dye approvals">
-        {project.dye_vendor ? <VendorRow label="Vendor" name={project.dye_vendor} /> : null}
-        <DateRow label="Lab dip requested" value={formatShortDate(project.lab_dip_request_date)} />
-        <DateRow label="Lab dip due" value={formatShortDate(project.lab_dip_due_date)} />
-        <DateRow label="Lab dip received" value={formatShortDate(project.lab_dip_received_date)} />
-        <GrayRow>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-text-primary">Lab dip status</span>
-            {approvalPill(project.lab_dip_approval_status)}
-          </div>
-        </GrayRow>
-      </SectionCard>
-      <SectionCard title="Print / embroidery / decoration">
-        {project.print_embroidery_vendor ? (
-          <VendorRow label="Vendor" name={project.print_embroidery_vendor} />
-        ) : null}
-        <DateRow label="Strike off requested" value={formatShortDate(project.strike_off_request_date)} />
-        <DateRow label="Strike off due" value={formatShortDate(project.strike_off_due_date)} />
-        <DateRow label="Strike off received" value={formatShortDate(project.strike_off_received_date)} />
-        <GrayRow>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-text-primary">Strike off status</span>
-            {approvalPill(project.strike_off_approval_status)}
-          </div>
-        </GrayRow>
-      </SectionCard>
-      <SectionCard title="Bulk production approvals">
-        <DateRow label="Bulk fabric approved" value={formatShortDate(project.bulk_fabric_approval_date)} />
-        <DateRow label="Bulk trim approved" value={formatShortDate(project.bulk_trim_approval_date)} />
-        <DateRow label="TOP due" value={formatShortDate(project.top_due_date)} />
-        <DateRow label="TOP approved" value={formatShortDate(project.top_approved_date)} />
-      </SectionCard>
+    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+      <CostingOverviewSection title="Costing approvals" project={project} patch={p} />
+      <RepeatableDyeCostingSections headingBase="Dye approvals" project={project} patch={p} />
+      <RepeatablePrintEmbroiderySections headingBase="Print / embroidery / decoration" project={project} patch={p} />
+      <RepeatableBulkApprovalSections title="Bulk production approvals" project={project} patch={p} />
     </PanelShell>
   );
 }
 
-function CostingPanel({ project }: { project: Project }) {
+function CostingPanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
+  const p = onPatchProject;
   return (
-    <PanelShell>
-      <SectionCard title="Costing overview">
-        <DateRow label="Quote requested" value={formatShortDate(project.quote_requested_date)} />
-        <DateRow label="Vendor costing received" value={formatShortDate(project.vendor_costing_received_date)} />
-        <DateRow label="Cost sheet prepared" value={formatShortDate(project.cost_sheet_prepared_date)} />
-        <DateRow label="Estimate sent" value={formatShortDate(project.estimate_sent_date)} />
-        {costingToggleRow(project.costing_approved)}
-      </SectionCard>
-      <SectionCard title="Dyes">
-        {project.dye_vendor ? <VendorRow label="Vendor" name={project.dye_vendor} /> : null}
-        <DateRow label="Lab dip requested" value={formatShortDate(project.lab_dip_request_date)} />
-        <DateRow label="Lab dip due" value={formatShortDate(project.lab_dip_due_date)} />
-        <DateRow label="Lab dip received" value={formatShortDate(project.lab_dip_received_date)} />
-      </SectionCard>
+    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+      <CostingOverviewSection title="Costing overview" project={project} patch={p} />
+      <RepeatableDyeCostingSections headingBase="Dyes" project={project} patch={p} />
+      <RepeatablePrintEmbroiderySections headingBase="Print / embroidery / decoration" project={project} patch={p} />
+      <RepeatableCostingExtraSections project={project} patch={p} />
     </PanelShell>
   );
 }
@@ -289,15 +1212,26 @@ function sampleSummary(s: Sample) {
   return `${s.type} · ${s.status}`;
 }
 
-function CsPanel({ project }: { project: Project }) {
+function CsPanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
+  const p = onPatchProject;
   const [selectedId, setSelectedId] = useState<number | "all">(
     project.colorways[0]?.id ?? "all",
   );
 
   if (project.colorways.length === 0) {
     return (
-      <PanelShell>
-        <p className="text-sm text-text-secondary">No colorways on this project.</p>
+      <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+        <p className="text-sm text-text-secondary">No colorways on this project yet.</p>
+        {p ? (
+          <AddRepeatSectionButton
+            onClick={() => {
+              p({ colorways: [{ id: 1, name: "Colorway 1", samples: [] }] });
+              setSelectedId(1);
+            }}
+          >
+            + Add another
+          </AddRepeatSectionButton>
+        ) : null}
       </PanelShell>
     );
   }
@@ -306,7 +1240,23 @@ function CsPanel({ project }: { project: Project }) {
     selectedId === "all" ? project.colorways : project.colorways.filter((c) => c.id === selectedId);
 
   return (
-    <PanelShell>
+    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+      {p ? (
+        <AddRepeatSectionButton
+          onClick={() => {
+            const maxId = project.colorways.reduce((m, c) => Math.max(m, c.id), 0);
+            const next = {
+              id: maxId + 1,
+              name: `Colorway ${project.colorways.length + 1}`,
+              samples: [] as Sample[],
+            };
+            p({ colorways: [...project.colorways, next] });
+            setSelectedId(next.id);
+          }}
+        >
+          + Add another
+        </AddRepeatSectionButton>
+      ) : null}
       <SectionCard title="Select colorway">
         <select
           className="w-full rounded-lg border border-border-light px-3 py-2.5 text-sm font-semibold text-text-primary"
@@ -325,16 +1275,123 @@ function CsPanel({ project }: { project: Project }) {
         </select>
       </SectionCard>
       {visible.map((cw) => (
-        <SectionCard key={cw.id} title={cw.name}>
+        <SectionCard
+          key={cw.id}
+          title={cw.name}
+          headerExtra={
+            p && project.colorways.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const nextCw = project.colorways.filter((c) => c.id !== cw.id);
+                  p({ colorways: nextCw });
+                  setSelectedId((prev) => {
+                    if (prev !== cw.id) return prev;
+                    return nextCw[0]?.id ?? "all";
+                  });
+                }}
+                className="text-[11px] font-semibold text-red-600 hover:underline"
+              >
+                Remove
+              </button>
+            ) : undefined
+          }
+        >
+          {p ? (
+            <StealthMetaField
+              label="Colorway name"
+              value={cw.name}
+              placeholder="Name"
+              onCommit={(v) => {
+                const name = v?.trim() || cw.name;
+                p({
+                  colorways: project.colorways.map((c) => (c.id === cw.id ? { ...c, name } : c)),
+                });
+              }}
+            />
+          ) : null}
           {cw.samples.length === 0 ? (
             <p className="text-sm text-text-secondary">No samples tracked for this colorway.</p>
           ) : (
             cw.samples.map((s) => (
               <GrayRow key={s.id}>
                 <p className="text-sm font-semibold text-text-primary">{sampleSummary(s)}</p>
-                <p className="mt-1 text-xs text-text-secondary">
-                  Received: {formatShortDate(s.received_date)}
-                </p>
+                {!p ? (
+                  <p className="mt-1 text-xs text-text-secondary">
+                    Received: {formatShortDate(s.received_date)}
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3 border-t border-slate-200/70 pt-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <span className="min-w-0 flex-1 text-xs font-medium text-text-secondary">Received</span>
+                      <input
+                        type="date"
+                        value={isoToDateInput(s.received_date)}
+                        onChange={(e) => {
+                          const ymd = e.target.value;
+                          p(
+                            patchSampleOnProject(project, cw.id, s.id, {
+                              received_date: ymd ? dateInputToIso(ymd) : null,
+                            }),
+                          );
+                        }}
+                        className={stealthDateInputClass}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <span className="min-w-0 flex-1 text-xs font-medium text-text-secondary">Comments sent</span>
+                      <input
+                        type="date"
+                        value={isoToDateInput(s.comments_sent_date)}
+                        onChange={(e) => {
+                          const ymd = e.target.value;
+                          p(
+                            patchSampleOnProject(project, cw.id, s.id, {
+                              comments_sent_date: ymd ? dateInputToIso(ymd) : null,
+                            }),
+                          );
+                        }}
+                        className={stealthDateInputClass}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <span className="min-w-0 flex-1 text-xs font-medium text-text-secondary">Status</span>
+                      <select
+                        value={s.status}
+                        onChange={(e) =>
+                          p(
+                            patchSampleOnProject(project, cw.id, s.id, {
+                              status: e.target.value as SampleStatus,
+                            }),
+                          )
+                        }
+                        className={stealthSelectClass}
+                      >
+                        {SAMPLE_STATUS_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <label className="block">
+                      <span className="text-xs font-medium text-text-secondary">Comments</span>
+                      <textarea
+                        value={s.comments ?? ""}
+                        placeholder="Notes…"
+                        onChange={(e) =>
+                          p(
+                            patchSampleOnProject(project, cw.id, s.id, {
+                              comments: e.target.value === "" ? null : e.target.value,
+                            }),
+                          )
+                        }
+                        className={stealthTextareaClass}
+                        rows={3}
+                      />
+                    </label>
+                  </div>
+                )}
               </GrayRow>
             ))
           )}
@@ -344,49 +1401,221 @@ function CsPanel({ project }: { project: Project }) {
   );
 }
 
-function BulkProductionPanel({ project }: { project: Project }) {
-  const ex = project.ex_factory_date ? new Date(project.ex_factory_date).getTime() : null;
-  const hint =
-    ex != null && !Number.isNaN(ex)
-      ? new Date(ex - 7 * 86400000).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : null;
+function BulkProductionPanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
+  const p = onPatchProject;
+  const tracks = resolveBulkProductionTracks(project);
 
+  function packingHintFromExFactory(iso: string | null): string | null {
+    const ex = iso ? new Date(iso).getTime() : null;
+    if (ex == null || Number.isNaN(ex)) return null;
+    return new Date(ex - 7 * 86400000).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
+  if (!p) {
+    return (
+      <PanelShell>
+        {tracks.map((t) => {
+          const hint = packingHintFromExFactory(t.ex_factory_date);
+          return (
+            <div key={t.id} className="space-y-5">
+              <SectionCard title={tracks.length > 1 ? t.title : "Bulk production"}>
+                <div className="space-y-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                    Production approvals
+                  </p>
+                  <DateRow label="Bulk fabric approval" value={formatShortDate(t.bulk_fabric_approval_date)} />
+                  <DateRow label="Bulk trim approval" value={formatShortDate(t.bulk_trim_approval_date)} />
+                  <DateRow label="New product request" value={formatShortDate(t.new_product_request_date)} />
+                  <DateRow label="Barcodes sent to vendor" value={formatShortDate(t.barcodes_sent_to_vendor_date)} />
+                </div>
+                <div className="space-y-3 border-t border-border-light pt-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">TOP sample</p>
+                  <DateRow label="TOP due" value={formatShortDate(t.top_due_date)} />
+                  <DateRow label="TOP approved" value={formatShortDate(t.top_approved_date)} />
+                </div>
+                <div className="space-y-3 border-t border-border-light pt-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                    Delivery schedule
+                  </p>
+                  <DateRow label="Bulk target delivery" value={formatShortDate(t.bulk_target_delivery_date)} />
+                  <DateRow label="Ex-factory date" value={formatShortDate(t.ex_factory_date)} />
+                </div>
+              </SectionCard>
+              {hint ? (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-5">
+                  <p className="text-sm font-semibold text-blue-900">Auto-calculation (mock)</p>
+                  <p className="mt-2 text-sm text-blue-800/90">
+                    Packing list target ~1 week before ex-factory: <span className="font-bold">{hint}</span>
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </PanelShell>
+    );
+  }
+
+  const save = p;
   return (
-    <PanelShell>
-      <SectionCard title="Production approvals">
-        <DateRow label="Bulk fabric approval" value={formatShortDate(project.bulk_fabric_approval_date)} />
-        <DateRow label="Bulk trim approval" value={formatShortDate(project.bulk_trim_approval_date)} />
-        <DateRow label="New product request" value={formatShortDate(project.new_product_request_date)} />
-        <DateRow label="Barcodes sent to vendor" value={formatShortDate(project.barcodes_sent_to_vendor_date)} />
-      </SectionCard>
-      <SectionCard title="TOP sample">
-        <DateRow label="TOP due" value={formatShortDate(project.top_due_date)} />
-        <DateRow label="TOP approved" value={formatShortDate(project.top_approved_date)} />
-      </SectionCard>
-      <SectionCard title="Delivery schedule">
-        <DateRow label="Bulk target delivery" value={formatShortDate(project.bulk_target_delivery_date)} />
-        <DateRow label="Ex-factory date" value={formatShortDate(project.ex_factory_date)} />
-      </SectionCard>
-      {hint ? (
-        <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-5">
-          <p className="text-sm font-semibold text-blue-900">Auto-calculation (mock)</p>
-          <p className="mt-2 text-sm text-blue-800/90">
-            Packing list target ~1 week before ex-factory: <span className="font-bold">{hint}</span>
-          </p>
-        </div>
-      ) : null}
+    <PanelShell hint={<MockPersistHint />}>
+      {tracks.map((t, i) => {
+        const hint = packingHintFromExFactory(t.ex_factory_date);
+        return (
+          <div key={t.id} className="space-y-5">
+            <SectionCard
+              title={tracks.length > 1 ? t.title : "Bulk production"}
+              headerExtra={
+                tracks.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => save({ bulk_production_tracks: tracks.filter((x) => x.id !== t.id) })}
+                    className="text-[11px] font-semibold text-red-600 hover:underline"
+                  >
+                    Remove schedule
+                  </button>
+                ) : undefined
+              }
+            >
+              <StealthMetaField
+                label="Schedule name"
+                value={t.title}
+                placeholder={`Production schedule ${i + 1}`}
+                onCommit={(v) =>
+                  save({
+                    bulk_production_tracks: updateBulkTrack(tracks, t.id, {
+                      title: v?.trim() ? v.trim() : `Schedule ${i + 1}`,
+                    }),
+                  })
+                }
+              />
+              <div className="space-y-3 border-t border-border-light pt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  Production approvals
+                </p>
+                <StealthDateRow
+                  label="Bulk fabric approval"
+                  value={t.bulk_fabric_approval_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, { bulk_fabric_approval_date: iso }),
+                    })
+                  }
+                />
+                <StealthDateRow
+                  label="Bulk trim approval"
+                  value={t.bulk_trim_approval_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, { bulk_trim_approval_date: iso }),
+                    })
+                  }
+                />
+                <StealthDateRow
+                  label="New product request"
+                  value={t.new_product_request_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, { new_product_request_date: iso }),
+                    })
+                  }
+                />
+                <StealthDateRow
+                  label="Barcodes sent to vendor"
+                  value={t.barcodes_sent_to_vendor_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, {
+                        barcodes_sent_to_vendor_date: iso,
+                      }),
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-3 border-t border-border-light pt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">TOP sample</p>
+                <StealthDateRow
+                  label="TOP due"
+                  value={t.top_due_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, { top_due_date: iso }),
+                    })
+                  }
+                />
+                <StealthDateRow
+                  label="TOP approved"
+                  value={t.top_approved_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, { top_approved_date: iso }),
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-3 border-t border-border-light pt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  Delivery schedule
+                </p>
+                <StealthDateRow
+                  label="Bulk target delivery"
+                  value={t.bulk_target_delivery_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, {
+                        bulk_target_delivery_date: iso,
+                      }),
+                    })
+                  }
+                />
+                <StealthDateRow
+                  label="Ex-factory date"
+                  value={t.ex_factory_date}
+                  onCommit={(iso) =>
+                    save({
+                      bulk_production_tracks: updateBulkTrack(tracks, t.id, { ex_factory_date: iso }),
+                    })
+                  }
+                />
+              </div>
+            </SectionCard>
+            {hint ? (
+              <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-5">
+                <p className="text-sm font-semibold text-blue-900">Auto-calculation (mock)</p>
+                <p className="mt-2 text-sm text-blue-800/90">
+                  Packing list target ~1 week before ex-factory: <span className="font-bold">{hint}</span>
+                </p>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      <AddRepeatSectionButton
+        onClick={() => {
+          const n = tracks.length + 1;
+          save({
+            bulk_production_tracks: [...tracks, defaultBulkProductionTrack(`Production schedule ${n}`)],
+          });
+        }}
+      >
+        + Add bulk production schedule
+      </AddRepeatSectionButton>
     </PanelShell>
   );
 }
 
-function ShippingModulePanel({ project }: { project: Project }) {
+function ShippingModulePanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
+  const p = onPatchProject;
   const [sub, setSub] = useState<"shipping" | "receiving">("shipping");
+  const termsDisplay = project.shipping_terms?.trim() || "FOB";
+  const methodDisplay = project.shipping_method?.trim() || "Not set";
+
   return (
-    <PanelShell>
+    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
       <div className="flex max-w-md rounded-xl border border-border-light bg-surface-card p-1">
         {(["shipping", "receiving"] as const).map((k) => (
           <button
@@ -404,21 +1633,72 @@ function ShippingModulePanel({ project }: { project: Project }) {
       {sub === "shipping" ? (
         <>
           <SectionCard title="Shipping details">
-            <DateRow label="Shipping terms" value={project.shipping_terms ?? "FOB"} />
-            <DateRow label="Shipping method" value={project.shipping_method ?? "Not set"} />
+            {!p ? (
+              <>
+                <MetaRow label="Shipping terms" value={termsDisplay} />
+                <MetaRow label="Shipping method" value={methodDisplay} />
+              </>
+            ) : (
+              <>
+                <StealthTextRow
+                  label="Shipping terms"
+                  value={project.shipping_terms}
+                  placeholder="FOB"
+                  onCommit={(v) => p({ shipping_terms: v })}
+                />
+                <StealthTextRow
+                  label="Shipping method"
+                  value={project.shipping_method}
+                  placeholder="e.g. Ocean freight"
+                  onCommit={(v) => p({ shipping_method: v })}
+                />
+              </>
+            )}
           </SectionCard>
           <SectionCard title="Packing list">
-            <DateRow label="Packing list received" value={formatShortDate(project.packing_list_received_date)} />
-            <DateRow
-              label="Sent to client"
-              value={formatShortDate(project.packing_list_sent_to_client_date)}
-            />
+            {!p ? (
+              <>
+                <DateRow label="Packing list received" value={formatShortDate(project.packing_list_received_date)} />
+                <DateRow label="Sent to client" value={formatShortDate(project.packing_list_sent_to_client_date)} />
+              </>
+            ) : (
+              <>
+                <StealthDateRow
+                  label="Packing list received"
+                  value={project.packing_list_received_date}
+                  onCommit={(iso) => p({ packing_list_received_date: iso })}
+                />
+                <StealthDateRow
+                  label="Sent to client"
+                  value={project.packing_list_sent_to_client_date}
+                  onCommit={(iso) => p({ packing_list_sent_to_client_date: iso })}
+                />
+              </>
+            )}
           </SectionCard>
         </>
       ) : (
         <SectionCard title="Receiving">
-          <DateRow label="Tracking / BOL" value={project.tracking_bol_number ?? "—"} />
-          <DateRow label="Client received" value={formatShortDate(project.client_received_date)} />
+          {!p ? (
+            <>
+              <MetaRow label="Tracking / BOL" value={project.tracking_bol_number ?? "—"} />
+              <DateRow label="Client received" value={formatShortDate(project.client_received_date)} />
+            </>
+          ) : (
+            <>
+              <StealthTextRow
+                label="Tracking / BOL"
+                value={project.tracking_bol_number}
+                placeholder="Number or reference"
+                onCommit={(v) => p({ tracking_bol_number: v })}
+              />
+              <StealthDateRow
+                label="Client received"
+                value={project.client_received_date}
+                onCommit={(iso) => p({ client_received_date: iso })}
+              />
+            </>
+          )}
         </SectionCard>
       )}
     </PanelShell>
@@ -547,7 +1827,15 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
   );
 }
 
-export function ProjectModuleRouter({ moduleId, project }: { moduleId: ProjectModuleId; project: Project }) {
+export function ProjectModuleRouter({
+  moduleId,
+  project,
+  onPatchProject,
+}: {
+  moduleId: ProjectModuleId;
+  project: Project;
+  onPatchProject?: ProjectPatchFn;
+}) {
   switch (moduleId) {
     case "details":
     case "internal":
@@ -557,15 +1845,15 @@ export function ProjectModuleRouter({ moduleId, project }: { moduleId: ProjectMo
     case "invoices":
       return <InvoicesPanel project={project} />;
     case "approvals":
-      return <ApprovalsPanel project={project} />;
+      return <ApprovalsPanel project={project} onPatchProject={onPatchProject} />;
     case "costing":
-      return <CostingPanel project={project} />;
+      return <CostingPanel project={project} onPatchProject={onPatchProject} />;
     case "cs":
-      return <CsPanel project={project} />;
+      return <CsPanel project={project} onPatchProject={onPatchProject} />;
     case "bulk_production":
-      return <BulkProductionPanel project={project} />;
+      return <BulkProductionPanel project={project} onPatchProject={onPatchProject} />;
     case "shipping":
-      return <ShippingModulePanel project={project} />;
+      return <ShippingModulePanel project={project} onPatchProject={onPatchProject} />;
     case "people_access":
       return <ProjectPeopleAccessPanel project={project} />;
     default:

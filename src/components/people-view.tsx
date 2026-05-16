@@ -14,9 +14,14 @@ import {
   type PeopleSegment,
 } from "@/lib/mock/people";
 import { formatShortDate } from "@/lib/format";
+import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
 import { InviteSentToast, type InviteToastPayload } from "@/components/invite-sent-toast";
 import { PermissionsEditor } from "@/components/permissions-editor";
+import { addInternalTeamMemberToProject } from "@/lib/internal-team-roster";
+import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
+import { mockProjects } from "@/lib/mock/projects";
+import type { Project } from "@/lib/types/project";
 
 function inviteHasCustomPermissions(inv: PendingInvite): boolean {
   if (!inv.permissions) return false;
@@ -40,24 +45,152 @@ function segmentFromRoleLabel(role: string): PeopleSegment | null {
   return null;
 }
 
+function AddTeamMemberToProjectRoster() {
+  const [projects, setProjects] = useState<Project[]>(() => mockProjects);
+  const teamPeople = useMemo(
+    () =>
+      [...MOCK_DIRECTORY_PEOPLE.filter((p) => p.segment === "team")].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    [],
+  );
+
+  useEffect(() => {
+    setProjects(mergeProjectLists(mockProjects, readSessionProjects()));
+  }, []);
+
+  const projectsSorted = useMemo(
+    () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
+    [projects],
+  );
+
+  const [personId, setPersonId] = useState("");
+  const [projectIdStr, setProjectIdStr] = useState("");
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(
+    null,
+  );
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setFeedback(null);
+    if (!personId || !projectIdStr) {
+      setFeedback({ tone: "err", text: "Choose a teammate and a project." });
+      return;
+    }
+    const pid = Number(projectIdStr);
+    const person = teamPeople.find((p) => p.id === personId);
+    const proj = projects.find((p) => p.id === pid);
+    if (!person || !proj) {
+      setFeedback({ tone: "err", text: "Something went wrong — refresh and try again." });
+      return;
+    }
+    const added = addInternalTeamMemberToProject(pid, person.name);
+    setFeedback(
+      added
+        ? {
+            tone: "ok",
+            text: `${person.name} was added to the Internal roster for ${proj.name}. Open the project → Internal to assign them.`,
+          }
+        : {
+            tone: "warn",
+            text: `${person.name} is already on that project's Internal roster (or matches an existing name).`,
+          },
+    );
+  }
+
+  return (
+    <div className="mt-8 rounded-2xl border border-border-light bg-surface-card p-5 shadow-sm">
+      <h3 className="text-sm font-semibold text-text-primary">Add teammate to a project</h3>
+      <p className="mt-1 text-xs text-text-secondary">
+        Pick someone from Team and a project — they appear in that project's Internal tab assignment dropdowns (browser-only mock).
+      </p>
+      <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={handleSubmit}>
+        <label className="min-w-[11rem] flex-1">
+          <span className="text-xs font-medium text-text-secondary">Teammate</span>
+          <select
+            value={personId}
+            onChange={(ev) => {
+              setPersonId(ev.target.value);
+              setFeedback(null);
+            }}
+            className="mt-1 w-full rounded-lg border border-border-light bg-white px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          >
+            <option value="">Select teammate…</option>
+            {teamPeople.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="min-w-[11rem] flex-1">
+          <span className="text-xs font-medium text-text-secondary">Project</span>
+          <select
+            value={projectIdStr}
+            onChange={(ev) => {
+              setProjectIdStr(ev.target.value);
+              setFeedback(null);
+            }}
+            className="mt-1 w-full rounded-lg border border-border-light bg-white px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          >
+            <option value="">Select project…</option>
+            {projectsSorted.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="submit"
+          className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
+        >
+          + Add to project roster
+        </button>
+      </form>
+      {feedback ? (
+        <p
+          className={`mt-3 text-sm font-medium ${
+            feedback.tone === "ok"
+              ? "text-emerald-700"
+              : feedback.tone === "warn"
+                ? "text-amber-800"
+                : "text-red-600"
+          }`}
+          role={feedback.tone === "err" ? "alert" : "status"}
+        >
+          {feedback.text}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function PeopleView() {
   const [segment, setSegment] = useState<PeopleSegment>("team");
   const [q, setQ] = useState("");
   const [detailPerson, setDetailPerson] = useState<DirectoryPerson | null>(null);
+  const [pendingInviteDetail, setPendingInviteDetail] = useState<PendingInvite | null>(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteToast, setInviteToast] = useState<InviteToastPayload | null>(null);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>(() => [...MOCK_PENDING_INVITES]);
 
   useEffect(() => {
-    if (!detailPerson && !inviteModalOpen) return;
+    const saved = readMockLs<PendingInvite[]>(MOCK_LS.pendingInvites);
+    if (saved !== null && Array.isArray(saved)) setPendingInvites(saved);
+  }, []);
+
+  useEffect(() => {
+    if (!detailPerson && !inviteModalOpen && !pendingInviteDetail) return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (inviteModalOpen) setInviteModalOpen(false);
+      else if (pendingInviteDetail) setPendingInviteDetail(null);
       else if (detailPerson) setDetailPerson(null);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailPerson, inviteModalOpen]);
+  }, [detailPerson, inviteModalOpen, pendingInviteDetail]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -71,6 +204,20 @@ export function PeopleView() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
+      {pendingInviteDetail ? (
+        <PendingInviteDetailModal
+          invite={pendingInviteDetail}
+          onClose={() => setPendingInviteDetail(null)}
+          onDelete={(id) => {
+            setPendingInvites((prev) => {
+              const next = prev.filter((i) => i.id !== id);
+              writeMockLs(MOCK_LS.pendingInvites, next);
+              return next;
+            });
+            setPendingInviteDetail(null);
+          }}
+        />
+      ) : null}
       {detailPerson ? (
         <PersonDetailModal person={detailPerson} onClose={() => setDetailPerson(null)} />
       ) : null}
@@ -78,7 +225,11 @@ export function PeopleView() {
         <InviteByEmailModal
           onClose={() => setInviteModalOpen(false)}
           onSent={(inv) => {
-            setPendingInvites((prev) => [...prev, inv]);
+            setPendingInvites((prev) => {
+              const next = [...prev, inv];
+              writeMockLs(MOCK_LS.pendingInvites, next);
+              return next;
+            });
             setInviteToast({ email: inv.email, segment: inv.segment });
           }}
         />
@@ -97,6 +248,7 @@ export function PeopleView() {
                 type="button"
                 onClick={() => {
                   setDetailPerson(null);
+                  setPendingInviteDetail(null);
                   setInviteModalOpen(true);
                 }}
                 className="shrink-0 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
@@ -114,19 +266,38 @@ export function PeopleView() {
                   {pendingInvites.map((inv) => (
                     <li
                       key={inv.id}
-                      className="flex w-[min(280px,calc(100vw-3rem))] shrink-0 snap-start flex-col rounded-xl border border-border-light bg-surface-card px-4 py-3 shadow-sm"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setDetailPerson(null);
+                        setInviteModalOpen(false);
+                        setPendingInviteDetail(inv);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setDetailPerson(null);
+                          setInviteModalOpen(false);
+                          setPendingInviteDetail(inv);
+                        }
+                      }}
+                      className="flex w-[min(280px,calc(100vw-3rem))] shrink-0 snap-start cursor-pointer flex-col rounded-xl border border-border-light bg-surface-card px-4 py-3 shadow-sm transition hover:border-accent/35 hover:bg-violet-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      aria-label={`Open pending invite for ${inv.email}`}
                     >
                       <span
                         className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(inv.segment)}`}
                       >
                         {segmentLabel(inv.segment)}
                       </span>
-                      <p className="mt-1 font-medium text-text-primary">{inv.email}</p>
+                      <p className="mt-1 font-medium text-accent underline-offset-2 hover:underline">{inv.email}</p>
                       <p className="mt-0.5 text-xs text-text-secondary">{inv.invited_label}</p>
                       <p className="mt-2 text-[11px] text-text-secondary">Sent {formatShortDate(`${inv.sent_at}T12:00:00`)}</p>
                       {inviteHasCustomPermissions(inv) ? (
                         <p className="mt-2 text-[11px] font-semibold text-violet-700">Custom permissions</p>
                       ) : null}
+                      <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
+                        Tap to manage
+                      </p>
                     </li>
                   ))}
                 </ul>
@@ -184,12 +355,21 @@ export function PeopleView() {
                       </tr>
                     ) : (
                       filtered.map((p) => (
-                        <PersonRow key={p.id} person={p} onOpen={() => setDetailPerson(p)} />
+                        <PersonRow
+                          key={p.id}
+                          person={p}
+                          onOpen={() => {
+                            setPendingInviteDetail(null);
+                            setDetailPerson(p);
+                          }}
+                        />
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
+
+              {segment === "team" ? <AddTeamMemberToProjectRoster /> : null}
             </section>
           </div>
         </div>
@@ -233,6 +413,97 @@ function PersonRow({ person: p, onOpen }: { person: DirectoryPerson; onOpen: () 
         {n === 0 ? "—" : `${n} project${n === 1 ? "" : "s"}`}
       </td>
     </tr>
+  );
+}
+
+function PendingInviteDetailModal({
+  invite: inv,
+  onClose,
+  onDelete,
+}: {
+  invite: PendingInvite;
+  onClose: () => void;
+  onDelete: (id: string) => void;
+}) {
+  const flags = inv.permissions ?? defaultPermissionsForSegment(inv.segment);
+
+  function handleDelete() {
+    if (!window.confirm(`Remove the pending invite for ${inv.email}?`)) return;
+    onDelete(inv.id);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[223] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
+      <button type="button" className="absolute inset-0 cursor-default" aria-label="Close" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pending-invite-title"
+        className="relative z-10 flex max-h-[min(720px,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-border-light sm:max-w-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Pending invitation</p>
+            <span
+              className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(inv.segment)}`}
+            >
+              {segmentLabel(inv.segment)}
+            </span>
+            <h2 id="pending-invite-title" className="mt-2 break-all text-lg font-bold text-text-primary">
+              {inv.email}
+            </h2>
+            <p className="mt-1 text-sm text-text-secondary">{inv.invited_label}</p>
+            <p className="mt-2 text-xs text-text-secondary">
+              Sent {formatShortDate(`${inv.sent_at}T12:00:00`)} · mock, stored in this browser
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-2 text-text-secondary hover:bg-surface-body hover:text-text-primary"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Permissions on accept</p>
+          <p className="mt-1 text-xs text-text-secondary">
+            {inviteHasCustomPermissions(inv)
+              ? "Custom set for this invite (read-only preview)."
+              : "Default permissions for this segment."}
+          </p>
+          <div className="mt-3 max-h-[min(280px,40vh)] overflow-y-auto rounded-xl border border-border-light bg-surface-body/40 p-3 pr-2">
+            <PermissionsEditor
+              dense
+              readOnly
+              segment={inv.segment}
+              flags={flags}
+              onChange={() => {}}
+            />
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border-light px-5 py-3 sm:flex-row sm:justify-end sm:gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-800 hover:bg-red-100"
+          >
+            Delete invite
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

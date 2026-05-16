@@ -18,6 +18,7 @@ import {
 } from "@/lib/project-wip-edits";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { parseProjectModuleTab, PROJECT_MODULE_TABS } from "@/lib/project-modules";
+import { CONNECT_DOTS_PROJECT_WIP_STEPS } from "@/lib/wip-project-timeline";
 import { ContentHeader } from "@/components/content-header";
 import {
   InternalDevelopmentPanel,
@@ -81,6 +82,33 @@ function stepStateLabel(state: WipStepState): string {
   return "Upcoming";
 }
 
+/** Row chrome for WIP steps in edit modals — reflects selected status. */
+function wipStepModalRowClass(state: WipStepState): string {
+  switch (state) {
+    case "completed":
+      return "border-emerald-300/80 bg-emerald-50/95 shadow-sm shadow-emerald-900/5";
+    case "in_progress":
+      return "border-violet-300/80 bg-violet-50/95 shadow-sm shadow-violet-900/5";
+    case "na":
+      return "border-slate-300 bg-slate-100/90 shadow-sm shadow-slate-900/5";
+    default:
+      return "border-border-light bg-surface-body/40";
+  }
+}
+
+function stepStateSelectClass(state: WipStepState): string {
+  switch (state) {
+    case "completed":
+      return "border-emerald-300 bg-emerald-50/90 text-emerald-950";
+    case "in_progress":
+      return "border-violet-300 bg-violet-50/90 text-violet-950";
+    case "na":
+      return "border-slate-300 bg-slate-100 text-slate-800";
+    default:
+      return "border-border-light bg-white text-text-primary";
+  }
+}
+
 function StepStateSelect({
   value,
   onChange,
@@ -92,7 +120,7 @@ function StepStateSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as WipStepState)}
-      className="rounded-lg border border-border-light bg-white px-2 py-1 text-xs font-medium text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+      className={`rounded-lg border px-2 py-1 text-xs font-semibold focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 ${stepStateSelectClass(value)}`}
       aria-label="Step status"
     >
       {WIP_STEP_STATES.map((s) => (
@@ -267,11 +295,16 @@ export function ProjectJobsView({ project }: { project: Project }) {
     const patch = saved && typeof saved === "object" ? saved : {};
     setProjectPatch(patch);
     setJobs(loadProjectJobs(project.id));
-    setProjectTimeline(loadProjectTimelineSteps(project.id, { ...project, ...patch }));
     setHydrated(true);
   }, [project, project.id]);
 
   const merged = useMemo(() => ({ ...project, ...projectPatch }), [project, projectPatch]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (jobs.length > 0 && jobs[0].project_id !== project.id) return;
+    setProjectTimeline(loadProjectTimelineSteps(project.id, merged, jobs));
+  }, [hydrated, jobs, merged, project.id]);
 
   const persistProject = useCallback(
     (next: Partial<Project>) => {
@@ -332,14 +365,15 @@ export function ProjectJobsView({ project }: { project: Project }) {
       return;
     }
     if (editModal?.kind === "job-new") {
-      const template = jobs[0]?.timeline ?? [
-        { id: "tp_setup", label: "Tech pack", state: "upcoming" as const },
-        { id: "quote", label: "Quote / costing", state: "upcoming" as const },
-        { id: "strike", label: "Strike-off", state: "upcoming" as const },
-        { id: "bulk_fabric", label: "Bulk fabric", state: "upcoming" as const },
-        { id: "top", label: "TOP", state: "upcoming" as const },
-        { id: "ex_factory", label: "Ex-factory", state: "upcoming" as const },
-      ];
+      const template =
+        jobs[0]?.timeline ??
+        CONNECT_DOTS_PROJECT_WIP_STEPS.map((def) => ({
+          id: def.id,
+          label: def.label,
+          durationShort: def.durationShort,
+          durationLabel: def.durationLabel,
+          state: "upcoming" as const,
+        }));
       setDraftJob({
         id: `job-${project.id}-${Date.now()}`,
         project_id: project.id,
@@ -647,7 +681,10 @@ export function ProjectJobsView({ project }: { project: Project }) {
                 <MetaItem label="Status update" value={formatShortDate(merged.status_update_date)} />
               </div>
               <section className="shrink-0 py-1">
-                <h2 className="mb-3 text-sm font-semibold text-text-primary">Connect the dots timeline</h2>
+                <h2 className="mb-1 text-sm font-semibold text-text-primary">Project timeline</h2>
+                <p className="mb-3 text-xs text-text-secondary">
+                  Each step completes only when every job has completed that step; the highlighted step is the earliest one still open on any line.
+                </p>
                 <WipTimeline
                   steps={projectTimeline}
                   editableDurations={hydrated}
@@ -660,11 +697,11 @@ export function ProjectJobsView({ project }: { project: Project }) {
 
           {activeModule === "internal" ? (
             <div className="space-y-6">
-              <InternalDevelopmentPanel project={merged} />
+              <InternalDevelopmentPanel project={merged} onPatchProject={persistProject} />
             </div>
           ) : null}
 
-          <ProjectModuleRouter moduleId={activeModule} project={merged} />
+          <ProjectModuleRouter moduleId={activeModule} project={merged} onPatchProject={persistProject} />
         </div>
       </div>
 
@@ -753,7 +790,10 @@ export function ProjectJobsView({ project }: { project: Project }) {
                 </h3>
                 <ul className="mt-2 space-y-2">
                   {draftTimeline.map((s, stepIndex) => (
-                    <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <li
+                      key={s.id}
+                      className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${wipStepModalRowClass(s.state)}`}
+                    >
                       <span className="min-w-0 flex-1 text-text-primary">{s.label}</span>
                       <div className="flex shrink-0 items-center gap-2">
                         {stepIndex < draftTimeline.length - 1 ? (
@@ -956,7 +996,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
                   {draftJob.timeline.map((s) => (
                     <li
                       key={s.id}
-                      className="flex flex-wrap items-center gap-2 rounded-xl border border-border-light bg-surface-body/40 px-3 py-2 sm:flex-nowrap"
+                      className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 transition-colors sm:flex-nowrap ${wipStepModalRowClass(s.state)}`}
                     >
                       <input
                         type="text"

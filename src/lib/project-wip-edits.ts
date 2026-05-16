@@ -23,14 +23,20 @@ export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
   writeMockLs(MOCK_LS.projectJobs(projectId), jobs);
 }
 
-export function loadProjectTimelineSteps(projectId: number, project?: Project): WipStep[] {
-  const seed = getProjectTimeline(projectId, project);
+export function loadProjectTimelineSteps(projectId: number, project?: Project, jobs?: ProjectJob[]): WipStep[] {
+  const seed = getProjectTimeline(projectId, project, jobs);
   const saved = readMockLs<WipStep[]>(MOCK_LS.projectTimeline(projectId));
   if (!saved?.length) return seed.map((s) => ({ ...s }));
   const byId = new Map(saved.map((s) => [s.id, s]));
   return seed.map((s) => {
     const patch = byId.get(s.id);
-    return patch ? { ...s, ...patch } : { ...s };
+    if (!patch) return { ...s };
+    return {
+      ...s,
+      state: s.state,
+      durationShort: patch.durationShort ?? s.durationShort,
+      durationLabel: patch.durationLabel ?? s.durationLabel,
+    };
   });
 }
 

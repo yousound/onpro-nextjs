@@ -64,14 +64,6 @@ export const mockThreadMessages: ThreadMessage[] = [
     },
   },
   {
-    id: "m3",
-    conversation_id: 1,
-    side: "incoming",
-    body: "Here are the two ref shots from the mill.",
-    time_label: "10:18 AM",
-    image_slots: 2,
-  },
-  {
     id: "m4",
     conversation_id: 2,
     side: "incoming",

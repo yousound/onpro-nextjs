@@ -321,7 +321,7 @@ export function WipTimeline({
 }) {
   return (
     <section
-      className={`overflow-x-auto rounded-2xl border border-border-light bg-surface-card p-6 shadow-sm ${className}`}
+      className={`scrollbar-light-gray overflow-x-auto rounded-2xl border border-border-light bg-surface-card p-6 shadow-sm [-ms-overflow-style:auto] [scrollbar-gutter:stable] ${className}`}
     >
       {editableDurations ? (
         <p className="mb-3 text-[11px] text-text-secondary">Tap + between steps to add or edit days.</p>

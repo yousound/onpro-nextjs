@@ -66,15 +66,6 @@ function jobStatusClass(status: ProjectJob["status"]): string {
   return "bg-slate-100 text-slate-600";
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200/70 bg-slate-50 px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
-      <p className="mt-1 text-sm font-medium text-text-primary">{value}</p>
-    </div>
-  );
-}
-
 function stepStateLabel(state: WipStepState): string {
   if (state === "completed") return "Done";
   if (state === "in_progress") return "In progress";
@@ -672,14 +663,6 @@ export function ProjectJobsView({ project }: { project: Project }) {
           {activeModule === "details" ? (
             <div className="space-y-5">
               <ProjectDetailsClientCard project={merged} />
-              <div className="grid shrink-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <MetaItem label="Project #" value={merged.project_number ?? "—"} />
-                <MetaItem label="Client" value={merged.client.name} />
-                <MetaItem label="Hand off" value={formatShortDate(merged.project_hand_off_date)} />
-                <MetaItem label="Due date" value={formatShortDate(merged.due_date)} />
-                <MetaItem label="Status overview" value={merged.status_overview ?? "—"} />
-                <MetaItem label="Status update" value={formatShortDate(merged.status_update_date)} />
-              </div>
               <section className="shrink-0 py-1">
                 <h2 className="mb-1 text-sm font-semibold text-text-primary">Project timeline</h2>
                 <p className="mb-3 text-xs text-text-secondary">

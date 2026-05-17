@@ -102,7 +102,7 @@ function AddTeamMemberToProjectRoster() {
     <div className="mt-8 rounded-2xl border border-border-light bg-surface-card p-5 shadow-sm">
       <h3 className="text-sm font-semibold text-text-primary">Add teammate to a project</h3>
       <p className="mt-1 text-xs text-text-secondary">
-        Pick someone from Team and a project — they appear in that project's Internal tab assignment dropdowns (browser-only mock).
+        Pick someone from Team and a project — they appear in that project&apos;s Internal tab assignment dropdowns (browser-only mock).
       </p>
       <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={handleSubmit}>
         <label className="min-w-[11rem] flex-1">

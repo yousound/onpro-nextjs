@@ -896,21 +896,32 @@ function RepeatableBulkApprovalSections({
 
 export function ProjectDetailsClientCard({ project }: { project: Project }) {
   const initials = clientInitials(project.client.name);
+  const pn = project.project_number?.trim();
   return (
     <section className="rounded-2xl border border-border-light bg-white p-6 shadow-sm">
       <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">Client</p>
-      <div className="mt-4 flex flex-wrap items-center gap-4">
+      <div className="mt-4 flex flex-wrap items-start gap-4">
         <div
           className="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-accent text-lg font-bold text-white shadow-inner"
           aria-hidden
         >
           {initials}
         </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-bold tracking-tight text-text-primary md:text-2xl">{project.client.name}</h2>
-          {project.project_number ? (
-            <p className="mt-1 text-sm font-medium text-text-secondary">{project.project_number}</p>
-          ) : null}
+        <div className="min-w-0 flex-1 space-y-4">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-text-primary md:text-2xl">{project.client.name}</h2>
+            {pn ? <p className="mt-1 text-sm font-medium text-text-secondary">{pn}</p> : null}
+          </div>
+          <dl className="grid max-w-lg gap-x-6 gap-y-2 text-sm sm:grid-cols-[minmax(0,7.5rem)_1fr]">
+            <dt className="text-text-secondary">Hand off</dt>
+            <dd className="font-medium text-text-primary">{formatShortDate(project.project_hand_off_date)}</dd>
+            <dt className="text-text-secondary">Due date</dt>
+            <dd className="font-medium text-text-primary">{formatShortDate(project.due_date)}</dd>
+            <dt className="text-text-secondary">Status overview</dt>
+            <dd className="font-medium text-text-primary">{project.status_overview ?? "—"}</dd>
+            <dt className="text-text-secondary">Status update</dt>
+            <dd className="font-medium text-text-primary">{formatShortDate(project.status_update_date)}</dd>
+          </dl>
         </div>
       </div>
     </section>

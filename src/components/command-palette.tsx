@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { mockProjects } from "@/lib/mock/projects";
+import { contactDisplayName, loadContacts, searchContacts, clientListContacts } from "@/lib/contacts-store";
+import { contactToDirectoryRow } from "@/components/add-contact-modals";
 
-type Item = { id: string; label: string; href: string; group: string };
+type Item = { id: string; label: string; href: string; group: string; subtitle?: string };
 
 const NAV_ITEMS: Item[] = [
   { id: "nav-overview", label: "Overview", href: "/", group: "Go to" },
@@ -38,7 +40,31 @@ export function CommandPalette() {
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return all;
-    return all.filter((i) => i.label.toLowerCase().includes(s));
+    const contacts = loadContacts();
+    const navAndProjects = all.filter((i) => i.label.toLowerCase().includes(s));
+    const peopleClients = clientListContacts(contacts, q).map((c) => {
+      const row = contactToDirectoryRow(c, contacts);
+      return {
+        id: `person-${c.id}`,
+        label: row.clientCompanyName ?? row.clientPeople[0] ?? contactDisplayName(c, contacts),
+        subtitle:
+          row.clientPeople.length > 0
+            ? `People: ${row.clientPeople.join(", ")}`
+            : c.email,
+        href: `/people?segment=client&q=${encodeURIComponent(row.clientCompanyName ?? c.name)}`,
+        group: "People" as const,
+      };
+    });
+    const peopleOthers = searchContacts(contacts, q)
+      .filter((c) => c.segment !== "client")
+      .map((c) => ({
+        id: `person-${c.id}`,
+        label: contactDisplayName(c, contacts),
+        subtitle: c.email,
+        href: `/people?segment=${c.segment}&q=${encodeURIComponent(c.email)}`,
+        group: "People" as const,
+      }));
+    return [...navAndProjects, ...peopleClients, ...peopleOthers].slice(0, 20);
   }, [all, q]);
 
   const onKey = useCallback(
@@ -88,7 +114,7 @@ export function CommandPalette() {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Quick find… (projects & pages)"
+            placeholder="Quick find… (people, projects & pages)"
             className="w-full rounded-lg border border-transparent bg-transparent px-2 py-2 text-sm text-text-primary outline-none focus:border-accent/40"
           />
         </div>
@@ -107,6 +133,9 @@ export function CommandPalette() {
                     {item.group}
                   </span>
                   <span className="font-medium text-text-primary">{item.label}</span>
+                  {item.subtitle ? (
+                    <span className="text-xs text-text-secondary">{item.subtitle}</span>
+                  ) : null}
                 </button>
               </li>
             ))

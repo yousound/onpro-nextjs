@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
 import { PeopleView } from "@/components/people-view";
 
@@ -7,10 +8,12 @@ export default function PeoplePage() {
       <div className="shrink-0">
         <PageHeader
           title="People"
-          subtitle="Everyone you work with—team, vendors, and clients. Click a person for project access. Set project-wide role defaults under each project’s People & access tab, or adjust permissions when you invite by email."
+          subtitle="Everyone you work with—team, vendors, and clients. Add clients from here; set access per project under each project's People & access tab."
         />
       </div>
-      <PeopleView />
+      <Suspense fallback={null}>
+        <PeopleView />
+      </Suspense>
     </div>
   );
 }

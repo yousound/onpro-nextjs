@@ -1,4 +1,10 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { NotificationsPopover } from "@/components/notifications-popover";
+
+export const PAGE_HEADER_NOTIFICATIONS_CLASS =
+  "relative flex h-10 w-10 items-center justify-center rounded-xl border border-border-light bg-white text-text-secondary shadow-sm transition hover:bg-surface-body";
 
 type Kpi = {
   label: string;
@@ -29,8 +35,9 @@ export function PageHeader(props: {
   action?: ReactNode;
   kpis?: Kpi[];
   variant?: "dark" | "light";
+  showNotifications?: boolean;
 }) {
-  const { title, subtitle, action, kpis, variant = "light" } = props;
+  const { title, subtitle, action, kpis, variant = "light", showNotifications = true } = props;
   const light = variant === "light";
   const toneClass = light ? toneClassLight : toneClassDark;
 
@@ -43,7 +50,7 @@ export function PageHeader(props: {
       }
     >
       <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{title}</h1>
             {subtitle ? (
@@ -52,7 +59,14 @@ export function PageHeader(props: {
               </p>
             ) : null}
           </div>
-          {action ? <div className="shrink-0">{action}</div> : null}
+          {action || showNotifications ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {action}
+              {showNotifications ? (
+                <NotificationsPopover buttonClassName={PAGE_HEADER_NOTIFICATIONS_CLASS} />
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {kpis && kpis.length > 0 ? (
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

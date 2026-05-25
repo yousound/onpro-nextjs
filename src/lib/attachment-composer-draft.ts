@@ -113,7 +113,7 @@ export function defaultAttachmentComposerDraft(roomTitle: string, refDate = new 
     jobName: "Olive capsule",
     jobSubtitle: "Print / Decoration on blanks",
     jobType: "PRINT / DECORATION ON BLANKS",
-    jobLeadVendor: "CA",
+    jobLeadVendor: "Millworks Collective",
     jobCategory: "SWEATSHIRT",
     jobStyleNumber: "GGP15-OLV",
     jobStatus: "In progress",

@@ -1,25 +1,42 @@
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
-import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
+import { normalizeJob } from "@/lib/job-defaults";
+import { MOCK_DEMO_SEED_VERSION, MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { getJobsForProject, getProjectTimeline } from "@/lib/mock/project-jobs";
+import { repairJobTimeline } from "@/lib/wip-project-timeline";
 
-export function loadProjectJobs(projectId: number): ProjectJob[] {
-  const seed = getJobsForProject(projectId);
-  const saved = readMockLs<ProjectJob[]>(MOCK_LS.projectJobs(projectId));
-  if (!saved?.length) return seed.map((j) => ({ ...j, timeline: j.timeline.map((s) => ({ ...s })) }));
-  const byId = new Map(saved.map((j) => [j.id, j]));
-  return seed.map((j) => {
-    const patch = byId.get(j.id);
-    if (!patch) return { ...j, timeline: j.timeline.map((s) => ({ ...s })) };
-    return {
-      ...j,
+function normalizeLoadedJob(seed: ProjectJob, patch: ProjectJob | undefined, project?: Project): ProjectJob {
+  const seedTimeline = seed.timeline.map((s) => ({ ...s }));
+  const mergedTimeline = repairJobTimeline(patch?.timeline, seedTimeline);
+  if (!patch) {
+    return normalizeJob({ ...seed, timeline: mergedTimeline }, project);
+  }
+  return normalizeJob(
+    {
+      ...seed,
       ...patch,
-      timeline: (patch.timeline ?? j.timeline).map((s) => ({ ...s })),
-    };
-  });
+      timeline: mergedTimeline,
+    },
+    project,
+  );
+}
+
+export function loadProjectJobs(projectId: number, project?: Project): ProjectJob[] {
+  const seed = getJobsForProject(projectId);
+  const seedVersion = readMockLs<number>(MOCK_LS.demoSeedVersion);
+  const saved =
+    seedVersion === MOCK_DEMO_SEED_VERSION
+      ? readMockLs<ProjectJob[]>(MOCK_LS.projectJobs(projectId))
+      : null;
+  if (!saved?.length) {
+    return seed.map((j) => normalizeLoadedJob(j, undefined, project));
+  }
+  const byId = new Map(saved.map((j) => [j.id, j]));
+  return seed.map((j) => normalizeLoadedJob(j, byId.get(j.id), project));
 }
 
 export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
+  writeMockLs(MOCK_LS.demoSeedVersion, MOCK_DEMO_SEED_VERSION);
   writeMockLs(MOCK_LS.projectJobs(projectId), jobs);
 }
 

@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
-  MOCK_DIRECTORY_PEOPLE,
   MOCK_PENDING_INVITES,
   projectsForPerson,
   segmentBadgeSoftClass,
@@ -13,9 +13,21 @@ import {
   type PendingInvite,
   type PeopleSegment,
 } from "@/lib/mock/people";
+import type { Contact, TeamRole } from "@/lib/types/contact";
+import { findContactByEmail, loadContacts, saveContacts, clientListContacts, searchContacts, upsertInvitedContact } from "@/lib/contacts-store";
+import { effectiveContactPermissions, permissionsLabel } from "@/lib/contact-permissions";
+import {
+  AddClientModal,
+  AddTeamMemberModal,
+  AddVendorModal,
+  contactToDirectoryRow,
+  TEAM_ROLE_OPTIONS,
+} from "@/components/add-contact-modals";
+import { AvatarUpload, fieldClass } from "@/components/contact-form-fields";
 import { formatShortDate } from "@/lib/format";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
+import { buildPendingInvite } from "@/lib/people-invite";
 import { InviteSentToast, type InviteToastPayload } from "@/components/invite-sent-toast";
 import { PermissionsEditor } from "@/components/permissions-editor";
 import { addInternalTeamMemberToProject } from "@/lib/internal-team-roster";
@@ -45,15 +57,8 @@ function segmentFromRoleLabel(role: string): PeopleSegment | null {
   return null;
 }
 
-function AddTeamMemberToProjectRoster() {
+function AddTeamMemberToProjectRoster({ teamPeople }: { teamPeople: DirectoryPerson[] }) {
   const [projects, setProjects] = useState<Project[]>(() => mockProjects);
-  const teamPeople = useMemo(
-    () =>
-      [...MOCK_DIRECTORY_PEOPLE.filter((p) => p.segment === "team")].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
-    [],
-  );
 
   useEffect(() => {
     setProjects(mergeProjectLists(mockProjects, readSessionProjects()));
@@ -167,13 +172,29 @@ function AddTeamMemberToProjectRoster() {
 }
 
 export function PeopleView() {
-  const [segment, setSegment] = useState<PeopleSegment>("team");
-  const [q, setQ] = useState("");
-  const [detailPerson, setDetailPerson] = useState<DirectoryPerson | null>(null);
+  const searchParams = useSearchParams();
+  const [segment, setSegment] = useState<PeopleSegment>(() => {
+    const s = searchParams.get("segment");
+    return s === "team" || s === "vendor" || s === "client" ? s : "team";
+  });
+  const [q, setQ] = useState(() => searchParams.get("q") ?? "");
+  const [detailPerson, setDetailPerson] = useState<ReturnType<typeof contactToDirectoryRow> | null>(null);
   const [pendingInviteDetail, setPendingInviteDetail] = useState<PendingInvite | null>(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteInitialSegment, setInviteInitialSegment] = useState<PeopleSegment>("team");
+  const [clientModalOpen, setClientModalOpen] = useState(false);
+  const [editClientContact, setEditClientContact] = useState<Contact | null>(null);
+  const [vendorModalOpen, setVendorModalOpen] = useState(false);
+  const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [editTeamContact, setEditTeamContact] = useState<Contact | null>(null);
   const [inviteToast, setInviteToast] = useState<InviteToastPayload | null>(null);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>(() => [...MOCK_PENDING_INVITES]);
+  const [contacts, setContacts] = useState<Contact[]>(() => loadContacts());
+  const [contactsVersion, setContactsVersion] = useState(0);
+
+  useEffect(() => {
+    setContacts(loadContacts());
+  }, [contactsVersion]);
 
   useEffect(() => {
     const saved = readMockLs<PendingInvite[]>(MOCK_LS.pendingInvites);
@@ -181,26 +202,60 @@ export function PeopleView() {
   }, []);
 
   useEffect(() => {
-    if (!detailPerson && !inviteModalOpen && !pendingInviteDetail) return;
+    if (!detailPerson && !inviteModalOpen && !pendingInviteDetail && !clientModalOpen && !vendorModalOpen && !teamModalOpen) return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       if (inviteModalOpen) setInviteModalOpen(false);
+      else if (clientModalOpen) {
+        setClientModalOpen(false);
+        setEditClientContact(null);
+      }
+      else if (vendorModalOpen) setVendorModalOpen(false);
+      else if (teamModalOpen) {
+        setTeamModalOpen(false);
+        setEditTeamContact(null);
+      }
       else if (pendingInviteDetail) setPendingInviteDetail(null);
       else if (detailPerson) setDetailPerson(null);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailPerson, inviteModalOpen, pendingInviteDetail]);
+  }, [detailPerson, inviteModalOpen, pendingInviteDetail, clientModalOpen, vendorModalOpen, teamModalOpen]);
+
+  const teamPeople = useMemo(
+    () =>
+      contacts
+        .filter((c) => c.segment === "team")
+        .map((c) => contactToDirectoryRow(c, contacts))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [contacts],
+  );
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return MOCK_DIRECTORY_PEOPLE.filter((p) => {
-      if (p.segment !== segment) return false;
-      if (!needle) return true;
-      const blob = `${p.name} ${p.email} ${p.company ?? ""}`.toLowerCase();
-      return blob.includes(needle);
+    const rows =
+      segment === "client"
+        ? clientListContacts(contacts, q)
+        : searchContacts(contacts, q, segment);
+    return rows.map((c) => contactToDirectoryRow(c, contacts));
+  }, [contacts, segment, q]);
+
+  function queueInvite(inv: PendingInvite) {
+    setPendingInvites((prev) => {
+      const next = [...prev, inv];
+      writeMockLs(MOCK_LS.pendingInvites, next);
+      return next;
     });
-  }, [segment, q]);
+    setInviteToast({ email: inv.email, segment: inv.segment });
+  }
+
+  function openInviteModal(forSegment: "team" | "vendor") {
+    setDetailPerson(null);
+    setPendingInviteDetail(null);
+    setInviteInitialSegment(forSegment);
+    setInviteModalOpen(true);
+  }
+
+  const clientTable = segment === "client";
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
@@ -219,19 +274,52 @@ export function PeopleView() {
         />
       ) : null}
       {detailPerson ? (
-        <PersonDetailModal person={detailPerson} onClose={() => setDetailPerson(null)} />
+        <PersonDetailModal
+          person={detailPerson}
+          contacts={contacts}
+          onClose={() => setDetailPerson(null)}
+          onContactsUpdated={() => setContactsVersion((v) => v + 1)}
+          onEditClient={(contact) => {
+            setDetailPerson(null);
+            setEditClientContact(contact);
+            setClientModalOpen(true);
+          }}
+        />
       ) : null}
       {inviteModalOpen ? (
         <InviteByEmailModal
+          initialSegment={inviteInitialSegment}
           onClose={() => setInviteModalOpen(false)}
-          onSent={(inv) => {
-            setPendingInvites((prev) => {
-              const next = [...prev, inv];
-              writeMockLs(MOCK_LS.pendingInvites, next);
-              return next;
-            });
-            setInviteToast({ email: inv.email, segment: inv.segment });
+          onSent={queueInvite}
+          onSaved={() => setContactsVersion((v) => v + 1)}
+        />
+      ) : null}
+      {teamModalOpen ? (
+        <AddTeamMemberModal
+          existing={editTeamContact}
+          onClose={() => {
+            setTeamModalOpen(false);
+            setEditTeamContact(null);
           }}
+          onSaved={() => setContactsVersion((v) => v + 1)}
+          onInviteSent={queueInvite}
+        />
+      ) : null}
+      {clientModalOpen ? (
+        <AddClientModal
+          existing={editClientContact}
+          onClose={() => {
+            setClientModalOpen(false);
+            setEditClientContact(null);
+          }}
+          onSaved={() => setContactsVersion((v) => v + 1)}
+          onInviteSent={queueInvite}
+        />
+      ) : null}
+      {vendorModalOpen ? (
+        <AddVendorModal
+          onClose={() => setVendorModalOpen(false)}
+          onSaved={() => setContactsVersion((v) => v + 1)}
         />
       ) : null}
 
@@ -243,18 +331,24 @@ export function PeopleView() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-text-primary">Pending invitations</h2>
+                <p className="mt-1 text-xs text-text-secondary">
+                  Client and teammate contacts are added with Add client / Add teammate. Vendor invites save permissions on the contact profile.
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setDetailPerson(null);
-                  setPendingInviteDetail(null);
-                  setInviteModalOpen(true);
-                }}
-                className="shrink-0 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-              >
-                + Invite by email
-              </button>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDetailPerson(null);
+                    setPendingInviteDetail(null);
+                    setEditClientContact(null);
+                    setClientModalOpen(true);
+                  }}
+                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                >
+                  + Add client
+                </button>
+              </div>
             </div>
             {pendingInvites.length === 0 ? (
               <p className="mt-4 text-sm text-text-secondary">No pending invites.</p>
@@ -326,21 +420,61 @@ export function PeopleView() {
             <section className="mt-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <h2 className="text-sm font-semibold text-text-primary">{segmentLabel(segment)}</h2>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center md:justify-end">
+                {segment === "team" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailPerson(null);
+                      setPendingInviteDetail(null);
+                      setEditTeamContact(null);
+                      setTeamModalOpen(true);
+                    }}
+                    className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
+                  >
+                    + Add teammate
+                  </button>
+                ) : null}
+                {segment === "vendor" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setVendorModalOpen(true)}
+                      className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
+                    >
+                      + Add vendor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openInviteModal("vendor")}
+                      className="shrink-0 rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+                    >
+                      + Invite by email
+                    </button>
+                  </>
+                ) : null}
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search name, email, or company…"
+                  placeholder={
+                    segment === "client"
+                      ? "Search client company, code, or contact…"
+                      : "Search name, email, or company…"
+                  }
                   className="h-11 w-full max-w-md rounded-xl border border-border-light bg-surface-card px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
                   aria-label="Search people"
                 />
+              </div>
               </div>
 
               <div className="mt-4 overflow-hidden rounded-2xl border border-border-light shadow-sm">
                 <table className="min-w-full text-left text-sm">
                   <thead className="border-b border-border-light bg-surface-body text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
                     <tr>
-                      <th className="px-4 py-3">Person</th>
-                      <th className="hidden px-4 py-3 sm:table-cell">Company</th>
+                      <th className="px-4 py-3">{clientTable ? "Company" : "Person"}</th>
+                      <th className="hidden px-4 py-3 sm:table-cell">
+                        {clientTable ? "People" : "Company"}
+                      </th>
                       <th className="hidden px-4 py-3 md:table-cell">Email</th>
                       <th className="hidden px-4 py-3 lg:table-cell">Phone</th>
                       <th className="px-4 py-3 text-right">Projects</th>
@@ -358,6 +492,7 @@ export function PeopleView() {
                         <PersonRow
                           key={p.id}
                           person={p}
+                          clientTable={clientTable}
                           onOpen={() => {
                             setPendingInviteDetail(null);
                             setDetailPerson(p);
@@ -369,7 +504,7 @@ export function PeopleView() {
                 </table>
               </div>
 
-              {segment === "team" ? <AddTeamMemberToProjectRoster /> : null}
+              {segment === "team" ? <AddTeamMemberToProjectRoster teamPeople={teamPeople} /> : null}
             </section>
           </div>
         </div>
@@ -378,8 +513,19 @@ export function PeopleView() {
   );
 }
 
-function PersonRow({ person: p, onOpen }: { person: DirectoryPerson; onOpen: () => void }) {
+function PersonRow({
+  person: p,
+  clientTable,
+  onOpen,
+}: {
+  person: ReturnType<typeof contactToDirectoryRow>;
+  clientTable?: boolean;
+  onOpen: () => void;
+}) {
   const n = projectsForPerson(p.id).length;
+  const avatarUrl = p.contact.avatar_url;
+  const companyLabel = p.clientCompanyName ?? (p.clientCompanyCode ? p.clientCompanyCode : "Individual");
+  const avatarText = clientTable ? initials(companyLabel) : initials(p.name);
 
   return (
     <tr
@@ -393,20 +539,65 @@ function PersonRow({ person: p, onOpen }: { person: DirectoryPerson; onOpen: () 
         }
       }}
       className="cursor-pointer border-border-light transition hover:bg-violet-50/60 focus-visible:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
-      aria-label={`Open ${p.name} — projects and permissions`}
+      aria-label={`Open ${clientTable ? companyLabel : p.name} — projects and permissions`}
     >
       <td className="px-4 py-3">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
-            {initials(p.name)}
-          </span>
-          <div className="min-w-0">
-            <p className="font-medium text-accent underline-offset-2 hover:underline">{p.name}</p>
-            <p className="mt-0.5 text-xs text-text-secondary sm:hidden">{p.email}</p>
+        {clientTable ? (
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
+              {avatarText}
+            </span>
+            <div className="min-w-0">
+              <p className="font-medium text-accent underline-offset-2 hover:underline">
+                {p.clientCompanyName ?? "Individual client"}
+              </p>
+              {p.clientCompanyCode ? (
+                <p className="mt-0.5 text-xs text-text-secondary">{p.clientCompanyCode}</p>
+              ) : null}
+              <p className="mt-0.5 text-xs text-text-secondary sm:hidden">
+                {p.clientPeople.length > 0 ? p.clientPeople.join(", ") : p.email}
+              </p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={avatarUrl}
+                alt=""
+                className="h-10 w-10 shrink-0 rounded-full object-cover ring-2 ring-border-light"
+              />
+            ) : (
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
+                {avatarText}
+              </span>
+            )}
+            <div className="min-w-0">
+              <p className="font-medium text-accent underline-offset-2 hover:underline">{p.name}</p>
+              {p.subtitle ? <p className="mt-0.5 text-xs text-text-secondary">{p.subtitle}</p> : null}
+              <p className="mt-0.5 text-xs text-text-secondary sm:hidden">{p.email}</p>
+            </div>
+          </div>
+        )}
       </td>
-      <td className="hidden px-4 py-3 text-text-secondary sm:table-cell">{p.company ?? "—"}</td>
+      <td className="hidden px-4 py-3 text-text-secondary sm:table-cell">
+        {clientTable ? (
+          p.clientPeople.length > 0 ? (
+            <ul className="space-y-0.5">
+              {p.clientPeople.map((person) => (
+                <li key={person} className="text-text-primary">
+                  {person}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            "—"
+          )
+        ) : (
+          (p.company ?? "—")
+        )}
+      </td>
       <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{p.email}</td>
       <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{p.phone ?? "—"}</td>
       <td className="px-4 py-3 text-right text-xs font-medium text-text-secondary">
@@ -425,8 +616,6 @@ function PendingInviteDetailModal({
   onClose: () => void;
   onDelete: (id: string) => void;
 }) {
-  const flags = inv.permissions ?? defaultPermissionsForSegment(inv.segment);
-
   function handleDelete() {
     if (!window.confirm(`Remove the pending invite for ${inv.email}?`)) return;
     onDelete(inv.id);
@@ -469,21 +658,14 @@ function PendingInviteDetailModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Permissions on accept</p>
-          <p className="mt-1 text-xs text-text-secondary">
-            {inviteHasCustomPermissions(inv)
-              ? "Custom set for this invite (read-only preview)."
-              : "Default permissions for this segment."}
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Access after accept</p>
+          <p className="mt-2 text-sm text-text-secondary">
+            This email only tracks the invitation. Permissions come from the contact or company profile in People, and
+            from each project&apos;s <span className="font-semibold text-text-primary">People &amp; access</span> tab.
           </p>
-          <div className="mt-3 max-h-[min(280px,40vh)] overflow-y-auto rounded-xl border border-border-light bg-surface-body/40 p-3 pr-2">
-            <PermissionsEditor
-              dense
-              readOnly
-              segment={inv.segment}
-              flags={flags}
-              onChange={() => {}}
-            />
-          </div>
+          <p className="mt-3 text-sm text-text-secondary">
+            Company members inherit their company&apos;s permission profile automatically.
+          </p>
         </div>
 
         <div className="flex shrink-0 flex-col gap-2 border-t border-border-light px-5 py-3 sm:flex-row sm:justify-end sm:gap-3">
@@ -507,33 +689,67 @@ function PendingInviteDetailModal({
   );
 }
 
+const INVITE_SEGMENTS: PeopleSegment[] = ["team", "vendor"];
+
 function InviteByEmailModal({
   onClose,
   onSent,
+  onSaved,
+  initialSegment = "team",
 }: {
   onClose: () => void;
   onSent: (invite: PendingInvite) => void;
+  onSaved: () => void;
+  initialSegment?: PeopleSegment;
 }) {
   const emailRef = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState("");
-  const [inviteSegment, setInviteSegment] = useState<PeopleSegment>("vendor");
-  const [permissionFlags, setPermissionFlags] = useState<ProjectPermissionFlags>(() =>
-    defaultPermissionsForSegment("vendor"),
+  const [inviteSegment, setInviteSegment] = useState<PeopleSegment>(
+    initialSegment === "client" ? "team" : initialSegment,
   );
   const [note, setNote] = useState("");
+  const [teamRole, setTeamRole] = useState<TeamRole>("staff");
+  const [teamRoleCustom, setTeamRoleCustom] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [vendorName, setVendorName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [permissions, setPermissions] = useState<ProjectPermissionFlags>(() =>
+    defaultPermissionsForSegment(initialSegment === "client" ? "team" : initialSegment),
+  );
+  const [existingMatch, setExistingMatch] = useState<Contact | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPermissions(defaultPermissionsForSegment(inviteSegment));
+  }, [inviteSegment]);
 
   useEffect(() => {
     requestAnimationFrame(() => emailRef.current?.focus());
   }, []);
 
-  useEffect(() => {
-    setPermissionFlags(defaultPermissionsForSegment(inviteSegment));
-  }, [inviteSegment]);
-
   function validateEmail(value: string): boolean {
     const v = value.trim();
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  }
+
+  function checkExistingEmail(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed || !validateEmail(trimmed)) {
+      setExistingMatch(null);
+      return;
+    }
+    const match = findContactByEmail(loadContacts(), trimmed) ?? null;
+    setExistingMatch(match);
+    if (match?.permissions) setPermissions(match.permissions);
+    if (match?.segment === "vendor" && match.kind === "company") {
+      setVendorName(match.name);
+      if (match.contact_name) setContactName(match.contact_name);
+    } else if (match?.segment === "team") {
+      setContactName(match.contact_name ?? match.name);
+      if (match.team_role) setTeamRole(match.team_role);
+      if (match.team_role_custom) setTeamRoleCustom(match.team_role_custom);
+    }
+    if (match?.phone) setPhone(match.phone);
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -547,19 +763,37 @@ function InviteByEmailModal({
       setError("That doesn't look like a valid email.");
       return;
     }
+    if (inviteSegment === "vendor" && !vendorName.trim() && !existingMatch) {
+      setError("Vendor company name is required for new contacts.");
+      return;
+    }
+    if (inviteSegment === "team" && !contactName.trim() && !existingMatch) {
+      setError("Contact name is required for new teammates.");
+      return;
+    }
     setError(null);
-    const invited_label =
-      note.trim() ||
-      `${segmentLabel(inviteSegment)} · ${inviteSegment === "team" ? "Workspace member" : inviteSegment === "vendor" ? "Vendor lane" : "Client access"}`;
-    const sent_at = new Date().toISOString().slice(0, 10);
-    onSent({
-      id: `inv-${Date.now()}`,
-      email: trimmed,
+    upsertInvitedContact({
       segment: inviteSegment,
-      invited_label,
-      sent_at,
-      permissions: permissionFlags,
+      email: trimmed,
+      permissions,
+      name: inviteSegment === "vendor" ? vendorName.trim() : contactName.trim(),
+      contactName: inviteSegment === "vendor" ? contactName.trim() || undefined : contactName.trim(),
+      phone: phone.trim() || undefined,
+      teamRole: inviteSegment === "team" ? teamRole : undefined,
+      teamRoleCustom: inviteSegment === "team" ? teamRoleCustom : undefined,
     });
+    onSaved();
+    onSent(
+      buildPendingInvite({
+        email: trimmed,
+        segment: inviteSegment,
+        note,
+        teamRole: inviteSegment === "team" ? teamRole : undefined,
+        teamRoleCustom: inviteSegment === "team" ? teamRoleCustom : undefined,
+        contactName: inviteSegment === "team" ? contactName : undefined,
+        phone: inviteSegment === "team" ? phone : undefined,
+      }),
+    );
     onClose();
   }
 
@@ -576,10 +810,10 @@ function InviteByEmailModal({
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
           <div>
             <h2 id="invite-email-title" className="text-lg font-bold text-text-primary">
-              Invite by email
+              Invite {inviteSegment === "team" ? "teammate" : "vendor"} by email
             </h2>
             <p className="mt-1 text-sm text-text-secondary">
-              Choose segment and permissions — mock adds them to pending below.
+              For clients, use Add client and optionally send an invite from there.
             </p>
           </div>
           <button
@@ -606,14 +840,21 @@ function InviteByEmailModal({
             onChange={(ev) => {
               setEmail(ev.target.value);
               setError(null);
+              checkExistingEmail(ev.target.value);
             }}
+            onBlur={(ev) => checkExistingEmail(ev.target.value)}
             placeholder="name@company.com"
             className="mt-2 h-11 w-full rounded-xl border border-border-light bg-surface-card px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
           />
+          {existingMatch ? (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 ring-1 ring-amber-200">
+              Will update existing contact
+            </p>
+          ) : null}
 
           <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-text-secondary">Segment</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {SEGMENTS.map((s) => (
+            {INVITE_SEGMENTS.map((s) => (
               <button
                 key={s}
                 type="button"
@@ -629,6 +870,101 @@ function InviteByEmailModal({
             ))}
           </div>
 
+          {inviteSegment === "team" ? (
+            <div className="mt-5 space-y-4">
+              <label htmlFor="invite-team-role" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Team role
+              </label>
+              <select
+                id="invite-team-role"
+                value={teamRole}
+                onChange={(ev) => setTeamRole(ev.target.value as TeamRole)}
+                className={fieldClass}
+              >
+                {TEAM_ROLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {teamRole === "custom" ? (
+                <label htmlFor="invite-team-role-custom" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                  Custom role label
+                  <input
+                    id="invite-team-role-custom"
+                    type="text"
+                    value={teamRoleCustom}
+                    onChange={(ev) => setTeamRoleCustom(ev.target.value)}
+                    placeholder="e.g. Project coordinator"
+                    className={fieldClass}
+                  />
+                </label>
+              ) : null}
+              <label htmlFor="invite-contact-name" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Contact name
+                <input
+                  id="invite-contact-name"
+                  type="text"
+                  value={contactName}
+                  onChange={(ev) => setContactName(ev.target.value)}
+                  placeholder="Full name"
+                  className={fieldClass}
+                  required={!existingMatch}
+                />
+              </label>
+              <label htmlFor="invite-phone" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Phone <span className="font-normal normal-case text-text-secondary">(optional)</span>
+                <input
+                  id="invite-phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(ev) => setPhone(ev.target.value)}
+                  placeholder="+1 555 0100"
+                  className={fieldClass}
+                />
+              </label>
+            </div>
+          ) : null}
+
+          {inviteSegment === "vendor" ? (
+            <div className="mt-5 space-y-4">
+              <label htmlFor="invite-vendor-name" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Vendor company name
+                <input
+                  id="invite-vendor-name"
+                  type="text"
+                  value={vendorName}
+                  onChange={(ev) => setVendorName(ev.target.value)}
+                  placeholder="Millworks Collective"
+                  className={fieldClass}
+                  required={!existingMatch}
+                />
+              </label>
+              <label htmlFor="invite-vendor-contact" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Contact name <span className="font-normal normal-case text-text-secondary">(optional)</span>
+                <input
+                  id="invite-vendor-contact"
+                  type="text"
+                  value={contactName}
+                  onChange={(ev) => setContactName(ev.target.value)}
+                  placeholder="Primary contact"
+                  className={fieldClass}
+                />
+              </label>
+              <label htmlFor="invite-vendor-phone" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Phone <span className="font-normal normal-case text-text-secondary">(optional)</span>
+                <input
+                  id="invite-vendor-phone"
+                  type="tel"
+                  value={phone}
+                  onChange={(ev) => setPhone(ev.target.value)}
+                  placeholder="+1 555 0100"
+                  className={fieldClass}
+                />
+              </label>
+            </div>
+          ) : null}
+
           <label htmlFor="invite-note-input" className="mt-5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
             Label <span className="font-normal normal-case text-text-secondary">(optional)</span>
           </label>
@@ -641,11 +977,18 @@ function InviteByEmailModal({
             className="mt-2 h-11 w-full rounded-xl border border-border-light bg-surface-card px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
           />
 
-          <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-text-secondary">Permissions for this invite</p>
-          <p className="mt-1 text-xs text-text-secondary">Adjust toggles before sending; segment chips above choose which rows apply.</p>
-          <div className="mt-3 max-h-[min(260px,38vh)] overflow-y-auto rounded-xl border border-border-light bg-surface-body/40 p-3 pr-2">
-            <PermissionsEditor dense segment={inviteSegment} flags={permissionFlags} onChange={setPermissionFlags} />
-          </div>
+          <fieldset className="mt-5 rounded-xl border border-border-light bg-surface-body/30 px-3 py-3">
+            <p className="text-sm font-semibold text-text-primary">
+              {inviteSegment === "vendor" ? "Company permissions" : "Contact permissions"}
+            </p>
+            <p className="mt-1 text-[11px] text-text-secondary">
+              Saved on the contact profile when you send this invite. Per-project overrides are set under each
+              project&apos;s <span className="font-semibold text-text-primary">People &amp; access</span> tab.
+            </p>
+            <div className="mt-3 max-h-[min(220px,32vh)] overflow-y-auto rounded-xl border border-border-light bg-white p-3">
+              <PermissionsEditor segment={inviteSegment} flags={permissions} onChange={setPermissions} dense />
+            </div>
+          </fieldset>
 
           {error ? (
             <p className="mt-3 text-sm font-medium text-red-600" role="alert">
@@ -666,7 +1009,7 @@ function InviteByEmailModal({
               type="submit"
               className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
             >
-              Send invite
+              Save contact &amp; send invite
             </button>
           </div>
         </form>
@@ -675,8 +1018,60 @@ function InviteByEmailModal({
   );
 }
 
-function PersonDetailModal({ person: p, onClose }: { person: DirectoryPerson; onClose: () => void }) {
+function PersonDetailModal({
+  person: p,
+  contacts,
+  onClose,
+  onEditClient,
+  onContactsUpdated,
+}: {
+  person: ReturnType<typeof contactToDirectoryRow>;
+  contacts: Contact[];
+  onClose: () => void;
+  onEditClient: (contact: Contact) => void;
+  onContactsUpdated: () => void;
+}) {
   const access = projectsForPerson(p.id);
+  const contact = p.contact;
+  const effective = effectiveContactPermissions(contacts, contact);
+  const [permDraft, setPermDraft] = useState<ProjectPermissionFlags>(effective.flags);
+  const [permSaved, setPermSaved] = useState(false);
+  const companyMembers =
+    p.isCompany && contact.member_contact_ids?.length
+      ? contacts.filter((c) => contact.member_contact_ids!.includes(c.id))
+      : [];
+
+  useEffect(() => {
+    setPermDraft(effectiveContactPermissions(contacts, contact).flags);
+  }, [contact, contacts]);
+
+  function openEdit() {
+    if (p.segment !== "client") return;
+    if (p.isCompanyMember && contact.parent_company_id) {
+      const parent = contacts.find((c) => c.id === contact.parent_company_id);
+      if (parent) {
+        onEditClient(parent);
+        return;
+      }
+    }
+    onEditClient(contact);
+  }
+
+  function savePermissions() {
+    if (p.isCompanyMember) return;
+    const targetId = p.isCompany ? contact.id : contact.id;
+    const now = new Date().toISOString();
+    const next = loadContacts().map((c) =>
+      c.id === targetId ? { ...c, permissions: permDraft, updated_at: now } : c,
+    );
+    saveContacts(next);
+    onContactsUpdated();
+    setPermSaved(true);
+    window.setTimeout(() => setPermSaved(false), 2000);
+  }
+
+  const canEditClient = p.segment === "client";
+  const canEditPermissions = !p.isCompanyMember;
 
   return (
     <div className="fixed inset-0 z-[220] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
@@ -701,10 +1096,22 @@ function PersonDetailModal({ person: p, onClose }: { person: DirectoryPerson; on
                 {segmentLabel(p.segment)}
               </span>
               <h2 id="people-detail-title" className="truncate text-lg font-bold text-text-primary">
-                {p.name}
+                {p.clientCompanyName ?? p.name}
               </h2>
+              {p.clientCompanyCode ? (
+                <p className="truncate text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                  {p.clientCompanyCode}
+                </p>
+              ) : null}
+              {p.clientPeople.length > 0 ? (
+                <p className="truncate text-sm text-text-secondary">
+                  People: {p.clientPeople.join(", ")}
+                </p>
+              ) : null}
               <p className="truncate text-sm text-text-secondary">{p.email}</p>
-              {p.company ? <p className="truncate text-xs text-text-secondary">{p.company}</p> : null}
+              {!p.isCompany && p.company ? (
+                <p className="truncate text-xs text-text-secondary">{p.company}</p>
+              ) : null}
             </div>
           </div>
           <button
@@ -718,6 +1125,54 @@ function PersonDetailModal({ person: p, onClose }: { person: DirectoryPerson; on
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {companyMembers.length > 0 ? (
+            <div className="mb-6">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Company members</h3>
+              <ul className="mt-2 space-y-1.5">
+                {companyMembers.map((m) => (
+                  <li key={m.id} className="text-sm text-text-primary">
+                    {m.contact_name ?? m.name}
+                    <span className="text-text-secondary"> · {m.email}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="mb-6">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              {p.isCompany ? "Company permissions" : "Workspace permissions"}
+            </h3>
+            <p className="mt-1 text-xs text-text-secondary">
+              {permissionsLabel(effective.source, effective.company)}
+              {p.isCompanyMember ? " — edit the company to change these for all members." : ""}
+            </p>
+            <div className="mt-3 max-h-[min(240px,34vh)] overflow-y-auto rounded-xl border border-border-light bg-surface-body/40 p-3">
+              <PermissionsEditor
+                dense
+                readOnly={!canEditPermissions}
+                segment={contact.segment}
+                flags={permDraft}
+                onChange={setPermDraft}
+              />
+            </div>
+            {canEditPermissions ? (
+              <button
+                type="button"
+                onClick={savePermissions}
+                className="mt-3 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white hover:opacity-95"
+              >
+                {permSaved ? "Saved" : "Save permissions"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openEdit}
+                className="mt-3 text-xs font-semibold text-accent hover:underline"
+              >
+                Edit company permissions →
+              </button>
+            )}
+          </div>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Projects &amp; permissions</h3>
           {access.length === 0 ? (
             <p className="mt-3 text-sm text-text-secondary">No project access in mock data for this person.</p>
@@ -781,7 +1236,16 @@ function PersonDetailModal({ person: p, onClose }: { person: DirectoryPerson; on
           )}
         </div>
 
-        <div className="shrink-0 border-t border-border-light px-5 py-3">
+        <div className="shrink-0 space-y-2 border-t border-border-light px-5 py-3">
+          {canEditClient ? (
+            <button
+              type="button"
+              onClick={openEdit}
+              className="w-full rounded-xl bg-accent py-2.5 text-sm font-semibold text-white hover:opacity-95"
+            >
+              {p.isCompanyMember ? "Edit company" : p.isCompany ? "Edit client & members" : "Edit client"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}

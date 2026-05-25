@@ -1,0 +1,73 @@
+{
+  "xlsxPath": "../Downloads/Connect Dots - Style, Color & Client Code Masterlist.xlsx",
+  "year": 2026,
+  "projects": [
+    {
+      "clientCode": "GG",
+      "status": "IN-PROGRESS",
+      "statusOverview": "Strike-offs in review — lead program",
+      "leadVendor": "Millworks Collective",
+      "leadTeamMember": "Jerry M",
+      "jobs": [
+        { "styleCode": "GGT148", "status": "In progress", "timeline": "olive" },
+        { "styleCode": "GGSW85", "status": "Upcoming", "timeline": "lagging" },
+        { "styleCode": "GGSH12", "status": "Upcoming", "timeline": "lagging" }
+      ]
+    },
+    {
+      "clientCode": "LNQ",
+      "status": "DELIVERED",
+      "statusOverview": "Delivered — fleece + tote program",
+      "leadVendor": "Millworks Collective",
+      "leadTeamMember": "Sam Rivera",
+      "jobs": [
+        { "styleCode": "LNQSW05", "status": "Completed", "timeline": "olive" },
+        { "styleCode": "LNQB01", "status": "Completed", "timeline": "olive" }
+      ]
+    },
+    {
+      "clientCode": "VOS",
+      "status": "IN-PROGRESS",
+      "statusOverview": "Bulk tee run in production",
+      "leadVendor": "Void Star Fabrics",
+      "leadTeamMember": "Jerry M",
+      "jobs": [
+        { "styleCode": "VOST08", "status": "In progress", "timeline": "olive" },
+        { "styleCode": "VOST01", "status": "Upcoming", "timeline": "lagging" }
+      ]
+    },
+    {
+      "clientCode": "HC",
+      "status": "PENDING",
+      "statusOverview": "Awaiting client assets",
+      "leadVendor": "Millworks Collective",
+      "leadTeamMember": "Jordan Lee",
+      "jobs": [
+        { "styleCode": "HCSW01", "status": "Upcoming", "timeline": "lagging" },
+        { "styleCode": "HCWT01", "status": "Upcoming", "timeline": "lagging" }
+      ]
+    },
+    {
+      "clientCode": "ESG",
+      "status": "IN DEVELOPMENT",
+      "statusOverview": "Headwear development",
+      "leadVendor": "Millworks Collective",
+      "leadTeamMember": "Sam Rivera",
+      "jobs": [
+        { "styleCode": "ESGH07", "status": "In progress", "timeline": "lagging" },
+        { "styleCode": "ESGH06", "status": "Upcoming", "timeline": "lagging" }
+      ]
+    },
+    {
+      "clientCode": "QOR",
+      "status": "IN-PROGRESS",
+      "statusOverview": "New legacy capsule",
+      "leadVendor": "Millworks Collective",
+      "leadTeamMember": "Jerry M",
+      "jobs": [
+        { "styleCode": "QORSW09", "status": "In progress", "timeline": "olive" },
+        { "styleCode": "QORT05", "status": "Upcoming", "timeline": "lagging" }
+      ]
+    }
+  ]
+}

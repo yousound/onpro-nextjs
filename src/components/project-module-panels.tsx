@@ -16,7 +16,14 @@ import {
   mergedInternalTeamRoster,
 } from "@/lib/internal-team-roster";
 import type { PeopleSegment } from "@/lib/mock/people";
-import { segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
+import { segmentBadgeSoftClass, segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
+import { loadContacts } from "@/lib/contacts-store";
+import { peopleForProject, type ProjectPersonRow } from "@/lib/project-people";
+import {
+  mergeRoleDrafts,
+  personListPermissionSummary,
+} from "@/lib/project-person-permissions";
+import { ProjectPersonPermissionsModal } from "@/components/project-person-permissions-modal";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
 import {
@@ -33,6 +40,8 @@ import {
   updateDyeTrack,
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
+import type { Contact } from "@/lib/types/contact";
+import { VendorStealthSelect, useProjectVendors } from "@/components/vendor-select";
 
 /** Shared chrome for stealth controls (width varies by control type — wide date inputs break native picker anchoring). */
 const stealthControlBase =
@@ -471,10 +480,12 @@ function RepeatableDyeCostingSections({
   headingBase,
   project,
   patch,
+  vendors,
 }: {
   headingBase: string;
   project: Project;
   patch?: ProjectPatchFn;
+  vendors: Contact[];
 }) {
   const tracks = resolveDyeCostingTracks(project);
   const save = patch;
@@ -518,10 +529,10 @@ function RepeatableDyeCostingSections({
             ) : undefined
           }
         >
-          <StealthMetaField
+          <VendorStealthSelect
             label="Vendor"
+            vendors={vendors}
             value={t.dye_vendor}
-            placeholder="Add dye vendor…"
             onCommit={(v) => save({ dye_costing_tracks: updateDyeTrack(tracks, t.id, { dye_vendor: v }) })}
           />
           <StealthDateRow
@@ -563,10 +574,12 @@ function RepeatablePrintEmbroiderySections({
   headingBase,
   project,
   patch,
+  vendors,
 }: {
   headingBase: string;
   project: Project;
   patch?: ProjectPatchFn;
+  vendors: Contact[];
 }) {
   const tracks = resolvePrintEmbroideryTracks(project);
   const save = patch;
@@ -616,10 +629,10 @@ function RepeatablePrintEmbroiderySections({
             ) : undefined
           }
         >
-          <StealthMetaField
+          <VendorStealthSelect
             label="Vendor"
+            vendors={vendors}
             value={t.print_embroidery_vendor}
-            placeholder="Add print / embroidery vendor…"
             onCommit={(v) =>
               save({
                 print_embroidery_costing_tracks: updatePrintEmbTrack(tracks, t.id, {
@@ -683,7 +696,15 @@ function RepeatablePrintEmbroiderySections({
   );
 }
 
-function RepeatableCostingExtraSections({ project, patch }: { project: Project; patch?: ProjectPatchFn }) {
+function RepeatableCostingExtraSections({
+  project,
+  patch,
+  vendors,
+}: {
+  project: Project;
+  patch?: ProjectPatchFn;
+  vendors: Contact[];
+}) {
   const tracks = resolveCostingExtraTracks(project);
   const save = patch;
 
@@ -738,10 +759,10 @@ function RepeatableCostingExtraSections({ project, patch }: { project: Project; 
               })
             }
           />
-          <StealthMetaField
+          <VendorStealthSelect
             label="Vendor"
+            vendors={vendors}
             value={t.vendor_name}
-            placeholder="Vendor optional"
             onCommit={(v) =>
               save({ costing_extra_tracks: updateCostingExtraTrack(tracks, t.id, { vendor_name: v }) })
             }
@@ -1162,8 +1183,60 @@ function PaymentsPanel({ project }: { project: Project }) {
 }
 
 function InvoicesPanel({ project }: { project: Project }) {
+  const [peopleFilter, setPeopleFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+
+  const peopleOptions = useMemo(() => {
+    const names = new Set<string>();
+    if (project.lead_team_member) names.add(project.lead_team_member);
+    if (project.lead_vendor) names.add(project.lead_vendor);
+    return ["all", ...Array.from(names)];
+  }, [project.lead_team_member, project.lead_vendor]);
+
+  const invoiceSections = ["Bulk invoices", "Sample invoices", "Tech pack / artwork"] as const;
+  const filteredSections =
+    typeFilter === "all"
+      ? invoiceSections
+      : invoiceSections.filter((t) => t.toLowerCase().includes(typeFilter.replace("_", " ")));
+
   return (
     <PanelShell>
+      {project.po_number ? (
+        <p className="mb-4 rounded-xl border border-violet-200 bg-violet-50/80 px-4 py-3 text-sm text-violet-950">
+          PO <span className="font-bold">{project.po_number}</span> flows to invoice creation (mock).
+        </p>
+      ) : null}
+      <SectionCard title="Filters">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-medium text-text-secondary">
+            People
+            <select
+              className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm"
+              value={peopleFilter}
+              onChange={(e) => setPeopleFilter(e.target.value)}
+            >
+              {peopleOptions.map((p) => (
+                <option key={p} value={p}>
+                  {p === "all" ? "All people" : p}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs font-medium text-text-secondary">
+            Invoice type
+            <select
+              className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+            >
+              <option value="all">All types</option>
+              <option value="bulk">Bulk</option>
+              <option value="sample">Sample</option>
+              <option value="tech">Tech pack / artwork</option>
+            </select>
+          </label>
+        </div>
+      </SectionCard>
       <SectionCard title="Invoice summary">
         <div className="grid gap-3 sm:grid-cols-3">
           <GrayRow>
@@ -1180,9 +1253,12 @@ function InvoicesPanel({ project }: { project: Project }) {
           </GrayRow>
         </div>
       </SectionCard>
-      {(["Bulk invoices", "Sample invoices", "Tech pack / artwork"] as const).map((title) => (
+      {filteredSections.map((title) => (
         <SectionCard key={title} title={title}>
-          <p className="text-sm text-text-secondary">No invoices yet for {project.name}.</p>
+          <p className="text-sm text-text-secondary">
+            No invoices yet for {project.name}
+            {peopleFilter !== "all" ? ` · filtered to ${peopleFilter}` : ""}.
+          </p>
           <button
             type="button"
             className="mt-4 w-full rounded-xl border-2 border-dashed border-accent/40 py-3 text-sm font-semibold text-accent hover:bg-violet-50"
@@ -1197,11 +1273,17 @@ function InvoicesPanel({ project }: { project: Project }) {
 
 function ApprovalsPanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
   const p = onPatchProject;
+  const vendors = useProjectVendors();
   return (
     <PanelShell hint={p ? <MockPersistHint /> : undefined}>
       <CostingOverviewSection title="Costing approvals" project={project} patch={p} />
-      <RepeatableDyeCostingSections headingBase="Dye approvals" project={project} patch={p} />
-      <RepeatablePrintEmbroiderySections headingBase="Print / embroidery / decoration" project={project} patch={p} />
+      <RepeatableDyeCostingSections headingBase="Dye approvals" project={project} patch={p} vendors={vendors} />
+      <RepeatablePrintEmbroiderySections
+        headingBase="Print / embroidery / decoration"
+        project={project}
+        patch={p}
+        vendors={vendors}
+      />
       <RepeatableBulkApprovalSections title="Bulk production approvals" project={project} patch={p} />
     </PanelShell>
   );
@@ -1209,12 +1291,18 @@ function ApprovalsPanel({ project, onPatchProject }: { project: Project; onPatch
 
 function CostingPanel({ project, onPatchProject }: { project: Project; onPatchProject?: ProjectPatchFn }) {
   const p = onPatchProject;
+  const vendors = useProjectVendors();
   return (
     <PanelShell hint={p ? <MockPersistHint /> : undefined}>
       <CostingOverviewSection title="Costing overview" project={project} patch={p} />
-      <RepeatableDyeCostingSections headingBase="Dyes" project={project} patch={p} />
-      <RepeatablePrintEmbroiderySections headingBase="Print / embroidery / decoration" project={project} patch={p} />
-      <RepeatableCostingExtraSections project={project} patch={p} />
+      <RepeatableDyeCostingSections headingBase="Dyes" project={project} patch={p} vendors={vendors} />
+      <RepeatablePrintEmbroiderySections
+        headingBase="Print / embroidery / decoration"
+        project={project}
+        patch={p}
+        vendors={vendors}
+      />
+      <RepeatableCostingExtraSections project={project} patch={p} vendors={vendors} />
     </PanelShell>
   );
 }
@@ -1718,27 +1806,25 @@ function ShippingModulePanel({ project, onPatchProject }: { project: Project; on
 
 const PEOPLE_SEGMENTS: PeopleSegment[] = ["team", "vendor", "client"];
 
-function mergeRoleDrafts(
-  raw: Partial<Record<PeopleSegment, Partial<ProjectPermissionFlags>>> | null,
-): Record<PeopleSegment, ProjectPermissionFlags> {
-  const base = {
-    team: defaultPermissionsForSegment("team"),
-    vendor: defaultPermissionsForSegment("vendor"),
-    client: defaultPermissionsForSegment("client"),
-  };
-  if (!raw) return base;
-  return {
-    team: { ...base.team, ...raw.team },
-    vendor: { ...base.vendor, ...raw.vendor },
-    client: { ...base.client, ...raw.client },
-  };
-}
-
 export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
   const [segment, setSegment] = useState<PeopleSegment>("team");
   const [drafts, setDrafts] = useState<Record<PeopleSegment, ProjectPermissionFlags>>(() => mergeRoleDrafts(null));
   const [hydrated, setHydrated] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState<ProjectPersonRow | null>(null);
+  const [permRevision, setPermRevision] = useState(0);
+
+  const projectPeople = useMemo(() => peopleForProject(project, loadContacts()), [project, permRevision]);
+  const contacts = useMemo(() => loadContacts(), [permRevision]);
+  const personSummaries = useMemo(() => {
+    if (!hydrated) return new Map<string, { text: string; hasOverride: boolean }>();
+    return new Map(
+      projectPeople.map((p) => [
+        p.key,
+        personListPermissionSummary(project.id, p, contacts, drafts),
+      ]),
+    );
+  }, [projectPeople, project.id, contacts, drafts, hydrated, permRevision]);
 
   useEffect(() => {
     const raw = readMockLs<Partial<Record<PeopleSegment, Partial<ProjectPermissionFlags>>>>(
@@ -1762,8 +1848,8 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
         <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">People &amp; access</h3>
         <p className="mt-2 max-w-2xl text-sm text-text-secondary">
           Default capabilities for each workspace segment on{" "}
-          <span className="font-semibold text-text-primary">{project.name}</span>. Invites from People let you tune permissions for that
-          email. Stored in this browser only (mock).
+          <span className="font-semibold text-text-primary">{project.name}</span>. These apply to everyone in that
+          segment on this project. Invites only send email — access is managed here.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           {PEOPLE_SEGMENTS.map((s) => (
@@ -1783,11 +1869,101 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
         </div>
       </section>
 
+      <SectionCard
+        title="People on this project"
+        headerExtra={
+          <Link
+            href="/people"
+            className="text-xs font-semibold text-accent hover:underline"
+          >
+            Manage in People →
+          </Link>
+        }
+      >
+        {projectPeople.length === 0 ? (
+          <p className="text-sm text-text-secondary">
+            No one is linked to this project yet. Assign leads on the Internal tab or add people from{" "}
+            <Link href="/people" className="font-semibold text-accent hover:underline">
+              People
+            </Link>
+            .
+          </p>
+        ) : (
+          <ul className="-mx-2 divide-y divide-border-light">
+            {projectPeople.map((person) => {
+              const summary = personSummaries.get(person.key);
+              return (
+                <li key={person.key}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPerson(person)}
+                    className="flex w-full gap-3 rounded-lg px-2 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-surface-body/80"
+                    aria-label={`Edit permissions for ${person.displayName}`}
+                  >
+                    <span
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-xs font-bold text-slate-800"
+                      aria-hidden
+                    >
+                      {clientInitials(person.displayName)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-semibold text-text-primary group-hover:text-accent">
+                          {person.displayName}
+                        </span>
+                        <span
+                          className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(person.segment)}`}
+                        >
+                          {segmentLabel(person.segment)}
+                        </span>
+                        {summary?.hasOverride ? (
+                          <span className="inline-flex shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-900 ring-1 ring-violet-300/70">
+                            Custom
+                          </span>
+                        ) : null}
+                      </div>
+                      {person.subtitle ? (
+                        <p className="mt-0.5 truncate text-sm text-text-secondary">{person.subtitle}</p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-text-secondary">
+                        <span className="font-medium text-text-primary">{person.roleOnProject}</span>
+                        {summary ? (
+                          <span className="text-text-secondary"> · {summary.text}</span>
+                        ) : null}
+                      </p>
+                      <p className="mt-1 text-[11px] font-semibold text-accent">Edit permissions →</p>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </SectionCard>
+
+      {selectedPerson ? (
+        <ProjectPersonPermissionsModal
+          project={project}
+          person={selectedPerson}
+          roleDefaults={drafts}
+          onClose={() => setSelectedPerson(null)}
+          onSaved={() => setPermRevision((n) => n + 1)}
+        />
+      ) : null}
+
       <SectionCard title={`Defaults · ${segmentLabel(segment)}`}>
         {!hydrated ? (
           <p className="text-sm text-text-secondary">Loading…</p>
         ) : (
           <>
+            <p className="text-sm text-text-secondary">
+              Baseline for everyone in the {segmentLabel(segment).toLowerCase()} segment on this project. Override per
+              person from{" "}
+              <Link href="/people" className="font-semibold text-accent hover:underline">
+                People
+              </Link>
+              .
+            </p>
             <PermissionsEditor
               segment={segment}
               flags={flags}
@@ -1823,17 +1999,6 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
           </>
         )}
       </SectionCard>
-
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-        <p className="text-sm font-semibold text-text-primary">Per-person invites</p>
-        <p className="mt-1 text-sm text-text-secondary">
-          Open{" "}
-          <Link href="/people" className="font-semibold text-accent hover:underline">
-            People
-          </Link>{" "}
-          to invite by email and set that person&apos;s permissions before they accept.
-        </p>
-      </div>
     </PanelShell>
   );
 }
@@ -1855,14 +2020,6 @@ export function ProjectModuleRouter({
       return <PaymentsPanel project={project} />;
     case "invoices":
       return <InvoicesPanel project={project} />;
-    case "approvals":
-      return <ApprovalsPanel project={project} onPatchProject={onPatchProject} />;
-    case "costing":
-      return <CostingPanel project={project} onPatchProject={onPatchProject} />;
-    case "cs":
-      return <CsPanel project={project} onPatchProject={onPatchProject} />;
-    case "bulk_production":
-      return <BulkProductionPanel project={project} onPatchProject={onPatchProject} />;
     case "shipping":
       return <ShippingModulePanel project={project} onPatchProject={onPatchProject} />;
     case "people_access":

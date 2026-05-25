@@ -4,21 +4,25 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Project, ProjectStatus } from "@/lib/types/project";
-import type { ProjectJob, JobScopeKind, WipStep, WipStepState } from "@/lib/types/wip";
-import { dateInputToIso, formatShortDate, isoToDateInput, normalizeDurationShort } from "@/lib/format";
+import type {
+  JobDetailsFocus,
+  ProjectJob,
+  JobScopeKind,
+  WipStep,
+} from "@/lib/types/wip";
+import { wipStepToSection, jobTimelineEditorLabel } from "@/lib/types/wip";
+import { dateInputToIso, formatShortDate, isoToDateInput } from "@/lib/format";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import {
-  JOB_STATUS_OPTIONS,
-  WIP_STEP_STATES,
   loadProjectJobs,
-  loadProjectTimelineSteps,
-  patchProjectStep,
   saveProjectJobs,
-  saveProjectTimelineSteps,
 } from "@/lib/project-wip-edits";
+import { loadContacts, vendorContacts } from "@/lib/contacts-store";
+import { clientCodeByName } from "@/lib/reference/client-codes";
+import { normalizeJob } from "@/lib/job-defaults";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { parseProjectModuleTab, PROJECT_MODULE_TABS } from "@/lib/project-modules";
-import { CONNECT_DOTS_PROJECT_WIP_STEPS } from "@/lib/wip-project-timeline";
+import { buildUpcomingJobTimeline } from "@/lib/wip-project-timeline";
 import { ContentHeader } from "@/components/content-header";
 import {
   InternalDevelopmentPanel,
@@ -26,6 +30,8 @@ import {
   ProjectModuleRouter,
 } from "@/components/project-module-panels";
 import { WipProgressSummary, WipTimeline } from "@/components/wip-timeline";
+import { JobTimelineStepsEditor } from "@/components/job-timeline-steps-editor";
+import { JobDetailsModal } from "@/components/job-details-modal";
 
 const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "IN DEVELOPMENT",
@@ -64,63 +70,6 @@ function jobStatusClass(status: ProjectJob["status"]): string {
   if (status === "In progress") return "bg-violet-100 text-violet-800";
   if (status === "Completed") return "bg-emerald-100 text-emerald-800";
   return "bg-slate-100 text-slate-600";
-}
-
-function stepStateLabel(state: WipStepState): string {
-  if (state === "completed") return "Done";
-  if (state === "in_progress") return "In progress";
-  if (state === "na") return "N/A";
-  return "Upcoming";
-}
-
-/** Row chrome for WIP steps in edit modals — reflects selected status. */
-function wipStepModalRowClass(state: WipStepState): string {
-  switch (state) {
-    case "completed":
-      return "border-emerald-300/80 bg-emerald-50/95 shadow-sm shadow-emerald-900/5";
-    case "in_progress":
-      return "border-violet-300/80 bg-violet-50/95 shadow-sm shadow-violet-900/5";
-    case "na":
-      return "border-slate-300 bg-slate-100/90 shadow-sm shadow-slate-900/5";
-    default:
-      return "border-border-light bg-surface-body/40";
-  }
-}
-
-function stepStateSelectClass(state: WipStepState): string {
-  switch (state) {
-    case "completed":
-      return "border-emerald-300 bg-emerald-50/90 text-emerald-950";
-    case "in_progress":
-      return "border-violet-300 bg-violet-50/90 text-violet-950";
-    case "na":
-      return "border-slate-300 bg-slate-100 text-slate-800";
-    default:
-      return "border-border-light bg-white text-text-primary";
-  }
-}
-
-function StepStateSelect({
-  value,
-  onChange,
-}: {
-  value: WipStepState;
-  onChange: (state: WipStepState) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as WipStepState)}
-      className={`rounded-lg border px-2 py-1 text-xs font-semibold focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 ${stepStateSelectClass(value)}`}
-      aria-label="Step status"
-    >
-      {WIP_STEP_STATES.map((s) => (
-        <option key={s} value={s}>
-          {stepStateLabel(s)}
-        </option>
-      ))}
-    </select>
-  );
 }
 
 function ModalShell({
@@ -163,7 +112,7 @@ function ModalShell({
   );
 }
 
-const JOB_COL_COUNT = 9;
+const JOB_COL_COUNT = 10;
 
 type JobScopeFilter = "all" | JobScopeKind;
 
@@ -180,19 +129,34 @@ function JobScopeBadge({ kind }: { kind: JobScopeKind }) {
   );
 }
 
-function JobTableRow({ job, onOpen }: { job: ProjectJob; onOpen: () => void }) {
+function JobTableRow({
+  job,
+  selected,
+  onSelect,
+  onOpenDetails,
+}: {
+  job: ProjectJob;
+  selected: boolean;
+  onSelect: (jobId: string) => void;
+  onOpenDetails: (jobId: string) => void;
+}) {
   return (
     <tr
       role="button"
       tabIndex={0}
-      onClick={onOpen}
+      onClick={() => onSelect(job.id)}
+      onDoubleClick={() => onOpenDetails(job.id)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpen();
+          onSelect(job.id);
         }
       }}
-      className="cursor-pointer border-b border-border-light bg-white transition hover:bg-slate-50/80"
+      className={`cursor-pointer border-b border-border-light transition hover:bg-slate-50/80 ${
+        selected
+          ? "border-l-4 border-l-accent bg-violet-50/60"
+          : "border-l-4 border-l-transparent bg-white"
+      }`}
     >
       <td className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -224,16 +188,40 @@ function JobTableRow({ job, onOpen }: { job: ProjectJob; onOpen: () => void }) {
       <td className="hidden whitespace-nowrap px-4 py-3 text-text-secondary md:table-cell">
         {formatShortDate(job.updated_at)}
       </td>
+      <td className="whitespace-nowrap px-4 py-3">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDetails(job.id);
+          }}
+          className="rounded-lg border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-violet-50"
+        >
+          Job Details
+        </button>
+      </td>
     </tr>
   );
 }
 
-function cloneSteps(steps: WipStep[]): WipStep[] {
-  return steps.map((s) => ({ ...s }));
-}
-
-function cloneJob(job: ProjectJob): ProjectJob {
-  return { ...job, timeline: cloneSteps(job.timeline) };
+function createNewJobSeed(project: Project, jobs: ProjectJob[]): ProjectJob {
+  const template = jobs[0]?.timeline ?? buildUpcomingJobTimeline();
+  return {
+    id: `job-${project.id}-${Date.now()}`,
+    project_id: project.id,
+    name: "",
+    subtitle: "",
+    type: "",
+    lead_vendor: "",
+    category: "",
+    style_number: "",
+    status: "Upcoming",
+    due_date: null,
+    updated_at: new Date().toISOString(),
+    scope_kind: "original",
+    scope_note: "",
+    timeline: template.map((s) => ({ ...s })),
+  };
 }
 
 export function ProjectJobsView({ project }: { project: Project }) {
@@ -243,7 +231,6 @@ export function ProjectJobsView({ project }: { project: Project }) {
 
   const [projectPatch, setProjectPatch] = useState<Partial<Project>>({});
   const [jobs, setJobs] = useState<ProjectJob[]>([]);
-  const [projectTimeline, setProjectTimeline] = useState<WipStep[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [editModal, setEditModal] = useState<EditModal>(null);
   const [activeModule, setActiveModule] = useState<ProjectModuleId>("details");
@@ -257,8 +244,10 @@ export function ProjectJobsView({ project }: { project: Project }) {
     status_overview: "",
     status_update: "",
   });
-  const [draftTimeline, setDraftTimeline] = useState<WipStep[]>([]);
-  const [draftJob, setDraftJob] = useState<ProjectJob | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [jobDetailsFocus, setJobDetailsFocus] = useState<JobDetailsFocus | null>(null);
+  const [timelineStepsOpen, setTimelineStepsOpen] = useState(false);
+  const [newJobSeed, setNewJobSeed] = useState<ProjectJob | null>(null);
   const [jobScopeFilter, setJobScopeFilter] = useState<JobScopeFilter>("all");
 
   useEffect(() => {
@@ -285,17 +274,40 @@ export function ProjectJobsView({ project }: { project: Project }) {
     const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
     const patch = saved && typeof saved === "object" ? saved : {};
     setProjectPatch(patch);
-    setJobs(loadProjectJobs(project.id));
+    const mergedProject = { ...project, ...patch };
+    const loadedJobs = loadProjectJobs(project.id, mergedProject);
+    setJobs(loadedJobs);
+    const savedJobId = readMockLs<string>(MOCK_LS.selectedJobId(project.id));
+    const validSaved =
+      typeof savedJobId === "string" && loadedJobs.some((j) => j.id === savedJobId);
+    setSelectedJobId(validSaved ? savedJobId : loadedJobs[0]?.id ?? null);
     setHydrated(true);
   }, [project, project.id]);
 
   const merged = useMemo(() => ({ ...project, ...projectPatch }), [project, projectPatch]);
 
+  const clientCode = useMemo(
+    () => clientCodeByName(merged.client.name) ?? "GG",
+    [merged.client.name],
+  );
+
+  const vendors = useMemo(() => vendorContacts(loadContacts()), []);
+
+  const selectedJob = useMemo(
+    () => jobs.find((j) => j.id === selectedJobId) ?? null,
+    [jobs, selectedJobId],
+  );
+
   useEffect(() => {
-    if (!hydrated) return;
-    if (jobs.length > 0 && jobs[0].project_id !== project.id) return;
-    setProjectTimeline(loadProjectTimelineSteps(project.id, merged, jobs));
-  }, [hydrated, jobs, merged, project.id]);
+    if (!hydrated || jobs.length === 0) {
+      if (jobs.length === 0) setSelectedJobId(null);
+      return;
+    }
+    if (selectedJobId && jobs.some((j) => j.id === selectedJobId)) return;
+    const nextId = jobs[0]!.id;
+    setSelectedJobId(nextId);
+    writeMockLs(MOCK_LS.selectedJobId(project.id), nextId);
+  }, [hydrated, jobs, selectedJobId, project.id]);
 
   const persistProject = useCallback(
     (next: Partial<Project>) => {
@@ -317,24 +329,6 @@ export function ProjectJobsView({ project }: { project: Project }) {
     [project.id],
   );
 
-  const persistTimeline = useCallback((steps: WipStep[]) => {
-    setProjectTimeline(steps);
-    saveProjectTimelineSteps(project.id, steps);
-  }, [project.id]);
-
-  const handleTimelineDurationChange = useCallback(
-    (stepId: string, durationShort: string) => {
-      setProjectTimeline((prev) => {
-        const next = patchProjectStep(prev, stepId, {
-          durationShort: durationShort || undefined,
-        });
-        saveProjectTimelineSteps(project.id, next);
-        return next;
-      });
-    },
-    [project.id],
-  );
-
   useEffect(() => {
     if (editModal?.kind !== "project") return;
     setDraftProject({
@@ -346,43 +340,12 @@ export function ProjectJobsView({ project }: { project: Project }) {
       status_overview: merged.status_overview ?? "",
       status_update: isoToDateInput(merged.status_update_date),
     });
-    setDraftTimeline(cloneSteps(projectTimeline));
-  }, [editModal, merged, projectTimeline]);
+  }, [editModal, merged]);
 
-  useEffect(() => {
-    if (editModal?.kind === "job") {
-      const job = jobs.find((j) => j.id === editModal.jobId);
-      setDraftJob(job ? cloneJob(job) : null);
-      return;
-    }
-    if (editModal?.kind === "job-new") {
-      const template =
-        jobs[0]?.timeline ??
-        CONNECT_DOTS_PROJECT_WIP_STEPS.map((def) => ({
-          id: def.id,
-          label: def.label,
-          durationShort: def.durationShort,
-          durationLabel: def.durationLabel,
-          state: "upcoming" as const,
-        }));
-      setDraftJob({
-        id: `job-${project.id}-${Date.now()}`,
-        project_id: project.id,
-        name: "",
-        subtitle: "",
-        type: "",
-        lead_vendor: "",
-        category: "",
-        style_number: "",
-        status: "Upcoming",
-        due_date: null,
-        updated_at: new Date().toISOString(),
-        scope_kind: "original",
-        scope_note: "",
-        timeline: cloneSteps(template),
-      });
-    }
-  }, [editModal, jobs, project.id]);
+  function selectJob(jobId: string) {
+    setSelectedJobId(jobId);
+    writeMockLs(MOCK_LS.selectedJobId(project.id), jobId);
+  }
 
   function openProjectEdit() {
     setEditModal({ kind: "project" });
@@ -390,15 +353,65 @@ export function ProjectJobsView({ project }: { project: Project }) {
 
   function openJobEdit(jobId: string) {
     setEditModal({ kind: "job", jobId });
+    setJobDetailsFocus(null);
+  }
+
+  function openJobDetails(jobId: string, focus: JobDetailsFocus | null = null) {
+    setEditModal({ kind: "job", jobId });
+    setJobDetailsFocus(focus);
   }
 
   function openNewJob() {
+    setNewJobSeed(createNewJobSeed(project, jobs));
     setEditModal({ kind: "job-new" });
+    setJobDetailsFocus(null);
   }
 
   function closeModal() {
     setEditModal(null);
-    setDraftJob(null);
+    setNewJobSeed(null);
+    setJobDetailsFocus(null);
+  }
+
+  function handleJobDurationChange(stepId: string, durationShort: string) {
+    if (!selectedJobId) return;
+    persistJobs((prev) =>
+      prev.map((j) => {
+        if (j.id !== selectedJobId) return j;
+        return {
+          ...j,
+          timeline: j.timeline.map((step) =>
+            step.id === stepId ? { ...step, durationShort: durationShort || undefined } : step,
+          ),
+        };
+      }),
+    );
+  }
+
+  function handleJobTimelineChange(timeline: WipStep[]) {
+    if (!selectedJobId) return;
+    persistJobs((prev) =>
+      prev.map((j) => (j.id === selectedJobId ? { ...j, timeline, updated_at: new Date().toISOString() } : j)),
+    );
+  }
+
+  function handleTimelineStepClick(stepId: string) {
+    if (!selectedJobId) return;
+    const step = jobs.find((j) => j.id === selectedJobId)?.timeline.find((s) => s.id === stepId);
+    openJobDetails(selectedJobId, {
+      section: wipStepToSection(stepId, step?.opensIn),
+      focusStepId: stepId,
+    });
+  }
+
+  function handleSaveJob(saved: ProjectJob) {
+    if (editModal?.kind === "job-new") {
+      persistJobs((prev) => [...prev, saved]);
+      selectJob(saved.id);
+    } else {
+      persistJobs((prev) => prev.map((j) => (j.id === saved.id ? saved : j)));
+    }
+    closeModal();
   }
 
   function saveProjectModal(e: FormEvent) {
@@ -412,72 +425,21 @@ export function ProjectJobsView({ project }: { project: Project }) {
       status_overview: draftProject.status_overview.trim() || null,
       status_update_date: dateInputToIso(draftProject.status_update),
     });
-    persistTimeline(draftTimeline);
     closeModal();
-  }
-
-  function saveJobModal(e: FormEvent) {
-    e.preventDefault();
-    if (!draftJob) return;
-    const note = draftJob.scope_note?.trim();
-    const saved: ProjectJob = {
-      ...draftJob,
-      scope_kind: draftJob.scope_kind ?? "original",
-      scope_note: note ? note : undefined,
-      updated_at: new Date().toISOString(),
-    };
-    if (editModal?.kind === "job-new") {
-      persistJobs((prev) => [...prev, saved]);
-    } else {
-      persistJobs((prev) => prev.map((j) => (j.id === saved.id ? saved : j)));
-    }
-    closeModal();
-  }
-
-  function updateDraftJobStep(stepId: string, state: WipStepState) {
-    setDraftJob((prev) =>
-      prev
-        ? {
-            ...prev,
-            timeline: prev.timeline.map((s) => (s.id === stepId ? { ...s, state } : s)),
-          }
-        : null,
-    );
-  }
-
-  function updateDraftJobStepLabel(stepId: string, label: string) {
-    setDraftJob((prev) =>
-      prev
-        ? {
-            ...prev,
-            timeline: prev.timeline.map((s) => (s.id === stepId ? { ...s, label } : s)),
-          }
-        : null,
-    );
-  }
-
-  function addDraftJobStep() {
-    setDraftJob((prev) => {
-      if (!prev) return null;
-      const id = `wip-${project.id}-${Date.now()}`;
-      return {
-        ...prev,
-        timeline: [...prev.timeline, { id, label: "New step", state: "upcoming" as const }],
-      };
-    });
-  }
-
-  function removeDraftJobStep(stepId: string) {
-    setDraftJob((prev) => {
-      if (!prev || prev.timeline.length <= 1) return prev;
-      return { ...prev, timeline: prev.timeline.filter((s) => s.id !== stepId) };
-    });
   }
 
   const filteredJobs = useMemo(() => {
     if (jobScopeFilter === "all") return jobs;
     return jobs.filter((j) => effectiveJobScope(j) === jobScopeFilter);
   }, [jobs, jobScopeFilter]);
+
+  const modalJob = useMemo(() => {
+    if (editModal?.kind === "job-new") return newJobSeed;
+    if (editModal?.kind === "job") {
+      return jobs.find((j) => j.id === editModal.jobId) ?? null;
+    }
+    return null;
+  }, [editModal, jobs, newJobSeed]);
 
   if (!hydrated) {
     return (
@@ -513,7 +475,8 @@ export function ProjectJobsView({ project }: { project: Project }) {
             )
           </h2>
           <p className="text-xs text-text-secondary">
-            Scope filters separate original deliverables from add-ons on the same project. Click a row to edit.
+            Scope filters separate original deliverables from add-ons on the same project. Single tap a row to
+            update the timeline; double tap or Job Details opens the modal.
           </p>
         </div>
         <div
@@ -560,6 +523,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
                 <th className="w-28 max-w-[7rem] px-4 py-3">Progress</th>
                 <th className="hidden px-4 py-3 sm:table-cell">Due date</th>
                 <th className="hidden px-4 py-3 md:table-cell">Updated</th>
+                <th className="whitespace-nowrap px-4 py-3">Details</th>
               </tr>
             </thead>
             <tbody className="bg-white">
@@ -577,7 +541,13 @@ export function ProjectJobsView({ project }: { project: Project }) {
                 </tr>
               ) : (
                 filteredJobs.map((job) => (
-                  <JobTableRow key={job.id} job={job} onOpen={() => openJobEdit(job.id)} />
+                  <JobTableRow
+                    key={job.id}
+                    job={job}
+                    selected={job.id === selectedJobId}
+                    onSelect={selectJob}
+                    onOpenDetails={openJobEdit}
+                  />
                 ))
               )}
             </tbody>
@@ -589,7 +559,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
             onClick={openNewJob}
             className="text-sm font-semibold text-accent hover:underline"
           >
-            + Add job
+            + New job
           </button>
         </div>
       </div>
@@ -614,6 +584,11 @@ export function ProjectJobsView({ project }: { project: Project }) {
         <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 pt-4 pb-2">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">{merged.name}</h1>
+            {merged.po_number ? (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-text-secondary">
+                PO {merged.po_number}
+              </span>
+            ) : null}
             <span
               className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide ${statusBadgeClass(merged.status)}`}
             >
@@ -664,15 +639,66 @@ export function ProjectJobsView({ project }: { project: Project }) {
             <div className="space-y-5">
               <ProjectDetailsClientCard project={merged} />
               <section className="shrink-0 py-1">
-                <h2 className="mb-1 text-sm font-semibold text-text-primary">Project timeline</h2>
-                <p className="mb-3 text-xs text-text-secondary">
-                  Each step completes only when every job has completed that step; the highlighted step is the earliest one still open on any line.
-                </p>
-                <WipTimeline
-                  steps={projectTimeline}
-                  editableDurations={hydrated}
-                  onDurationChange={handleTimelineDurationChange}
-                />
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-semibold text-text-primary">Job timeline</h2>
+                    <p className="mt-1 text-xs text-text-secondary">
+                      Progress for the selected job. Tap a step to jump to its fields in Job Details; use Manage steps for order and custom steps.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedJob ? (
+                      <button
+                        type="button"
+                        onClick={() => setTimelineStepsOpen((open) => !open)}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                          timelineStepsOpen
+                            ? "border-accent bg-violet-50 text-accent"
+                            : "border-border-light bg-white text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        {timelineStepsOpen ? "Hide steps" : "Manage steps"}
+                      </button>
+                    ) : null}
+                    {jobs.length >= 1 ? (
+                      <label className="flex items-center gap-2 text-xs font-medium text-text-secondary">
+                        Job
+                        <select
+                          className="rounded-lg border border-border-light bg-white px-3 py-1.5 text-sm font-semibold text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                          value={selectedJobId ?? ""}
+                          onChange={(e) => selectJob(e.target.value)}
+                        >
+                          {jobs.map((j) => (
+                            <option key={j.id} value={j.id}>
+                              {j.name || "Untitled job"}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                  </div>
+                </div>
+                {selectedJob ? (
+                  <>
+                    <WipTimeline
+                      steps={selectedJob.timeline}
+                      editableDurations
+                      onDurationChange={handleJobDurationChange}
+                      onStepClick={handleTimelineStepClick}
+                    />
+                    {timelineStepsOpen ? (
+                      <div className="mt-4">
+                        <JobTimelineStepsEditor
+                          jobLabel={jobTimelineEditorLabel(selectedJob)}
+                          steps={selectedJob.timeline}
+                          onChange={handleJobTimelineChange}
+                        />
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-sm text-text-secondary">Add a job to see its timeline.</p>
+                )}
               </section>
               {jobsTableSection}
             </div>
@@ -767,62 +793,6 @@ export function ProjectJobsView({ project }: { project: Project }) {
                   onChange={(e) => setDraftProject((d) => ({ ...d, status_overview: e.target.value }))}
                 />
               </label>
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Project timeline steps
-                </h3>
-                <ul className="mt-2 space-y-2">
-                  {draftTimeline.map((s, stepIndex) => (
-                    <li
-                      key={s.id}
-                      className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${wipStepModalRowClass(s.state)}`}
-                    >
-                      <span className="min-w-0 flex-1 text-text-primary">{s.label}</span>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {stepIndex < draftTimeline.length - 1 ? (
-                          <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
-                            Days →
-                            <input
-                              type="text"
-                              className="w-16 rounded-lg border border-border-light bg-white px-2 py-1 text-xs font-semibold tabular-nums text-text-primary"
-                              placeholder="1d"
-                              value={s.durationShort ?? ""}
-                              onChange={(e) =>
-                                setDraftTimeline((steps) =>
-                                  steps.map((step) =>
-                                    step.id === s.id
-                                      ? { ...step, durationShort: e.target.value || undefined }
-                                      : step,
-                                  ),
-                                )
-                              }
-                              onBlur={(e) => {
-                                const v = e.target.value.trim();
-                                if (!v) return;
-                                const normalized = normalizeDurationShort(v);
-                                if (normalized === v) return;
-                                setDraftTimeline((steps) =>
-                                  steps.map((step) =>
-                                    step.id === s.id ? { ...step, durationShort: normalized } : step,
-                                  ),
-                                );
-                              }}
-                            />
-                          </label>
-                        ) : null}
-                        <StepStateSelect
-                          value={s.state}
-                          onChange={(state) =>
-                            setDraftTimeline((steps) =>
-                              steps.map((step) => (step.id === s.id ? { ...step, state } : step)),
-                            )
-                          }
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
             </div>
             <div className="flex shrink-0 justify-end gap-2 border-t border-border-light px-5 py-4">
               <button
@@ -843,192 +813,18 @@ export function ProjectJobsView({ project }: { project: Project }) {
         </ModalShell>
       ) : null}
 
-      {(editModal?.kind === "job" || editModal?.kind === "job-new") && draftJob ? (
-        <ModalShell
-          titleId="edit-job-title"
-          title={editModal.kind === "job-new" ? "Add job" : `Edit job — ${draftJob.name || "Untitled"}`}
-          description={`Saved in this browser — ${MOCK_LS.projectJobs(project.id)}`}
+      {modalJob ? (
+        <JobDetailsModal
+          project={merged}
+          job={normalizeJob(modalJob, merged)}
+          allJobs={jobs}
+          clientCode={clientCode}
+          vendors={vendors}
+          focus={jobDetailsFocus ?? undefined}
+          isNew={editModal?.kind === "job-new"}
           onClose={closeModal}
-        >
-          <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveJobModal}>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              <label className={labelClass}>
-                Job name
-                <input
-                  className={fieldClass}
-                  value={draftJob.name}
-                  onChange={(e) => setDraftJob((j) => (j ? { ...j, name: e.target.value } : j))}
-                />
-              </label>
-              <label className={labelClass}>
-                Subtitle
-                <input
-                  className={fieldClass}
-                  value={draftJob.subtitle}
-                  onChange={(e) => setDraftJob((j) => (j ? { ...j, subtitle: e.target.value } : j))}
-                />
-              </label>
-              <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                  Scope on project
-                </p>
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Mark add-ons when extra work lands after invoicing but stays on the same commercial storyline (mock —
-                  no invoice wiring yet).
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <label className={labelClass}>
-                    Kind
-                    <select
-                      className={fieldClass}
-                      value={draftJob.scope_kind ?? "original"}
-                      onChange={(e) =>
-                        setDraftJob((j) =>
-                          j ? { ...j, scope_kind: e.target.value as JobScopeKind } : j,
-                        )
-                      }
-                    >
-                      <option value="original">Original scope</option>
-                      <option value="addon">Add-on / change order</option>
-                    </select>
-                  </label>
-                  <label className={`${labelClass} sm:col-span-2`}>
-                    Scope note (optional)
-                    <input
-                      className={fieldClass}
-                      placeholder="e.g. +50 units — same invoice bucket"
-                      value={draftJob.scope_note ?? ""}
-                      onChange={(e) => setDraftJob((j) => (j ? { ...j, scope_note: e.target.value } : j))}
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  Type
-                  <input
-                    className={fieldClass}
-                    value={draftJob.type}
-                    onChange={(e) => setDraftJob((j) => (j ? { ...j, type: e.target.value } : j))}
-                  />
-                </label>
-                <label className={labelClass}>
-                  Status
-                  <select
-                    className={fieldClass}
-                    value={draftJob.status}
-                    onChange={(e) =>
-                      setDraftJob((j) =>
-                        j ? { ...j, status: e.target.value as ProjectJob["status"] } : j,
-                      )
-                    }
-                  >
-                    {JOB_STATUS_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label className={labelClass}>
-                Lead vendor
-                <input
-                  className={fieldClass}
-                  value={draftJob.lead_vendor}
-                  onChange={(e) => setDraftJob((j) => (j ? { ...j, lead_vendor: e.target.value } : j))}
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  Category
-                  <input
-                    className={fieldClass}
-                    value={draftJob.category}
-                    onChange={(e) => setDraftJob((j) => (j ? { ...j, category: e.target.value } : j))}
-                  />
-                </label>
-                <label className={labelClass}>
-                  Style #
-                  <input
-                    className={fieldClass}
-                    value={draftJob.style_number}
-                    onChange={(e) => setDraftJob((j) => (j ? { ...j, style_number: e.target.value } : j))}
-                  />
-                </label>
-              </div>
-              <label className={labelClass}>
-                Due date
-                <input
-                  type="date"
-                  className={fieldClass}
-                  value={isoToDateInput(draftJob.due_date)}
-                  onChange={(e) =>
-                    setDraftJob((j) => (j ? { ...j, due_date: dateInputToIso(e.target.value) } : j))
-                  }
-                />
-              </label>
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Job timeline steps
-                </h3>
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Rename steps, set status, add rows, or remove extras — Save writes to this browser (mock).
-                </p>
-                <ul className="mt-3 space-y-2">
-                  {draftJob.timeline.map((s) => (
-                    <li
-                      key={s.id}
-                      className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 transition-colors sm:flex-nowrap ${wipStepModalRowClass(s.state)}`}
-                    >
-                      <input
-                        type="text"
-                        aria-label={`Step name: ${s.label}`}
-                        className="min-w-0 flex-1 rounded-lg border border-border-light bg-white px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-                        value={s.label}
-                        onChange={(e) => updateDraftJobStepLabel(s.id, e.target.value)}
-                      />
-                      <div className="flex shrink-0 items-center gap-2">
-                        <StepStateSelect value={s.state} onChange={(state) => updateDraftJobStep(s.id, state)} />
-                        <button
-                          type="button"
-                          disabled={draftJob.timeline.length <= 1}
-                          onClick={() => removeDraftJobStep(s.id)}
-                          className="rounded-lg px-2 py-1 text-xs font-semibold text-text-secondary hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={`Remove step ${s.label}`}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={addDraftJobStep}
-                  className="mt-3 text-sm font-semibold text-accent hover:underline"
-                >
-                  + Add WIP step
-                </button>
-              </div>
-            </div>
-            <div className="flex shrink-0 justify-end gap-2 border-t border-border-light px-5 py-4">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-text-secondary hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-              >
-                Save
-              </button>
-            </div>
-          </form>
-        </ModalShell>
+          onSave={handleSaveJob}
+        />
       ) : null}
     </div>
   );

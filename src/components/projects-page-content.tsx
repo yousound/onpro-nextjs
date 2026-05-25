@@ -19,6 +19,9 @@ import {
   mergeProjectLists,
   readSessionProjects,
 } from "@/lib/mock/project-session";
+import { clientListContacts, loadContacts } from "@/lib/contacts-store";
+import { clientCodeByName } from "@/lib/reference/client-codes";
+import { collectAllPoNumbers, generatePoNumber } from "@/lib/po-number";
 
 const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "IN DEVELOPMENT",
@@ -89,6 +92,7 @@ function emptyProjectRecord(
     name,
     description,
     project_number: projectNumber,
+    po_number: null,
     project_hand_off_date: null,
     due_date: dueDate,
     client,
@@ -164,17 +168,26 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   const [clientSelect, setClientSelect] = useState<string>(() => String(initialProjects[0]?.client.id ?? ""));
   const [newClientName, setNewClientName] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("PENDING");
-  const [projectNumber, setProjectNumber] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [description, setDescription] = useState("");
+
+  const directoryClients = useMemo(() => clientListContacts(loadContacts()), []);
 
   const k = useMemo(() => computeProjectKpis(projects), [projects]);
 
   const clientsSorted = useMemo(() => {
-    const m = new Map<number, string>();
-    for (const p of projects) m.set(p.client.id, p.client.name);
-    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [projects]);
+    const fromProjects = new Map<number, string>();
+    for (const p of projects) fromProjects.set(p.client.id, p.client.name);
+    const fromDirectory = directoryClients.map((c) => ({
+      id: c.id,
+      name: c.name,
+      code: c.company_code,
+    }));
+    if (fromDirectory.length > 0) {
+      return fromDirectory.map((c) => [c.id, c.name, c.code] as const);
+    }
+    return [...fromProjects.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => [String(id), name, ""] as const);
+  }, [projects, directoryClients]);
 
   const resetForm = useCallback(() => {
     const firstId = clientsSorted[0]?.[0];
@@ -182,7 +195,6 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     setClientSelect(firstId != null ? String(firstId) : NEW_CLIENT);
     setNewClientName("");
     setStatus("PENDING");
-    setProjectNumber("");
     setDueDate("");
     setDescription("");
   }, [clientsSorted]);
@@ -211,29 +223,29 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     if (!trimmedName) return;
 
     let client: Client;
+    let clientCode = "XX";
     if (clientSelect === NEW_CLIENT) {
       const cn = newClientName.trim();
       if (!cn) return;
       const maxClient = Math.max(0, ...projects.map((p) => p.client.id));
       client = { id: maxClient + 1, name: cn, avatar_url: null };
+      clientCode = clientCodeByName(cn) ?? cn.slice(0, 3).toUpperCase();
     } else {
-      const id = Number(clientSelect);
-      const row = clientsSorted.find(([cid]) => cid === id);
+      const row = clientsSorted.find(([cid]) => cid === clientSelect);
       if (!row) return;
-      client = { id: row[0], name: row[1], avatar_url: null };
+      const idNum = Number.isFinite(Number(row[0])) ? Number(row[0]) : Math.max(0, ...projects.map((p) => p.client.id)) + 1;
+      client = { id: idNum, name: row[1], avatar_url: null };
+      clientCode = row[2] || clientCodeByName(row[1]) || "XX";
     }
+
+    const po = generatePoNumber(clientCode, collectAllPoNumbers(projects));
 
     const nextId = Math.max(0, ...projects.map((p) => p.id)) + 1;
     const dueIso = dueDate ? dateInputToIso(dueDate) : null;
-    const proj = emptyProjectRecord(
-      nextId,
-      trimmedName,
-      client,
-      status,
-      projectNumber.trim() || null,
-      dueIso,
-      description.trim() || null,
-    );
+    const proj = {
+      ...emptyProjectRecord(nextId, trimmedName, client, status, po, dueIso, description.trim() || null),
+      po_number: po,
+    };
 
     appendSessionProject(proj);
     setProjects((prev) => [...prev, proj]);
@@ -327,15 +339,9 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
                   ))}
                 </select>
               </label>
-              <label className={labelClass}>
-                Project # <span className="font-normal text-text-secondary">(optional)</span>
-                <input
-                  className={fieldClass}
-                  value={projectNumber}
-                  onChange={(e) => setProjectNumber(e.target.value)}
-                  placeholder="e.g. ABC-101"
-                />
-              </label>
+              <p className="rounded-lg border border-border-light bg-surface-body/50 px-3 py-2 text-xs text-text-secondary">
+                PO number is assigned automatically on create (ClientCode-Year-Seq, e.g. GG-2026-001).
+              </p>
               <label className={labelClass}>
                 Due date <span className="font-normal text-text-secondary">(optional)</span>
                 <input

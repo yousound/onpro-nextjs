@@ -63,17 +63,7 @@ export function TopNav() {
           >
             <BellIcon />
           </button>
-          <div className="flex items-center gap-2 pl-1">
-            <span className="hidden max-w-[120px] truncate text-sm text-text-muted-chrome sm:inline" title="Account">
-              Demo user
-            </span>
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-bold text-white ring-2 ring-border-subtle"
-              title="Account"
-            >
-              DU
-            </span>
-          </div>
+
         </div>
       </div>
     </header>

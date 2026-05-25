@@ -1,6 +1,7 @@
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
 import { getProjectById } from "@/lib/mock/projects";
+import { buildDemoJobs } from "@/lib/mock/generated/demo-jobs";
 import { CONNECT_DOTS_PROJECT_WIP_STEPS, buildEmptyProjectTimeline, buildProjectTimeline, buildProjectTimelineFromJobs } from "@/lib/wip-project-timeline";
 
 function jobTimelineFromStates(stepStatesById: Partial<Record<string, WipStepState>>): WipStep[] {
@@ -32,7 +33,7 @@ function oliveJobTimeline(): WipStep[] {
   doneThrough.forEach((id) => {
     m[id] = "completed";
   });
-  m["trimming"] = "in_progress";
+  m.trimming = "in_progress";
   return jobTimelineFromStates(m);
 }
 
@@ -48,65 +49,17 @@ function laggingJobTimeline(): WipStep[] {
   });
 }
 
-const jobsByProject: Record<number, ProjectJob[]> = {
-  1: [
-    {
-      id: "job-1-olive",
-      project_id: 1,
-      name: "Olive capsule",
-      subtitle: "Print / Decoration on blanks",
-      type: "PRINT / DECORATION ON BLANKS",
-      lead_vendor: "CA",
-      category: "SWEATSHIRT",
-      style_number: "GGP15-OLV",
-      status: "In progress",
-      due_date: "2026-06-20T12:00:00.000Z",
-      updated_at: "2026-05-12T12:00:00.000Z",
-      timeline: oliveJobTimeline(),
-      scope_kind: "original",
-    },
-    {
-      id: "job-1-indigo",
-      project_id: 1,
-      name: "Washed indigo denim",
-      subtitle: "Print / Decoration on blanks",
-      type: "PRINT / DECORATION ON BLANKS",
-      lead_vendor: "CA",
-      category: "SWEATSHIRT",
-      style_number: "GGP15-IND",
-      status: "Upcoming",
-      due_date: "2026-07-01T12:00:00.000Z",
-      updated_at: "2026-05-08T12:00:00.000Z",
-      timeline: laggingJobTimeline(),
-      scope_kind: "original",
-    },
-    {
-      id: "job-1-black",
-      project_id: 1,
-      name: "Washed black denim — rush add-on",
-      subtitle: "Print / Decoration on blanks",
-      type: "PRINT / DECORATION ON BLANKS",
-      lead_vendor: "CA",
-      category: "SWEATSHIRT",
-      style_number: "GGP15-BLK",
-      status: "Upcoming",
-      due_date: "2026-07-08T12:00:00.000Z",
-      updated_at: "2026-05-08T12:00:00.000Z",
-      timeline: laggingJobTimeline(),
-      scope_kind: "addon",
-      scope_note: "+50 units after initial invoice — keep on same build",
-    },
-  ],
-};
+const demoJobs = buildDemoJobs(oliveJobTimeline, laggingJobTimeline);
 
 export function getJobsForProject(projectId: number): ProjectJob[] {
-  return jobsByProject[projectId] ?? [];
+  return demoJobs.filter((j) => j.project_id === projectId);
 }
 
 /** Project WIP strip: from all jobs when present, else from `Project` date fields. */
 export function getProjectTimeline(projectId: number, project?: Project, jobs?: ProjectJob[]): WipStep[] {
   const p = project ?? getProjectById(projectId);
   if (!p) return buildEmptyProjectTimeline();
-  if (jobs?.length) return buildProjectTimelineFromJobs(p, jobs);
+  const jobList = jobs ?? getJobsForProject(projectId);
+  if (jobList.length) return buildProjectTimelineFromJobs(p, jobList);
   return buildProjectTimeline(p);
 }

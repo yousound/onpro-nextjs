@@ -261,7 +261,7 @@ export function MessageAttachmentComposer(props: {
   const [jobName, setJobName] = useState("Olive capsule");
   const [jobSubtitle, setJobSubtitle] = useState("Print / Decoration on blanks");
   const [jobType, setJobType] = useState("PRINT / DECORATION ON BLANKS");
-  const [jobLeadVendor, setJobLeadVendor] = useState("CA");
+  const [jobLeadVendor, setJobLeadVendor] = useState("Millworks Collective");
   const [jobCategory, setJobCategory] = useState("SWEATSHIRT");
   const [jobStyleNumber, setJobStyleNumber] = useState("GGP15-OLV");
   const [jobStatus, setJobStatus] = useState("In progress");

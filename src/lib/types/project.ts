@@ -106,6 +106,8 @@ export interface Project {
   name: string;
   description: string | null;
   project_number: string | null;
+  /** Auto-generated PO: ClientCode-Year-Seq (e.g. GG-2026-001) */
+  po_number?: string | null;
   /** Connect Dots WIP: project hand off date. */
   project_hand_off_date: ISODate;
   due_date: ISODate;

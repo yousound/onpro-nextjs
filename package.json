@@ -9,7 +9,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "import-masterlist": "python3 scripts/import_masterlist.py"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",

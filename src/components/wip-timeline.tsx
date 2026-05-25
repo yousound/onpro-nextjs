@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { displayDurationShort, normalizeDurationShort } from "@/lib/format";
+import { normalizeDurationShort } from "@/lib/format";
 import { summarizeWipSteps } from "@/lib/wip-progress";
 import type { WipStep, WipStepState } from "@/lib/types/wip";
 
@@ -70,12 +70,12 @@ function connectorIsDashed(left: WipStepState, right: WipStepState): boolean {
 }
 
 function connectorDuration(step: WipStep): string | undefined {
-  if (step.durationShort) return displayDurationShort(step.durationShort);
+  if (step.durationShort?.trim()) return step.durationShort.trim();
   return step.durationLabel;
 }
 
 const durationPillClass =
-  "max-w-[5rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums ring-1 ring-slate-200/80";
+  "whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold leading-none tabular-nums ring-1 ring-slate-200/80";
 
 const durationTooltipClass =
   "pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-50 w-[min(100vw-2rem,15rem)] -translate-x-1/2 rounded-lg border border-slate-600 bg-slate-900 px-3 py-2.5 text-left text-xs leading-relaxed text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100";
@@ -159,7 +159,8 @@ function DurationPill({
         inputMode="text"
         aria-label={`Days after ${step.label}`}
         placeholder="1d"
-        className={`${durationPillClass} w-14 border-accent text-text-primary outline-none ring-2 ring-accent/30`}
+        className={`${durationPillClass} min-w-[2.75rem] border border-accent bg-white text-text-primary outline-none ring-2 ring-accent/30`}
+        style={{ width: `${Math.max(2.75, draft.length + 0.5)}ch` }}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -231,7 +232,7 @@ function Connector({
   const dashed = connectorIsDashed(left.state, right.state);
 
   return (
-    <div className="flex min-w-[1.75rem] flex-1 flex-col self-start px-0.5">
+    <div className="flex min-w-[2.75rem] flex-1 flex-col self-start px-0.5">
       <div className="flex h-5 shrink-0 items-center justify-center">
         <DurationPill
           step={left}
@@ -313,11 +314,14 @@ export function WipTimeline({
   className = "",
   editableDurations = false,
   onDurationChange,
+  onStepClick,
 }: {
   steps: WipStep[];
   className?: string;
   editableDurations?: boolean;
   onDurationChange?: (stepId: string, durationShort: string) => void;
+  /** Opens Job Details scrolled to the section for this step. */
+  onStepClick?: (stepId: string) => void;
 }) {
   return (
     <section
@@ -325,6 +329,8 @@ export function WipTimeline({
     >
       {editableDurations ? (
         <p className="mb-3 text-[11px] text-text-secondary">Tap + between steps to add or edit days.</p>
+      ) : onStepClick ? (
+        <p className="mb-3 text-[11px] text-text-secondary">Tap a step to open Job Details at that task.</p>
       ) : null}
       <div
         className="flex items-start"
@@ -342,7 +348,20 @@ export function WipTimeline({
               <div
                 className={`flex flex-col items-center px-1 pt-6 ${
                   step.state === "in_progress" ? "min-w-[5.5rem]" : "min-w-[4.5rem]"
-                }`}
+                } ${onStepClick ? "cursor-pointer rounded-xl transition hover:bg-violet-50/80" : ""}`}
+                role={onStepClick ? "button" : undefined}
+                tabIndex={onStepClick ? 0 : undefined}
+                onClick={onStepClick ? () => onStepClick(step.id) : undefined}
+                onKeyDown={
+                  onStepClick
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onStepClick(step.id);
+                        }
+                      }
+                    : undefined
+                }
               >
                 <StepIcon state={step.state} large={step.state === "in_progress"} />
                 <p

@@ -9,6 +9,7 @@ import {
   type ThreadSmartAttachment,
 } from "@/lib/mock/message-threads";
 import { formatDateTime } from "@/lib/format";
+import { PageHeader } from "@/components/page-header";
 import { AttachmentReaderModal } from "@/components/attachment-reader-modal";
 import {
   AttachmentsOnboardingModal,
@@ -74,6 +75,21 @@ function initials(name: string) {
   if (p.length === 0) return "?";
   if (p.length === 1) return p[0].slice(0, 2).toUpperCase();
   return (p[0][0] + p[p.length - 1][0]).toUpperCase();
+}
+
+function MemberRow({ participant: p }: { participant: Conversation["participants"][number] }) {
+  const subtitle = !p.is_company && p.company_name?.trim() ? p.company_name.trim() : null;
+  return (
+    <li className="flex items-center gap-2 text-sm">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-600">
+        {initials(p.name)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium leading-tight text-slate-800">{p.name}</p>
+        {subtitle ? <p className="truncate text-[11px] leading-tight text-slate-500">{subtitle}</p> : null}
+      </div>
+    </li>
+  );
 }
 
 function extIcon(ext: string) {
@@ -157,7 +173,9 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
     const needle = inboxSearchQuery.trim().toLowerCase();
     if (!needle) return allConversations;
     return allConversations.filter((c) => {
-      const participantNames = c.participants.map((p) => p.name).join(" ");
+      const participantNames = c.participants
+        .map((p) => [p.name, p.company_name].filter(Boolean).join(" "))
+        .join(" ");
       const blob = `${c.name} ${c.last_message_preview ?? ""} ${participantNames}`.toLowerCase();
       return blob.includes(needle);
     });
@@ -206,7 +224,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
       unread_count: 0,
       participants: [
         { id: participantId, name, avatar_url: null },
-        { id: 2, name: "Jerry M", avatar_url: null },
+        { id: 2, name: "Jerry M", avatar_url: null, company_name: "OnPro" },
       ],
       is_group: false,
       project_id: null,
@@ -279,7 +297,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
     "transition-[max-width] duration-300 ease-out motion-reduce:transition-none";
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-slate-50">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <AttachmentsOnboardingModal open={attachOnboardingOpen} onDismiss={dismissAttachOnboarding} />
       <AttachmentReaderModal
         open={readerOpen}
@@ -303,17 +321,22 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
           setComposerOpen(true);
         }}
       />
-      {/* App-style sub-header (light, under global nav) */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 shadow-sm md:px-6">
-        <h1 className="text-lg font-semibold text-slate-900">Messages</h1>
-        <button
-          type="button"
-          onClick={() => setNewMessageOpen(true)}
-          className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-700"
-        >
-          New message
-        </button>
-      </header>
+      <div className="shrink-0">
+        <PageHeader
+          title="Messages"
+          subtitle="Threads with clients, vendors, and your team."
+          action={
+            <button
+              type="button"
+              onClick={() => setNewMessageOpen(true)}
+              className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95 active:opacity-90"
+            >
+              New message
+            </button>
+          }
+        />
+      </div>
+      <div className="relative flex min-h-0 flex-1 flex-col bg-slate-50">
 
       {newMessageOpen ? (
         <div
@@ -825,12 +848,7 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                 </button>
                 <ul className="mt-4 space-y-2">
                   {active.participants.map((p) => (
-                    <li key={p.id} className="flex items-center gap-2 text-sm">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-600">
-                        {initials(p.name)}
-                      </span>
-                      <span className="truncate text-slate-800">{p.name}</span>
-                    </li>
+                    <MemberRow key={p.id} participant={p} />
                   ))}
                 </ul>
               </details>
@@ -841,6 +859,8 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
             </div>
           ) : null}
         </aside>
+      </div>
+
       </div>
 
       {/* Narrow screens: hint for right column */}

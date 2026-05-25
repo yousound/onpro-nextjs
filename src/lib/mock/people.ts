@@ -1,4 +1,5 @@
 import type { ProjectPermissionFlags } from "@/lib/project-permissions";
+import type { TeamRole } from "@/lib/types/contact";
 
 /** Mirrors iOS `UserRole` segments — workspace directory (mock). */
 export type PeopleSegment = "team" | "vendor" | "client";
@@ -21,6 +22,10 @@ export type PendingInvite = {
   sent_at: string;
   /** Permissions they'll get when they accept (mock). */
   permissions?: ProjectPermissionFlags;
+  team_role?: TeamRole;
+  team_role_custom?: string;
+  contact_name?: string;
+  phone?: string;
 };
 
 export const MOCK_DIRECTORY_PEOPLE: DirectoryPerson[] = [
@@ -59,10 +64,9 @@ export const MOCK_DIRECTORY_PEOPLE: DirectoryPerson[] = [
   {
     id: "p5",
     segment: "client",
-    name: "Morgan Ellis",
-    email: "morgan@fillo.design",
-    company: "Fillo Product Design",
-    phone: "+1 212 555 0144",
+    name: "Riley Chen",
+    email: "riley@lnq.test",
+    company: "LNQ",
   },
   {
     id: "p6",
@@ -70,6 +74,34 @@ export const MOCK_DIRECTORY_PEOPLE: DirectoryPerson[] = [
     name: "Taylor Brooks",
     email: "taylor@glogang.co",
     company: "Glo Gang",
+  },
+  {
+    id: "p7",
+    segment: "client",
+    name: "Dev Singh",
+    email: "dev@voidstar.test",
+    company: "VOID STAR",
+  },
+  {
+    id: "p8",
+    segment: "client",
+    name: "Avery Kim",
+    email: "avery@homecoming.test",
+    company: "Homecoming",
+  },
+  {
+    id: "p9",
+    segment: "client",
+    name: "Chris Park",
+    email: "chris@eastsidegolf.test",
+    company: "Eastside Golf",
+  },
+  {
+    id: "p10",
+    segment: "client",
+    name: "Jordan Wells",
+    email: "jordan@qore.test",
+    company: "Qore",
   },
 ];
 
@@ -198,8 +230,8 @@ export const MOCK_PERSON_PROJECT_ACCESS: Record<string, PersonProjectAccess[]> =
       ],
     },
     {
-      project_id: 5,
-      project_name: "Void Star Tee",
+      project_id: 3,
+      project_name: "VOID STAR",
       role_on_project: "Team",
       permission_groups: [
         {
@@ -217,8 +249,8 @@ export const MOCK_PERSON_PROJECT_ACCESS: Record<string, PersonProjectAccess[]> =
   ],
   p2: [
     {
-      project_id: 3,
-      project_name: "LNQ Hoodie",
+      project_id: 2,
+      project_name: "LNQ",
       role_on_project: "Team",
       permission_groups: [
         { title: "General messages", lines: ["Accept messages from team"] },
@@ -228,7 +260,7 @@ export const MOCK_PERSON_PROJECT_ACCESS: Record<string, PersonProjectAccess[]> =
     },
     {
       project_id: 6,
-      project_name: "Mind Body Mastery",
+      project_name: "Qore",
       role_on_project: "Team",
       permission_groups: [
         { title: "General messages", lines: ["Accept messages from team"] },
@@ -257,7 +289,7 @@ export const MOCK_PERSON_PROJECT_ACCESS: Record<string, PersonProjectAccess[]> =
     },
     {
       project_id: 5,
-      project_name: "Void Star Tee",
+      project_name: "VOID STAR",
       role_on_project: "Vendor",
       permission_groups: [
         { title: "General messages", lines: ["Accept messages from team"] },
@@ -269,7 +301,7 @@ export const MOCK_PERSON_PROJECT_ACCESS: Record<string, PersonProjectAccess[]> =
   p4: [
     {
       project_id: 3,
-      project_name: "LNQ Hoodie",
+      project_name: "LNQ",
       role_on_project: "Vendor",
       permission_groups: [
         { title: "General messages", lines: ["Accept messages from team"] },
@@ -281,7 +313,7 @@ export const MOCK_PERSON_PROJECT_ACCESS: Record<string, PersonProjectAccess[]> =
   p5: [
     {
       project_id: 6,
-      project_name: "Mind Body Mastery",
+      project_name: "Qore",
       role_on_project: "Client",
       permission_groups: [
         { title: "General messages", lines: ["Accept messages from team"] },

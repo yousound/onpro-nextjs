@@ -16,12 +16,6 @@ export function ContentHeader({
       <div className="flex shrink-0 items-center gap-2">
         {actions}
         <NotificationsPopover buttonClassName="relative rounded-full p-2 text-text-secondary hover:bg-surface-body" />
-        <div className="flex items-center gap-2 pl-1">
-          <span className="hidden text-sm text-text-secondary sm:inline">Demo user</span>
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-xs font-bold text-white">
-            DU
-          </span>
-        </div>
       </div>
     </header>
   );

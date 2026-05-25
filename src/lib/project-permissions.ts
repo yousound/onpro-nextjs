@@ -105,6 +105,37 @@ export function permissionKeyApplies(segment: PeopleSegment, key: keyof ProjectP
   return true;
 }
 
+/** Build flags from mock permission group bullets (e.g. MOCK_PERSON_PROJECT_ACCESS). */
+export function flagsFromPermissionSummary(
+  groups: PermissionSummaryGroup[],
+  segment: PeopleSegment,
+): ProjectPermissionFlags {
+  const keys = Object.keys(defaultPermissionsForSegment(segment)) as (keyof ProjectPermissionFlags)[];
+  const flags = {} as ProjectPermissionFlags;
+  for (const k of keys) flags[k] = false;
+
+  const lineToKey = new Map<string, keyof ProjectPermissionFlags>();
+  for (const [key, label] of Object.entries(LABELS) as [keyof ProjectPermissionFlags, string][]) {
+    if (label) lineToKey.set(label, key);
+  }
+  for (const g of groups) {
+    for (const line of g.lines) {
+      const key = lineToKey.get(line);
+      if (key) flags[key] = true;
+    }
+  }
+  return flags;
+}
+
+/** One-line summary for list rows. */
+export function shortPermissionSummary(flags: ProjectPermissionFlags): string {
+  const groups = permissionFlagsToSummary(flags);
+  const lines = groups.flatMap((g) => g.lines);
+  if (!lines.length) return "No permissions enabled";
+  if (lines.length <= 3) return lines.join(" · ");
+  return `${lines.length} permissions across ${groups.length} groups`;
+}
+
 /** Convert flags to grouped bullets for modals / summaries. */
 export function permissionFlagsToSummary(flags: ProjectPermissionFlags): PermissionSummaryGroup[] {
   const groups: PermissionSummaryGroup[] = [];

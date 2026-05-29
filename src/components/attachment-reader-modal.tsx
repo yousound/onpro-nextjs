@@ -12,6 +12,7 @@ function kindLabel(kind: string) {
     payment: "Payment",
     invoice: "Invoice",
     receiving: "Receiving",
+    packing_list: "Packing list",
     tracking: "Tracking",
     task: "Task",
     calendar_event: "Calendar event",

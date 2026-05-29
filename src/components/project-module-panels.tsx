@@ -17,6 +17,7 @@ import {
 } from "@/lib/internal-team-roster";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { segmentBadgeSoftClass, segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
+import { PackingSlipSection } from "@/components/packing-slip-section";
 import { loadContacts } from "@/lib/contacts-store";
 import { peopleForProject, type ProjectPersonRow } from "@/lib/project-people";
 import {
@@ -1773,6 +1774,17 @@ function ShippingModulePanel({ project, onPatchProject }: { project: Project; on
                   onCommit={(iso) => p({ packing_list_sent_to_client_date: iso })}
                 />
               </>
+            )}
+          </SectionCard>
+          <SectionCard title="Create packing list">
+            {p ? (
+              <PackingSlipSection project={project} onPatchProject={p} />
+            ) : (
+              <p className="text-sm text-text-secondary">
+                {(project.packaging_slips?.length ?? 0) > 0
+                  ? `${project.packaging_slips!.length} packing list(s) on file`
+                  : "No packing lists created yet."}
+              </p>
             )}
           </SectionCard>
         </>

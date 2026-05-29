@@ -19,6 +19,7 @@ import {
 import { MessageAttachmentComposer } from "@/components/message-attachment-composer";
 import type { AttachmentComposerDraft } from "@/lib/attachment-composer-draft";
 import { fallbackDraftFromSmartAttachment } from "@/lib/attachment-composer-draft";
+import { getProjectById } from "@/lib/mock/projects";
 
 function kindLabel(kind: string) {
   const map: Record<string, string> = {
@@ -30,6 +31,7 @@ function kindLabel(kind: string) {
     payment: "Payment",
     invoice: "Invoice",
     receiving: "Receiving",
+    packing_list: "Packing list",
     tracking: "Tracking",
     task: "Task",
     calendar_event: "Event",
@@ -183,6 +185,10 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
 
   const peerName = active?.name ?? "—";
   const handle = `@${peerName.replace(/\s+/g, "").toLowerCase()}`;
+  const activeProject = useMemo(
+    () => (active?.project_id != null ? getProjectById(active.project_id) : undefined),
+    [active?.project_id],
+  );
 
   /** Choosing a thread should dismiss the expanded inbox rail (focus was keeping it stuck open). */
   function pickConversation(conversationId: number) {
@@ -751,6 +757,8 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
                   setEditingMessageId(null);
                 }}
                 roomTitle={peerName}
+                projectId={active?.project_id ?? null}
+                linkedProjectName={activeProject?.name ?? null}
                 onSend={(attachment: ThreadSmartAttachment, timeLabel: string) => {
                   if (!active) return;
                   if (editingMessageId) {

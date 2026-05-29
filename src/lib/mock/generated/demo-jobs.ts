@@ -19,6 +19,25 @@ export function buildDemoJobs(
     lead_vendor: "Millworks Collective",
     category: "Tee",
     style_number: "GGT148",
+    colorway: "Black",
+    po_number: "GG-2026-05-001",
+    label_files: [
+      {
+        id: "demo-label-pdf",
+        name: "Connect Dots Label Final-MOBILE-STATION.pdf",
+        url: "#",
+        uploaded_at: "2026-05-01T12:00:00.000Z",
+      },
+    ],
+    label_lines: [
+      {
+        id: "demo-ll-m",
+        size: "M",
+        style_color_code: "GGT148-B",
+        description: "tee (black)",
+        scan_value: "479944",
+      },
+    ],
     status: "In progress",
     due_date: "2026-07-15T12:00:00.000Z",
     updated_at: "2026-05-12T12:00:00.000Z",

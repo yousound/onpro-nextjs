@@ -45,8 +45,8 @@ export const mockThreadMessages: ThreadMessage[] = [
     time_label: "10:15 AM",
     smart_attachment: {
       kind: "job",
-      title: "Cut & sew batch #12",
-      subtitle: "Due · Apr 2 · Factory floor",
+      title: "NO HUMANS ALLOWED TEE",
+      subtitle: "TEES · GGT148 · Black · PRINT PRODUCTION · Millworks Collective",
       badge: "In progress",
     },
   },

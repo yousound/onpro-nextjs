@@ -1,5 +1,7 @@
 /** Mirrors OnPro Swift `Project` + nested types; dates are ISO strings (JSON-safe). */
 
+import type { PackingSlipDocument } from "@/lib/types/packing-slip";
+
 export type ProjectStatus =
   | "IN DEVELOPMENT"
   | "PENDING"
@@ -106,7 +108,7 @@ export interface Project {
   name: string;
   description: string | null;
   project_number: string | null;
-  /** Auto-generated PO: ClientCode-Year-Seq (e.g. GG-2026-001) */
+  /** Auto-generated PO: ClientCode-Year-Month-Seq (e.g. GG-2026-05-001) */
   po_number?: string | null;
   /** Connect Dots WIP: project hand off date. */
   project_hand_off_date: ISODate;
@@ -166,6 +168,8 @@ export interface Project {
   tracking_bol_number: string | null;
   packing_list_sent_to_client_date: ISODate;
   client_received_date: ISODate;
+  /** Packing lists created in OnPro for outbound shipments */
+  packaging_slips?: PackingSlipDocument[];
 
   /** When set, overrides legacy single-row dye / lab dip fields for UI + persistence. */
   dye_costing_tracks?: DyeCostingTrack[] | null;

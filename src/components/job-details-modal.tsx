@@ -16,13 +16,15 @@ import type {
   Project,
   Sample,
   SampleStatus,
+  SampleType,
 } from "@/lib/types/project";
 import type { Contact } from "@/lib/types/contact";
-import type {
+import {
   JobDetailsFocus,
   JobDetailsSection,
   JobType,
   ProjectJob,
+  wipStepToSection,
 } from "@/lib/types/wip";
 import { jobTimelineEditorLabel } from "@/lib/types/wip";
 import { VendorFieldSelect } from "@/components/vendor-select";
@@ -45,9 +47,12 @@ import {
   updateDyeTrack,
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
-import { generateBarcode, generateStyleNumber } from "@/lib/style-number";
+import { generatePoForJob } from "@/lib/po-context";
+import { generateStyleNumber, styleColorCode } from "@/lib/style-number";
 import { wipStepLabel } from "@/lib/wip-project-timeline";
 import { JobTimelineStepsEditor } from "@/components/job-timeline-steps-editor";
+import { WipTimeline } from "@/components/wip-timeline";
+import { JobLabelsSection } from "@/components/job-labels-section";
 
 const fieldClass =
   "mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
@@ -65,15 +70,30 @@ const SAMPLE_STATUS_OPTIONS: SampleStatus[] = [
   "IN REVIEW",
 ];
 
+const SAMPLE_TYPE_OPTIONS: SampleType[] = [
+  "1ST SAMPLE",
+  "2ND SAMPLE",
+  "3RD SAMPLE",
+  "PP SAMPLE",
+  "2ND PP SAMPLE",
+];
+
 const SECTION_LABELS: Record<JobDetailsSection, string> = {
   overview: "Overview",
   estimate: "Estimate",
+  development: "Development",
   costing: "Costing",
   approvals: "Approvals",
   bulk: "Bulk production",
 };
 
-const ACCORDION_SECTIONS: JobDetailsSection[] = ["estimate", "costing", "approvals", "bulk"];
+const ACCORDION_SECTIONS: JobDetailsSection[] = [
+  "estimate",
+  "development",
+  "costing",
+  "approvals",
+  "bulk",
+];
 
 function resolveCategoryDropdown(category: string): string {
   const trimmed = category.trim();
@@ -117,6 +137,8 @@ function cloneJob(job: ProjectJob): ProjectJob {
     bulk_production_tracks: job.bulk_production_tracks?.map((t) => ({ ...t })),
     addon_shirt_sizes: job.addon_shirt_sizes ? [...job.addon_shirt_sizes] : undefined,
     addon_pant_sizes: job.addon_pant_sizes ? [...job.addon_pant_sizes] : undefined,
+    label_files: job.label_files?.map((f) => ({ ...f })),
+    label_lines: job.label_lines?.map((l) => ({ ...l })),
   };
 }
 
@@ -287,6 +309,8 @@ export type JobDetailsModalProps = {
   vendors: Contact[];
   focus?: JobDetailsFocus;
   isNew?: boolean;
+  /** When nested inside another modal (e.g. message attachment composer). */
+  overlayClassName?: string;
   onClose: () => void;
   onSave: (job: ProjectJob) => void;
 };
@@ -299,15 +323,19 @@ export function JobDetailsModal({
   vendors,
   focus,
   isNew,
+  overlayClassName = "z-[100]",
   onClose,
   onSave,
 }: JobDetailsModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [draft, setDraft] = useState(() => cloneJob(normalizeJob(job, project)));
-  const [categoryDropdown, setCategoryDropdown] = useState(() => resolveCategoryDropdown(job.category));
+  const [draft, setDraft] = useState(() => cloneJob(normalizeJob(job, isNew ? undefined : project)));
+  const [categoryDropdown, setCategoryDropdown] = useState(() =>
+    isNew ? "" : resolveCategoryDropdown(job.category),
+  );
   const [expanded, setExpanded] = useState<Record<JobDetailsSection, boolean>>(() => ({
     overview: true,
     estimate: focus?.section === "estimate",
+    development: focus?.section === "development",
     costing: focus?.section === "costing",
     approvals: focus?.section === "approvals",
     bulk: focus?.section === "bulk",
@@ -397,15 +425,53 @@ export function JobDetailsModal({
     });
   }
 
+  const siblingJobs = useMemo(
+    () => allJobs.filter((j) => j.project_id === project.id && j.id !== draft.id),
+    [allJobs, project.id, draft.id],
+  );
+
+  function handleGeneratePo() {
+    patch({ po_number: generatePoForJob(project) });
+  }
+
+  function handleLinkPo(fromJobId: string) {
+    const source = allJobs.find((j) => j.id === fromJobId);
+    if (source?.po_number) patch({ po_number: source.po_number });
+  }
+
+  function handleTimelineStepClick(stepId: string) {
+    const step = draft.timeline.find((s) => s.id === stepId);
+    const section = wipStepToSection(stepId, step?.opensIn);
+    setExpanded((prev) => ({ ...prev, [section]: true }));
+    const targetId = `job-step-${stepId}`;
+    setHighlightId(targetId);
+    window.setTimeout(() => {
+      const root = scrollRef.current;
+      const el = root?.querySelector<HTMLElement>(`#${CSS.escape(targetId)}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => setHighlightId(null), 1800);
+    }, 80);
+  }
+
+  function handleJobDurationChange(stepId: string, durationShort: string) {
+    patch({
+      timeline: draft.timeline.map((step) =>
+        step.id === stepId ? { ...step, durationShort: durationShort || undefined } : step,
+      ),
+    });
+  }
+
   function handleGenerateBarcode() {
-    patch({ barcode: generateBarcode(draft.style_number, draft.colorway ?? "") });
+    patch({ barcode: styleColorCode(draft.style_number, draft.colorway ?? "") });
   }
 
   function handleSave(e: FormEvent) {
     e.preventDefault();
+    const po = draft.po_number?.trim() || null;
     const saved: ProjectJob = {
       ...draft,
       category: categoryDropdown,
+      po_number: po,
       scope_note: draft.scope_note?.trim() || undefined,
       updated_at: new Date().toISOString(),
     };
@@ -450,6 +516,12 @@ export function JobDetailsModal({
     });
   }
 
+  function nextSampleType(colorwayId: number): SampleType {
+    const cw = colorways.find((c) => c.id === colorwayId);
+    const used = new Set(cw?.samples.map((s) => s.type) ?? []);
+    return SAMPLE_TYPE_OPTIONS.find((t) => !used.has(t)) ?? "1ST SAMPLE";
+  }
+
   function addSample(colorwayId: number) {
     const cw = colorways.find((c) => c.id === colorwayId);
     if (!cw) return;
@@ -459,7 +531,7 @@ export function JobDetailsModal({
         ...cw.samples,
         {
           id: maxId + 1,
-          type: "1ST SAMPLE",
+          type: nextSampleType(colorwayId),
           received_date: null,
           comments_sent_date: null,
           status: "PENDING",
@@ -481,7 +553,7 @@ export function JobDetailsModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 sm:items-center"
+      className={`fixed inset-0 flex items-end justify-center bg-black/45 p-4 sm:items-center ${overlayClassName}`}
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -585,9 +657,51 @@ export function JobDetailsModal({
                 />
               </label>
 
+              <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">PO #</p>
+                <label className={`${labelClass} mt-2`}>
+                  Purchase order
+                  <input
+                    className={fieldClass}
+                    value={draft.po_number ?? ""}
+                    onChange={(e) => patch({ po_number: e.target.value.trim() || null })}
+                    placeholder="Auto-assigned on create"
+                  />
+                </label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGeneratePo}
+                    className="rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-violet-50"
+                  >
+                    Generate new PO
+                  </button>
+                  {siblingJobs.length > 0 ? (
+                    <label className="flex items-center gap-2 text-xs font-medium text-text-secondary">
+                      Link to job PO
+                      <select
+                        className="rounded-lg border border-border-light bg-white px-2 py-1.5 text-xs font-semibold text-text-primary"
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) handleLinkPo(e.target.value);
+                          e.target.value = "";
+                        }}
+                      >
+                        <option value="">Select…</option>
+                        {siblingJobs.map((j) => (
+                          <option key={j.id} value={j.id}>
+                            {j.name || j.style_number} {j.po_number ? `(${j.po_number})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+
               <div>
                 <label className={labelClass}>
-                  Barcode
+                  Style-color code
                   <input className={readOnlyFieldClass} readOnly value={draft.barcode ?? ""} aria-readonly />
                 </label>
                 <button
@@ -595,9 +709,11 @@ export function JobDetailsModal({
                   onClick={handleGenerateBarcode}
                   className="mt-2 rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-violet-50"
                 >
-                  Generate barcode
+                  Generate style-color code
                 </button>
               </div>
+
+              <JobLabelsSection draft={draft} allJobs={allJobs} onPatch={patch} />
 
               {draft.scope_kind === "addon" ? (
                 <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
@@ -722,6 +838,21 @@ export function JobDetailsModal({
                 </div>
               </div>
 
+              <div className="space-y-3 border-t border-border-light pt-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-text-primary">Job timeline</h4>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    Tap a step to jump to its fields; durations are editable.
+                  </p>
+                </div>
+                <WipTimeline
+                  steps={draft.timeline}
+                  editableDurations
+                  onDurationChange={handleJobDurationChange}
+                  onStepClick={handleTimelineStepClick}
+                />
+              </div>
+
               <JobTimelineStepsEditor
                 jobLabel={jobTimelineEditorLabel(draft)}
                 steps={draft.timeline}
@@ -797,59 +928,8 @@ export function JobDetailsModal({
                   </>
                 ) : null}
 
-                {section === "costing" ? (
+                {section === "development" ? (
                   <>
-                    <WipStepFieldBlock stepId="cost_sheets" highlight={highlightId === "job-step-cost_sheets"}>
-                      <label className={labelClass}>
-                        Cost sheet prepared
-                        <input
-                          type="date"
-                          className={fieldClass}
-                          value={isoToDateInput(costing.cost_sheet_prepared_date)}
-                          onChange={(e) =>
-                            patchCosting({ cost_sheet_prepared_date: dateInputToIso(e.target.value) })
-                          }
-                        />
-                      </label>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock
-                      stepId="costing_summary"
-                      highlight={highlightId === "job-step-costing_summary"}
-                    >
-                      <label className={labelClass}>
-                        Estimate sent
-                        <input
-                          type="date"
-                          className={fieldClass}
-                          value={isoToDateInput(costing.estimate_sent_date)}
-                          onChange={(e) =>
-                            patchCosting({ estimate_sent_date: dateInputToIso(e.target.value) })
-                          }
-                        />
-                      </label>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock
-                      stepId="deposit_payment"
-                      highlight={highlightId === "job-step-deposit_payment"}
-                    >
-                      <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-text-primary">
-                        <input
-                          type="checkbox"
-                          className="size-4 rounded border-border-light text-accent focus:ring-accent"
-                          checked={costing.costing_approved === true}
-                          ref={(el) => {
-                            if (el) el.indeterminate = costing.costing_approved === null;
-                          }}
-                          onChange={(e) =>
-                            patchCosting({ costing_approved: e.target.checked ? true : false })
-                          }
-                        />
-                        Deposit / payment received (costing approved)
-                      </label>
-                    </WipStepFieldBlock>
-
                     <WipStepFieldBlock stepId="tp_setup" highlight={highlightId === "job-step-tp_setup"}>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className={labelClass}>
@@ -903,8 +983,38 @@ export function JobDetailsModal({
                       stepId="blanks_lab_dip"
                       highlight={highlightId === "job-step-blanks_lab_dip"}
                     >
-                      <div className="space-y-3">
-                        <p className="text-[11px] font-medium text-text-secondary">Dye & lab dip lines</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                        Blanks purchased / PG requested
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className={labelClass}>
+                          Blanks purchased
+                          <input
+                            type="date"
+                            className={fieldClass}
+                            value={isoToDateInput(costing.blanks_purchased_date)}
+                            onChange={(e) =>
+                              patchCosting({ blanks_purchased_date: dateInputToIso(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className={labelClass}>
+                          PG requested
+                          <input
+                            type="date"
+                            className={fieldClass}
+                            value={isoToDateInput(costing.pg_requested_date)}
+                            onChange={(e) =>
+                              patchCosting({ pg_requested_date: dateInputToIso(e.target.value) })
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                        Lab dip requested
+                      </p>
+                      <div className="mt-3 space-y-3">
                         {dyeTracks.map((t, i) => (
                           <SectionCard
                             key={t.id}
@@ -1016,11 +1126,13 @@ export function JobDetailsModal({
                           + Add dye line
                         </button>
                       </div>
-
                     </WipStepFieldBlock>
 
                     <WipStepFieldBlock stepId="order_trims" highlight={highlightId === "job-step-order_trims"}>
-                      <div className="grid gap-3 sm:grid-cols-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                        Trims & appliques ordered
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <label className={labelClass}>
                           New product request
                           <input
@@ -1067,6 +1179,61 @@ export function JobDetailsModal({
                           />
                         </label>
                       </div>
+                    </WipStepFieldBlock>
+                  </>
+                ) : null}
+
+                {section === "costing" ? (
+                  <>
+                    <WipStepFieldBlock stepId="cost_sheets" highlight={highlightId === "job-step-cost_sheets"}>
+                      <label className={labelClass}>
+                        Cost sheet prepared
+                        <input
+                          type="date"
+                          className={fieldClass}
+                          value={isoToDateInput(costing.cost_sheet_prepared_date)}
+                          onChange={(e) =>
+                            patchCosting({ cost_sheet_prepared_date: dateInputToIso(e.target.value) })
+                          }
+                        />
+                      </label>
+                    </WipStepFieldBlock>
+
+                    <WipStepFieldBlock
+                      stepId="costing_summary"
+                      highlight={highlightId === "job-step-costing_summary"}
+                    >
+                      <label className={labelClass}>
+                        Estimate sent
+                        <input
+                          type="date"
+                          className={fieldClass}
+                          value={isoToDateInput(costing.estimate_sent_date)}
+                          onChange={(e) =>
+                            patchCosting({ estimate_sent_date: dateInputToIso(e.target.value) })
+                          }
+                        />
+                      </label>
+                    </WipStepFieldBlock>
+
+                    <WipStepFieldBlock
+                      stepId="deposit_payment"
+                      highlight={highlightId === "job-step-deposit_payment"}
+                    >
+                      <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-text-primary">
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-border-light text-accent focus:ring-accent"
+                          checked={costing.costing_approved === true}
+                          ref={(el) => {
+                            if (el) el.indeterminate = costing.costing_approved === null;
+                          }}
+                          onChange={(e) =>
+                            patchCosting({ costing_approved: e.target.checked ? true : false })
+                          }
+                        />
+                        Deposit / payment received (costing approved)
+                      </label>
                     </WipStepFieldBlock>
 
                     <WipStepFieldBlock stepId="tp_completion" highlight={highlightId === "job-step-tp_completion"}>
@@ -1259,7 +1426,24 @@ export function JobDetailsModal({
                             cw.samples.map((s) => (
                               <GrayRow key={s.id}>
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="text-sm font-semibold text-text-primary">{s.type}</span>
+                                  <label className={`${labelClass} min-w-[10rem] flex-1`}>
+                                    Sample stage
+                                    <select
+                                      className={fieldClass}
+                                      value={s.type}
+                                      onChange={(e) =>
+                                        patchSample(cw.id, s.id, {
+                                          type: e.target.value as SampleType,
+                                        })
+                                      }
+                                    >
+                                      {SAMPLE_TYPE_OPTIONS.map((opt) => (
+                                        <option key={opt} value={opt}>
+                                          {opt}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
                                   <button
                                     type="button"
                                     onClick={() =>

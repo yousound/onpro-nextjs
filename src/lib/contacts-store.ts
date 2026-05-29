@@ -14,7 +14,7 @@ function directoryToContact(p: (typeof MOCK_DIRECTORY_PEOPLE)[0]): Contact {
   const code =
     clientCodeByName(p.company ?? p.name) ??
     deriveCompanyCode(p.company ?? p.name);
-  return {
+  const contact: Contact = {
     id: p.id,
     segment: p.segment,
     kind,
@@ -31,6 +31,16 @@ function directoryToContact(p: (typeof MOCK_DIRECTORY_PEOPLE)[0]): Contact {
     created_at: now(),
     updated_at: now(),
   };
+  if (p.id === "p-cd") {
+    contact.shipping_address = {
+      line1: "456 Industrial Blvd",
+      city: "Los Angeles",
+      state: "CA",
+      postal_code: "90001",
+      country: "USA",
+    };
+  }
+  return contact;
 }
 
 export const SEED_CONTACTS: Contact[] = MOCK_DIRECTORY_PEOPLE.map(directoryToContact);

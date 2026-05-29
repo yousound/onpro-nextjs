@@ -26,12 +26,73 @@ export function generateStyleNumber(
   return `${prefix}${String(next).padStart(2, "0")}`;
 }
 
-export function generateBarcode(styleNumber: string, colorway: string): string {
+/** Common colorway → 3-letter codes (matches legacy inventory VID). */
+const COLORWAY_ABBREV: Record<string, string> = {
+  white: "WHT",
+  "off white": "OWT",
+  black: "BLK",
+  navy: "NVY",
+  red: "RED",
+  blue: "BLU",
+  green: "GRN",
+  grey: "GRY",
+  gray: "GRY",
+  pink: "PNK",
+  "baby pink": "BPK",
+  olive: "OLV",
+  cream: "CRM",
+  natural: "NAT",
+};
+
+export function colorwayAbbrev(colorway: string): string {
+  const key = colorway.trim().toLowerCase();
+  if (COLORWAY_ABBREV[key]) return COLORWAY_ABBREV[key];
+  const words = colorway.trim().split(/\s+/);
+  if (words.length >= 2) {
+    const fromWords = words
+      .map((w) => w[0] ?? "")
+      .join("")
+      .toUpperCase()
+      .slice(0, 3);
+    if (fromWords.length >= 2) return fromWords;
+  }
   const slug = colorway
     .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 12);
-  return slug ? `${styleNumber}-${slug}` : styleNumber;
+    .replace(/[^A-Z0-9]+/g, "")
+    .slice(0, 3);
+  return slug || "XX";
+}
+
+/** Style + color code for labels e.g. FT28127-BPK */
+export function styleColorCode(styleNumber: string, colorway: string): string {
+  const style = styleNumber.trim().toUpperCase();
+  const abbrev = colorwayAbbrev(colorway);
+  return abbrev ? `${style}-${abbrev}` : style;
+}
+
+export function generateBarcode(styleNumber: string, colorway: string): string {
+  return styleColorCode(styleNumber, colorway);
+}
+
+/** Product description for label e.g. "fitted tee (baby pink)" */
+export function labelDescription(category: string, colorway: string): string {
+  const cat = category.trim().toLowerCase() || "garment";
+  const color = colorway.trim().toLowerCase();
+  return color ? `${cat} (${color})` : cat;
+}
+
+/** Short title on barcode label — prefer job name (legacy inventory “Title”). */
+export function labelTitleFromJob(job: { name?: string; category?: string; colorway?: string }): string {
+  const name = job.name?.trim();
+  if (name) return name.toLowerCase();
+  return labelDescription(job.category ?? "", job.colorway ?? "");
+}
+
+/** Full SKU / VID e.g. FT18123-WHT_S */
+export function labelLineSku(styleColorCode: string, size: string): string {
+  const base = styleColorCode.trim().toUpperCase();
+  const sz = size.trim().toUpperCase().replace(/\s+/g, "");
+  if (!sz) return base;
+  return `${base}_${sz}`;
 }

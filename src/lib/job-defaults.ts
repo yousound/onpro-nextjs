@@ -21,6 +21,8 @@ export function defaultJobCosting(project?: Project): NonNullable<ProjectJob["co
     cost_sheet_prepared_date: project?.cost_sheet_prepared_date ?? null,
     estimate_sent_date: project?.estimate_sent_date ?? null,
     costing_approved: project?.costing_approved ?? null,
+    blanks_purchased_date: null,
+    pg_requested_date: null,
     dye_costing_tracks: [defaultDyeCostingTrack()],
     print_embroidery_costing_tracks: [defaultPrintEmbroideryTrack()],
     costing_extra_tracks: [defaultCostingExtraTrack()],
@@ -71,9 +73,12 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
   return {
     ...job,
     scope_kind: job.scope_kind ?? "original",
-    job_type: job.job_type ?? "print_production",
+    job_type: job.job_type ?? (project !== undefined ? "print_production" : job.job_type),
     colorway: job.colorway ?? "",
     barcode: job.barcode ?? "",
+    po_number: job.po_number ?? null,
+    label_files: job.label_files ? [...job.label_files] : [],
+    label_lines: job.label_lines ? job.label_lines.map((l) => ({ ...l })) : [],
     estimate: { ...defaultJobEstimate(project), ...job.estimate },
     costing: {
       ...defaultJobCosting(project),

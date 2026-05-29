@@ -9,85 +9,100 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import type { Project } from "@/lib/types/project";
-import { WIP_COLUMNS } from "@/lib/wip-columns";
-import { formatCellValue } from "@/lib/format";
-import { MilestoneStrip } from "@/components/milestone-strip";
-import Link from "next/link";
+import type { ProjectJob } from "@/lib/types/wip";
+import { getProjects } from "@/lib/mock/projects";
+import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
+import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
+import { formatShortDate } from "@/lib/format";
+import { WipProgressSummary } from "@/components/wip-timeline";
+import { JobDetailsModal } from "@/components/job-details-modal";
+import { normalizeJob } from "@/lib/job-defaults";
+import { clientCodeByName } from "@/lib/reference/client-codes";
+import { loadContacts, vendorContacts } from "@/lib/contacts-store";
+import { JOB_WIP_COLUMNS, formatJobWipCell } from "@/lib/job-wip-columns";
 
-function Inspector({ project }: { project: Project }) {
-  return (
-    <aside className="shrink-0 border-t border-border-light bg-white px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-text-primary">Inspector</h2>
-          <p className="text-xs text-text-secondary">Selected job / project row</p>
-        </div>
-        <Link
-          href={`/projects/${project.id}`}
-          className="shrink-0 text-xs font-semibold text-accent hover:underline"
-        >
-          Open project detail →
-        </Link>
-      </div>
-      <dl className="mt-3 grid gap-4 text-xs sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5">
-        <div>
-          <dt className="text-text-secondary">Name</dt>
-          <dd className="mt-0.5 font-medium text-text-primary">{project.name}</dd>
-        </div>
-        <div>
-          <dt className="text-text-secondary">Client</dt>
-          <dd className="mt-0.5 font-medium text-text-primary">{project.client.name}</dd>
-        </div>
-        <div>
-          <dt className="text-text-secondary">Status</dt>
-          <dd className="mt-0.5 font-medium text-text-primary">{project.status}</dd>
-        </div>
-        <div>
-          <dt className="text-text-secondary">Due</dt>
-          <dd className="mt-0.5 font-medium text-text-primary">{formatCellValue(project.due_date)}</dd>
-        </div>
-        <div className="min-w-0 sm:col-span-2 md:col-span-4 lg:col-span-5">
-          <dt className="text-text-secondary">Milestones</dt>
-          <dd className="mt-1 overflow-x-auto">
-            <MilestoneStrip project={project} />
-          </dd>
-        </div>
-      </dl>
-    </aside>
-  );
+export type ProductionJobRow = ProjectJob & {
+  projectName: string;
+  clientName: string;
+};
+
+function parseInspectJob(raw: string | null): { projectId: number; jobId: string } | null {
+  if (!raw) return null;
+  const [pid, jid] = raw.split(":");
+  const projectId = Number(pid);
+  if (!Number.isFinite(projectId) || !jid) return null;
+  return { projectId, jobId: jid };
 }
 
-export function ProductionBoard({ projects }: { projects: Project[] }) {
+function rowKey(row: Pick<ProductionJobRow, "project_id" | "id">): string {
+  return `${row.project_id}:${row.id}`;
+}
+
+export function ProductionBoard({ projects: projectsProp }: { projects: Project[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [modalJob, setModalJob] = useState<{ project: Project; job: ProjectJob } | null>(null);
 
-  useEffect(() => {
-    const raw = searchParams.get("inspect");
-    const id = raw ? Number(raw) : NaN;
-    if (Number.isFinite(id)) setSelectedId(id);
-  }, [searchParams]);
-
-  const selected = useMemo(
-    () => projects.find((p) => p.id === selectedId) ?? null,
-    [projects, selectedId],
+  const projects = useMemo(
+    () => mergeProjectLists(projectsProp.length ? projectsProp : getProjects(), readSessionProjects()),
+    [projectsProp],
   );
 
-  const columns: ColumnDef<Project>[] = useMemo(
+  const jobRows = useMemo(() => {
+    const rows: ProductionJobRow[] = [];
+    for (const p of projects) {
+      for (const j of loadProjectJobs(p.id, p)) {
+        rows.push({
+          ...j,
+          projectName: p.name,
+          clientName: p.client.name,
+        });
+      }
+    }
+    return rows;
+  }, [projects]);
+
+  const vendors = useMemo(() => vendorContacts(loadContacts()), []);
+
+  const openRowKey = modalJob ? rowKey({ project_id: modalJob.project.id, id: modalJob.job.id }) : null;
+
+  useEffect(() => {
+    const parsed = parseInspectJob(searchParams.get("inspectJob"));
+    if (!parsed) return;
+    const project = projects.find((p) => p.id === parsed.projectId);
+    const job = project ? loadProjectJobs(project.id, project).find((j) => j.id === parsed.jobId) : null;
+    if (project && job) {
+      setModalJob({ project, job });
+    }
+  }, [searchParams, projects]);
+
+  const columns: ColumnDef<ProductionJobRow>[] = useMemo(
     () => [
+      { id: "job", header: "Job", size: 160, accessorFn: (r) => r.name, cell: ({ row }) => row.original.name || "—" },
+      { id: "project", header: "Project", size: 140, accessorFn: (r) => r.projectName },
+      { id: "client", header: "Client", size: 120, accessorFn: (r) => r.clientName },
+      { id: "po", header: "PO #", size: 130, accessorFn: (r) => r.po_number ?? "" },
+      { id: "status", header: "Status", size: 110, accessorFn: (r) => r.status },
       {
-        id: "milestones",
-        header: "Milestones",
+        id: "progress",
+        header: "Progress",
         size: 120,
-        cell: ({ row }) => <MilestoneStrip project={row.original} />,
+        cell: ({ row }) => <WipProgressSummary steps={row.original.timeline} />,
       },
-      ...WIP_COLUMNS.map(
-        (c): ColumnDef<Project> => ({
+      {
+        id: "due",
+        header: "Due",
+        size: 100,
+        accessorFn: (r) => r.due_date,
+        cell: ({ getValue }) => formatShortDate(getValue() as string | null),
+      },
+      ...JOB_WIP_COLUMNS.map(
+        (c): ColumnDef<ProductionJobRow> => ({
           id: c.id,
           header: c.label,
           size: c.minWidth,
           accessorFn: (row) => c.accessor(row),
-          cell: ({ getValue }) => formatCellValue(getValue()),
+          cell: ({ getValue }) => formatJobWipCell(getValue()),
         }),
       ),
     ],
@@ -95,23 +110,45 @@ export function ProductionBoard({ projects }: { projects: Project[] }) {
   );
 
   const table = useReactTable({
-    data: projects,
+    data: jobRows,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const onPickRow = (id: number) => {
-    setSelectedId(id);
-    router.replace(`/production?inspect=${id}`, { scroll: false });
-  };
+  function openJobModal(row: ProductionJobRow) {
+    const project = projects.find((p) => p.id === row.project_id);
+    if (!project) return;
+    const job = loadProjectJobs(project.id, project).find((j) => j.id === row.id);
+    if (!job) return;
+    setModalJob({ project, job });
+    router.replace(
+      `/production?inspectJob=${row.project_id}:${encodeURIComponent(row.id)}`,
+      { scroll: false },
+    );
+  }
 
-  const openProjectDetail = (id: number) => {
-    router.push(`/projects/${id}`);
-  };
+  function closeJobModal() {
+    setModalJob(null);
+    router.replace("/production", { scroll: false });
+  }
+
+  function handleSaveJob(saved: ProjectJob) {
+    if (!modalJob) return;
+    const current = loadProjectJobs(modalJob.project.id, modalJob.project);
+    const next = current.some((j) => j.id === saved.id)
+      ? current.map((j) => (j.id === saved.id ? saved : j))
+      : [...current, saved];
+    saveProjectJobs(modalJob.project.id, next);
+    setModalJob({ project: modalJob.project, job: saved });
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-white p-4 lg:p-6">
+        <p className="mb-3 text-xs text-text-secondary">
+          Click a row to open Job Details. Share a link with{" "}
+          <code className="rounded bg-surface-body px-1">?inspectJob=projectId:jobId</code>
+        </p>
         <table className="min-w-max border-collapse bg-white text-left text-xs">
           <thead>
             {table.getHeaderGroups().map((hg) => (
@@ -130,14 +167,19 @@ export function ProductionBoard({ projects }: { projects: Project[] }) {
           </thead>
           <tbody className="bg-white">
             {table.getRowModel().rows.map((row) => {
-              const active = selectedId === row.original.id;
+              const key = rowKey(row.original);
+              const active = openRowKey === key;
               return (
                 <tr
                   key={row.id}
-                  onClick={() => onPickRow(row.original.id)}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    openProjectDetail(row.original.id);
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openJobModal(row.original)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openJobModal(row.original);
+                    }
                   }}
                   className={`cursor-pointer border-b border-border-light bg-white ${
                     active ? "bg-slate-50 ring-1 ring-inset ring-accent/25" : "hover:bg-slate-50"
@@ -158,14 +200,20 @@ export function ProductionBoard({ projects }: { projects: Project[] }) {
           </tbody>
         </table>
       </div>
-      {selected ? (
-        <Inspector project={selected} />
-      ) : (
-        <aside className="flex shrink-0 items-center justify-center border-t border-border-light bg-white px-6 py-4 text-sm text-text-secondary">
-          Select a row to inspect, or double-click a row to open project details. Add{" "}
-          <code className="mx-1 rounded bg-surface-body px-1">?inspect=1</code> to the URL to deep-link.
-        </aside>
-      )}
+
+      {modalJob ? (
+        <JobDetailsModal
+          project={modalJob.project}
+          job={normalizeJob(modalJob.job, modalJob.project)}
+          allJobs={loadProjectJobs(modalJob.project.id, modalJob.project)}
+          clientCode={clientCodeByName(modalJob.project.client.name) ?? "GG"}
+          vendors={vendors}
+          onClose={closeJobModal}
+          onSave={(saved) => {
+            handleSaveJob(saved);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

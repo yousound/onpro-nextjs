@@ -35,7 +35,7 @@ export function ProjectsBrowser({ projects }: { projects: Project[] }) {
       if (status !== "ALL" && p.status !== status) return false;
       if (clientId !== "ALL" && p.client.id !== clientId) return false;
       if (!needle) return true;
-      const blob = `${p.name} ${p.client.name} ${p.project_number ?? ""} ${p.style_number ?? ""}`.toLowerCase();
+      const blob = `${p.name} ${p.client.name} ${p.project_number ?? ""} ${p.style_number ?? ""} ${p.po_number ?? ""}`.toLowerCase();
       return blob.includes(needle);
     });
   }, [projects, q, status, clientId]);

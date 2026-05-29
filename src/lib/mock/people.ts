@@ -47,6 +47,14 @@ export const MOCK_DIRECTORY_PEOPLE: DirectoryPerson[] = [
     phone: "+1 415 555 0102",
   },
   {
+    id: "p-cd",
+    segment: "vendor",
+    name: "Warehouse Ops",
+    email: "ops@connectdots.co",
+    company: "Connect Dots",
+    phone: "+1 310 555 0199",
+  },
+  {
     id: "p3",
     segment: "vendor",
     name: "Alex Chen",

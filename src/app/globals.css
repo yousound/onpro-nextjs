@@ -59,6 +59,18 @@ body {
   .scrollbar-light-gray::-webkit-scrollbar-thumb:hover {
     background: #d9dce2;
   }
+
+  /** Hide scrollbar but keep touch/trackpad scroll (e.g. invitee cards). */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 
 :focus-visible {

@@ -1,4 +1,5 @@
 import type { DocumentRow } from "@/lib/types/documents";
+import type { CalendarEventType } from "@/lib/types/calendar";
 
 export type ChatAttachmentKind =
   | "job"
@@ -9,6 +10,7 @@ export type ChatAttachmentKind =
   | "payment"
   | "invoice"
   | "receiving"
+  | "packing_list"
   | "tracking"
   | "task"
   | "calendar_event";
@@ -24,6 +26,8 @@ export type ComposerLineDraft = {
 export type AttachmentComposerDraft = {
   v: 1;
   kind: ChatAttachmentKind;
+  /** `kind:entityId` from attachment-composer-sources (job, packing, doc, etc.). */
+  selectedSourceId: string;
   invoiceNo: string;
   projectName: string;
   issued: string;
@@ -46,12 +50,16 @@ export type AttachmentComposerDraft = {
   poLines: string;
   estNo: string;
   estScope: string;
+  /** Links to `ProjectJob.id` when shared from a project thread. */
+  jobId: string;
   jobName: string;
   jobSubtitle: string;
   jobType: string;
   jobLeadVendor: string;
   jobCategory: string;
   jobStyleNumber: string;
+  jobColorway: string;
+  jobPoNumber: string;
   jobStatus: string;
   jobDue: string;
   approvalFile: string;
@@ -60,13 +68,22 @@ export type AttachmentComposerDraft = {
   payNote: string;
   recvBol: string;
   recvSummary: string;
+  packingListNo: string;
+  packingCompanyName: string;
+  packingShipDate: string;
   trackCarrier: string;
   trackNo: string;
   taskTitle: string;
   taskAssignee: string;
   calTitle: string;
+  /** Display string for thread subtitle (derived from date + times). */
   calWhen: string;
   calWhere: string;
+  calDate: string;
+  calStart: string;
+  calEnd: string;
+  calType: CalendarEventType;
+  calDesc: string;
 };
 
 function isoDate(d: Date) {
@@ -84,6 +101,7 @@ export function defaultAttachmentComposerDraft(roomTitle: string, refDate = new 
   jobDue.setDate(jobDue.getDate() + 45);
   return {
     v: 1,
+    selectedSourceId: "",
     kind: "invoice",
     invoiceNo: "INV-2026-0142",
     projectName: "Filllo Product Design",
@@ -110,12 +128,15 @@ export function defaultAttachmentComposerDraft(roomTitle: string, refDate = new 
     poLines: "Bulk fleece — 2,400 units · 3 colorways",
     estNo: "EST-2026-0044",
     estScope: "Sampling + TOP cycle for capsule.",
-    jobName: "Olive capsule",
-    jobSubtitle: "Print / Decoration on blanks",
-    jobType: "PRINT / DECORATION ON BLANKS",
+    jobId: "",
+    jobName: "NO HUMANS ALLOWED TEE",
+    jobSubtitle: "TEES",
+    jobType: "PRINT PRODUCTION",
     jobLeadVendor: "Millworks Collective",
-    jobCategory: "SWEATSHIRT",
-    jobStyleNumber: "GGP15-OLV",
+    jobCategory: "Tee",
+    jobStyleNumber: "GGT148",
+    jobColorway: "Black",
+    jobPoNumber: "GG-2026-05-001",
     jobStatus: "In progress",
     jobDue: isoDate(jobDue),
     approvalFile: "strike-off-v2.pdf",
@@ -124,13 +145,21 @@ export function defaultAttachmentComposerDraft(roomTitle: string, refDate = new 
     payNote: "Net 30 · ACH preferred",
     recvBol: "BOL-99821",
     recvSummary: "2 cartons · Glo Gang bulk",
+    packingListNo: "GG240816",
+    packingCompanyName: "Connect Dots",
+    packingShipDate: isoDate(refDate),
     trackCarrier: "FedEx",
     trackNo: "7844 1200 3391",
     taskTitle: "Upload TOP photos",
     taskAssignee: roomTitle,
-    calTitle: "Lab dip review — Mind Body",
-    calWhen: "Wed 2:30 PM",
-    calWhere: "Zoom",
+    calTitle: "",
+    calWhen: "",
+    calWhere: "",
+    calDate: isoDate(refDate),
+    calStart: "10:00",
+    calEnd: "11:00",
+    calType: "meeting",
+    calDesc: "",
   };
 }
 
@@ -144,6 +173,7 @@ function isChatKind(k: string): k is ChatAttachmentKind {
     k === "payment" ||
     k === "invoice" ||
     k === "receiving" ||
+    k === "packing_list" ||
     k === "tracking" ||
     k === "task" ||
     k === "calendar_event"
@@ -169,6 +199,7 @@ export function coerceAttachmentComposerDraft(raw: unknown, roomTitle: string): 
     ...base,
     ...o,
     kind: o.kind,
+    selectedSourceId: o.selectedSourceId ?? base.selectedSourceId,
     lines,
   };
 }
@@ -210,13 +241,15 @@ export function fallbackDraftFromSmartAttachment(
         poLines: a.subtitle?.split("·").slice(1).join("·").trim() || a.subtitle || base.poLines,
       };
     }
-    case "job":
+    case "job": {
+      const matched = a.title.trim();
       return {
         ...next,
-        jobName: a.title.trim() || base.jobName,
+        jobName: matched || base.jobName,
         jobSubtitle: a.subtitle?.trim() || base.jobSubtitle,
         jobStatus: a.badge?.trim() || base.jobStatus,
       };
+    }
     case "estimate": {
       const m = /^Estimate\s+(.+)$/i.exec(a.title.trim());
       return { ...next, estNo: m?.[1]?.trim() || base.estNo };
@@ -233,6 +266,14 @@ export function fallbackDraftFromSmartAttachment(
     }
     case "receiving":
       return { ...next, recvBol: a.title.trim() || base.recvBol, recvSummary: a.subtitle || base.recvSummary };
+    case "packing_list": {
+      const m = /^Packing list\s+(.+)$/i.exec(a.title.trim());
+      return {
+        ...next,
+        packingListNo: m?.[1]?.trim() || base.packingListNo,
+        toName: a.subtitle?.split("·")[0]?.trim() || base.toName,
+      };
+    }
     case "tracking":
       return {
         ...next,

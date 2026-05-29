@@ -7,6 +7,49 @@ import {
   coerceAttachmentComposerDraft,
   defaultAttachmentComposerDraft,
 } from "@/lib/attachment-composer-draft";
+import {
+  blankJobComposerFields,
+  draftFieldsFromProjectJob,
+  findProjectJobForDraft,
+  jobAttachmentSubtitle,
+  jobAttachmentTitle,
+} from "@/lib/attachment-composer-job";
+import { JobDetailsModal } from "@/components/job-details-modal";
+import { normalizeJob } from "@/lib/job-defaults";
+import { MOCK_LS, readMockLs } from "@/lib/mock-local";
+import { getProjectById } from "@/lib/mock/projects";
+import { AttachmentPreviewModal } from "@/components/attachment-preview-modal";
+import { AttachmentSourcePicker } from "@/components/attachment-source-picker";
+import {
+  applyAttachmentSource,
+  draftFromPackingSlip,
+  listAttachmentSources,
+  newAttachmentDraftForKind,
+  sourcePickerLabel,
+  type AttachmentSourceContext,
+} from "@/lib/attachment-composer-sources";
+import { createNewJobSeed } from "@/lib/project-job-create";
+import { createPackingSlipDraft } from "@/lib/packing-slip";
+import {
+  blankCalendarComposerFields,
+  buildCalendarEventFromComposer,
+  calendarWhenFromDraft,
+  loadAllCalendarEvents,
+  parseCalendarSourceId,
+  upsertCalendarEvent,
+} from "@/lib/calendar-events-store";
+import { getCalendarEvents } from "@/lib/mock/calendar-events";
+import type { CalendarEventType } from "@/lib/types/calendar";
+import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
+import { loadContacts, vendorContacts } from "@/lib/contacts-store";
+import { ContactFieldSelect, contactFieldsFromPick } from "@/components/contact-field-select";
+import { SearchableSelect } from "@/components/searchable-select";
+import { VendorFieldSelect } from "@/components/vendor-select";
+import { mockDocuments } from "@/lib/mock/documents";
+import { clientCodeByName } from "@/lib/reference/client-codes";
+import type { Contact } from "@/lib/types/contact";
+import type { Project } from "@/lib/types/project";
+import type { ProjectJob } from "@/lib/types/wip";
 
 export type { AttachmentComposerDraft, ChatAttachmentKind } from "@/lib/attachment-composer-draft";
 
@@ -73,6 +116,14 @@ function KindIcon({ kind, className }: { kind: ChatAttachmentKind; className?: s
           <line x1="12" y1="22.08" x2="12" y2="12" />
         </svg>
       );
+    case "packing_list":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M9 3h6l2 4H7l2-4z" />
+          <path d="M5 7h14v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7z" />
+          <path d="M9 12h6M9 16h4" />
+        </svg>
+      );
     case "tracking":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
@@ -113,7 +164,7 @@ const KIND_META: {
   title: string;
   description: string;
 }[] = [
-  { id: "job", title: "Jobs", description: "Share a job / colorway & WIP to chat" },
+  { id: "job", title: "Jobs", description: "Select or create a project job to share in chat" },
   { id: "estimate", title: "Estimates", description: "Create an estimate & send to chat" },
   { id: "quote", title: "Quotes", description: "Create a quote & send it to chat" },
   { id: "approval", title: "Approvals", description: "Select a file for approval" },
@@ -121,9 +172,10 @@ const KIND_META: {
   { id: "payment", title: "Payments", description: "Request payment & send options" },
   { id: "invoice", title: "Invoices", description: "Create an invoice & send to chat" },
   { id: "receiving", title: "Receiving", description: "Receiving doc & share with chat" },
+  { id: "packing_list", title: "Packing list", description: "Outbound packing list & send to chat" },
   { id: "tracking", title: "Tracking", description: "Carrier + tracking to chat" },
   { id: "task", title: "Task", description: "Assign a task in this thread" },
-  { id: "calendar_event", title: "Calendar Event", description: "Share a calendar event" },
+  { id: "calendar_event", title: "Calendar Event", description: "Pick an event or create a new one for Calendar" },
 ];
 
 function Accordion({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
@@ -204,6 +256,9 @@ export function MessageAttachmentComposer(props: {
   mode: "new" | "edit";
   onClose: () => void;
   roomTitle: string;
+  /** When set, job attachments pick from live project jobs (same as Projects → Jobs). */
+  projectId?: number | null;
+  linkedProjectName?: string | null;
   onSend: (attachment: ThreadSmartAttachment, timeLabel: string) => void;
   /** `document` = paper-style inline edit (from thread tap). `workspace` = full builder (+ menu). */
   layout?: "workspace" | "document";
@@ -215,6 +270,8 @@ export function MessageAttachmentComposer(props: {
     mode,
     onClose,
     roomTitle,
+    projectId = null,
+    linkedProjectName = null,
     onSend,
     layout = "workspace",
   } = props;
@@ -258,12 +315,15 @@ export function MessageAttachmentComposer(props: {
   });
   const [poLines, setPoLines] = useState("Bulk fleece — 2,400 units · 3 colorways");
 
-  const [jobName, setJobName] = useState("Olive capsule");
-  const [jobSubtitle, setJobSubtitle] = useState("Print / Decoration on blanks");
-  const [jobType, setJobType] = useState("PRINT / DECORATION ON BLANKS");
+  const [jobId, setJobId] = useState("");
+  const [jobName, setJobName] = useState("NO HUMANS ALLOWED TEE");
+  const [jobSubtitle, setJobSubtitle] = useState("TEES");
+  const [jobType, setJobType] = useState("PRINT PRODUCTION");
   const [jobLeadVendor, setJobLeadVendor] = useState("Millworks Collective");
-  const [jobCategory, setJobCategory] = useState("SWEATSHIRT");
-  const [jobStyleNumber, setJobStyleNumber] = useState("GGP15-OLV");
+  const [jobCategory, setJobCategory] = useState("Tee");
+  const [jobStyleNumber, setJobStyleNumber] = useState("GGT148");
+  const [jobColorway, setJobColorway] = useState("Black");
+  const [jobPoNumber, setJobPoNumber] = useState("GG-2026-05-001");
   const [jobStatus, setJobStatus] = useState("In progress");
   const [jobDue, setJobDue] = useState(() => {
     const d = new Date();
@@ -283,24 +343,130 @@ export function MessageAttachmentComposer(props: {
   const [recvBol, setRecvBol] = useState("BOL-99821");
   const [recvSummary, setRecvSummary] = useState("2 cartons · Glo Gang bulk");
 
+  const [packingListNo, setPackingListNo] = useState("GG240816");
+  const [packingCompanyName, setPackingCompanyName] = useState("Connect Dots");
+  const [packingShipDate, setPackingShipDate] = useState(() => new Date().toISOString().slice(0, 10));
+
   const [trackCarrier, setTrackCarrier] = useState("FedEx");
   const [trackNo, setTrackNo] = useState("7844 1200 3391");
 
   const [taskTitle, setTaskTitle] = useState("Upload TOP photos");
   const [taskAssignee, setTaskAssignee] = useState(roomTitle);
 
-  const [calTitle, setCalTitle] = useState("Lab dip review — Mind Body");
-  const [calWhen, setCalWhen] = useState("Wed 2:30 PM");
-  const [calWhere, setCalWhere] = useState("Zoom");
+  const [calTitle, setCalTitle] = useState("");
+  const [calWhen, setCalWhen] = useState("");
+  const [calWhere, setCalWhere] = useState("");
+  const [calDate, setCalDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [calStart, setCalStart] = useState("10:00");
+  const [calEnd, setCalEnd] = useState("11:00");
+  const [calType, setCalType] = useState<CalendarEventType>("meeting");
+  const [calDesc, setCalDesc] = useState("");
+  const [calRevision, setCalRevision] = useState(0);
 
   const meta = useMemo(() => KIND_META.find((k) => k.id === kind)!, [kind]);
 
-  useEffect(() => {
-    if (!open) return;
-    const d = initialDraft
-      ? (coerceAttachmentComposerDraft(initialDraft, roomTitle) ?? defaultAttachmentComposerDraft(roomTitle))
-      : defaultAttachmentComposerDraft(roomTitle);
+  const [jobsRevision, setJobsRevision] = useState(0);
+  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [jobModal, setJobModal] = useState<
+    { kind: "new"; seed: ProjectJob } | { kind: "edit"; jobId: string } | null
+  >(null);
+
+  const linkedProject = useMemo((): Project | null => {
+    if (projectId == null) return null;
+    const base = getProjectById(projectId);
+    if (!base) return null;
+    const patch = readMockLs<Partial<Project>>(MOCK_LS.project(projectId));
+    return { ...base, ...(patch && typeof patch === "object" ? patch : {}) };
+  }, [projectId, open, sessionKey, jobsRevision]);
+
+  const projectJobs = useMemo(() => {
+    if (!linkedProject) return [];
+    return loadProjectJobs(linkedProject.id, linkedProject);
+  }, [linkedProject, jobsRevision]);
+
+  const clientCode = useMemo(
+    () => (linkedProject ? clientCodeByName(linkedProject.client.name) ?? "GG" : "GG"),
+    [linkedProject],
+  );
+
+  const contacts = useMemo(() => loadContacts(), []);
+  const vendors = useMemo(() => vendorContacts(contacts), [contacts]);
+
+  function applyFromContact(contact: Contact | null) {
+    if (!contact) {
+      setFromName("");
+      setFromAddr("");
+      setFromEmail("");
+      return;
+    }
+    const { name, address, email } = contactFieldsFromPick(contact, contacts);
+    setFromName(name);
+    setFromAddr(address);
+    setFromEmail(email);
+  }
+
+  function applyToContact(contact: Contact | null) {
+    if (!contact) {
+      setToName("");
+      setToAddr("");
+      return;
+    }
+    const { name, address } = contactFieldsFromPick(contact, contacts);
+    setToName(name);
+    setToAddr(address);
+  }
+
+  function applyVendorContact(contact: Contact | null) {
+    if (!contact) {
+      setVendor("");
+      return;
+    }
+    const { name } = contactFieldsFromPick(contact, contacts);
+    setVendor(name);
+  }
+
+  const projectDocuments = useMemo(() => {
+    if (!linkedProject) return [];
+    return mockDocuments.filter((d) => d.project_id === linkedProject.id);
+  }, [linkedProject]);
+
+  const seedCalendarEvents = useMemo(() => getCalendarEvents(), []);
+  const seedCalendarIds = useMemo(
+    () => new Set(seedCalendarEvents.map((e) => e.id)),
+    [seedCalendarEvents],
+  );
+  const calendarEvents = useMemo(
+    () => loadAllCalendarEvents(seedCalendarEvents),
+    [seedCalendarEvents, calRevision],
+  );
+
+  const sourceContext: AttachmentSourceContext = useMemo(
+    () => ({
+      project: linkedProject,
+      jobs: projectJobs,
+      documents: projectDocuments,
+      calendarEvents,
+      roomTitle,
+    }),
+    [linkedProject, projectJobs, projectDocuments, calendarEvents, roomTitle],
+  );
+
+  const sourceOptions = useMemo(
+    () => listAttachmentSources(kind, sourceContext),
+    [kind, sourceContext],
+  );
+
+  const jobModalJob = useMemo(() => {
+    if (!jobModal || !linkedProject) return null;
+    if (jobModal.kind === "new") return normalizeJob(jobModal.seed, undefined);
+    const found = projectJobs.find((j) => j.id === jobModal.jobId);
+    return found ? normalizeJob(found, linkedProject) : null;
+  }, [jobModal, linkedProject, projectJobs]);
+
+  function applyDraftFrom(d: AttachmentComposerDraft) {
     setKind(d.kind);
+    setSelectedSourceId(d.selectedSourceId ?? "");
     setInvoiceNo(d.invoiceNo);
     setProjectName(d.projectName);
     setIssued(d.issued);
@@ -323,12 +489,15 @@ export function MessageAttachmentComposer(props: {
     setPoLines(d.poLines);
     setEstNo(d.estNo);
     setEstScope(d.estScope);
+    setJobId(d.jobId ?? "");
     setJobName(d.jobName);
     setJobSubtitle(d.jobSubtitle);
     setJobType(d.jobType);
     setJobLeadVendor(d.jobLeadVendor);
     setJobCategory(d.jobCategory);
     setJobStyleNumber(d.jobStyleNumber);
+    setJobColorway(d.jobColorway ?? "");
+    setJobPoNumber(d.jobPoNumber ?? "");
     setJobStatus(d.jobStatus);
     setJobDue(d.jobDue);
     setApprovalFile(d.approvalFile);
@@ -337,6 +506,9 @@ export function MessageAttachmentComposer(props: {
     setPayNote(d.payNote);
     setRecvBol(d.recvBol);
     setRecvSummary(d.recvSummary);
+    setPackingListNo(d.packingListNo);
+    setPackingCompanyName(d.packingCompanyName);
+    setPackingShipDate(d.packingShipDate);
     setTrackCarrier(d.trackCarrier);
     setTrackNo(d.trackNo);
     setTaskTitle(d.taskTitle);
@@ -344,15 +516,96 @@ export function MessageAttachmentComposer(props: {
     setCalTitle(d.calTitle);
     setCalWhen(d.calWhen);
     setCalWhere(d.calWhere);
-  }, [open, sessionKey, roomTitle, initialDraft]);
+    setCalDate(d.calDate);
+    setCalStart(d.calStart);
+    setCalEnd(d.calEnd);
+    setCalType(d.calType);
+    setCalDesc(d.calDesc);
+  }
+
+  function applyProjectJob(job: ProjectJob | null) {
+    if (!job) {
+      const blank = blankJobComposerFields();
+      setJobId(blank.jobId);
+      setJobName(blank.jobName);
+      setJobSubtitle(blank.jobSubtitle);
+      setJobType(blank.jobType);
+      setJobLeadVendor(blank.jobLeadVendor);
+      setJobCategory(blank.jobCategory);
+      setJobStyleNumber(blank.jobStyleNumber);
+      setJobColorway(blank.jobColorway);
+      setJobPoNumber(blank.jobPoNumber);
+      setJobStatus(blank.jobStatus);
+      setJobDue(blank.jobDue);
+      return;
+    }
+    const f = draftFieldsFromProjectJob(job);
+    setJobId(f.jobId);
+    setJobName(f.jobName);
+    setJobSubtitle(f.jobSubtitle);
+    setJobType(f.jobType);
+    setJobLeadVendor(f.jobLeadVendor);
+    setJobCategory(f.jobCategory);
+    setJobStyleNumber(f.jobStyleNumber);
+    setJobColorway(f.jobColorway);
+    setJobPoNumber(f.jobPoNumber);
+    setJobStatus(f.jobStatus);
+    setJobDue(f.jobDue);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const d = initialDraft
+      ? (coerceAttachmentComposerDraft(initialDraft, roomTitle) ?? defaultAttachmentComposerDraft(roomTitle))
+      : defaultAttachmentComposerDraft(roomTitle);
+    applyDraftFrom(d);
+    if (projectId != null && projectJobs.length > 0) {
+      const matched = findProjectJobForDraft(projectJobs, d);
+      if (matched && !d.selectedSourceId) {
+        applyDraftFrom({
+          ...d,
+          selectedSourceId: `job:${matched.id}`,
+          ...draftFieldsFromProjectJob(matched),
+        });
+      }
+    }
+    if (linkedProjectName?.trim()) {
+      setProjectName(linkedProjectName.trim());
+    }
+  }, [open, sessionKey, roomTitle, initialDraft, projectId, projectJobs, linkedProjectName]);
+
+  useEffect(() => {
+    if (!open) {
+      setJobModal(null);
+      setPreviewOpen(false);
+    }
+  }, [open, sessionKey]);
+
+  function handleComposerJobSave(saved: ProjectJob) {
+    if (!linkedProject) return;
+    const next =
+      jobModal?.kind === "new"
+        ? [...projectJobs, saved]
+        : projectJobs.map((j) => (j.id === saved.id ? saved : j));
+    saveProjectJobs(linkedProject.id, next);
+    setJobsRevision((r) => r + 1);
+    applyProjectJob(saved);
+    setSelectedSourceId(`job:${saved.id}`);
+    setJobModal(null);
+  }
 
   const invoiceTotal = useMemo(() => {
     return lines.reduce((s, l) => s + (Number(l.price) || 0) * (Number(l.units) || 0), 0);
   }, [lines]);
 
+  const packingTotalPieces = useMemo(() => {
+    return lines.reduce((s, l) => s + (Number(l.units) || 0), 0);
+  }, [lines]);
+
   function buildSnapshot(): AttachmentComposerDraft {
     return {
       v: 1,
+      selectedSourceId,
       kind,
       invoiceNo,
       projectName,
@@ -376,12 +629,15 @@ export function MessageAttachmentComposer(props: {
       poLines,
       estNo,
       estScope,
+      jobId,
       jobName,
       jobSubtitle,
       jobType,
       jobLeadVendor,
       jobCategory,
       jobStyleNumber,
+      jobColorway,
+      jobPoNumber,
       jobStatus,
       jobDue,
       approvalFile,
@@ -390,6 +646,9 @@ export function MessageAttachmentComposer(props: {
       payNote,
       recvBol,
       recvSummary,
+      packingListNo,
+      packingCompanyName,
+      packingShipDate,
       trackCarrier,
       trackNo,
       taskTitle,
@@ -397,11 +656,80 @@ export function MessageAttachmentComposer(props: {
       calTitle,
       calWhen,
       calWhere,
+      calDate,
+      calStart,
+      calEnd,
+      calType,
+      calDesc,
     };
   }
 
-  function buildAttachment(): ThreadSmartAttachment {
-    const composer_draft = buildSnapshot();
+  function saveCalendarEventFromForm(): AttachmentComposerDraft | null {
+    if (!calTitle.trim()) return null;
+    const existingId = parseCalendarSourceId(selectedSourceId);
+    const ev = buildCalendarEventFromComposer({
+      calTitle,
+      calDate,
+      calStart,
+      calEnd,
+      calType,
+      calDesc,
+      calWhere,
+      linkToClient: linkedProject?.client.name ?? roomTitle,
+      existingId,
+    });
+    const saved = upsertCalendarEvent(ev, seedCalendarIds);
+    const when = calendarWhenFromDraft(calDate, calStart, calEnd);
+    setSelectedSourceId(`calendar:${saved.id}`);
+    setCalWhen(when);
+    setCalRevision((r) => r + 1);
+    return {
+      ...buildSnapshot(),
+      selectedSourceId: `calendar:${saved.id}`,
+      calWhen: when,
+    };
+  }
+
+  function handleKindChange(next: ChatAttachmentKind) {
+    if (next !== kind) setSelectedSourceId("");
+    setKind(next);
+  }
+
+  function handleSelectSource(sourceId: string) {
+    setSelectedSourceId(sourceId);
+    if (!sourceId) return;
+    const next = applyAttachmentSource(kind, sourceId, buildSnapshot(), sourceContext);
+    if (next) applyDraftFrom(next);
+  }
+
+  function handleCreateNewKind() {
+    if (kind === "job" && linkedProject) {
+      setSelectedSourceId("");
+      applyProjectJob(null);
+      setJobModal({ kind: "new", seed: createNewJobSeed(linkedProject, projectJobs) });
+      return;
+    }
+    if (kind === "calendar_event") {
+      setSelectedSourceId("");
+      const blank = defaultAttachmentComposerDraft(roomTitle);
+      applyDraftFrom({
+        ...blank,
+        kind: "calendar_event",
+        ...blankCalendarComposerFields(roomTitle, linkedProject?.client.name),
+      });
+      return;
+    }
+    const fresh = newAttachmentDraftForKind(kind, sourceContext);
+    if (kind === "packing_list" && linkedProject) {
+      const slip = createPackingSlipDraft(linkedProject, projectJobs, loadContacts());
+      applyDraftFrom(draftFromPackingSlip(slip, roomTitle, fresh));
+      return;
+    }
+    applyDraftFrom(fresh);
+  }
+
+  function buildAttachment(draftOverride?: AttachmentComposerDraft): ThreadSmartAttachment {
+    const composer_draft = draftOverride ?? buildSnapshot();
     switch (kind) {
       case "invoice":
         return {
@@ -427,14 +755,20 @@ export function MessageAttachmentComposer(props: {
           badge: poShip,
           composer_draft,
         };
-      case "job":
+      case "job": {
+        const linked = projectJobs.find((j) => j.id === jobId);
+        const title = linked ? jobAttachmentTitle(linked) : jobName.trim() || "Untitled job";
+        const subtitle = linked
+          ? jobAttachmentSubtitle(linked)
+          : [jobSubtitle, jobStyleNumber, jobColorway, jobType, jobLeadVendor].filter(Boolean).join(" · ");
         return {
           kind,
-          title: jobName.trim() || "Untitled job",
-          subtitle: jobSubtitle.trim() || [jobType, jobLeadVendor].filter(Boolean).join(" · "),
+          title,
+          subtitle,
           badge: jobStatus,
           composer_draft,
         };
+      }
       case "estimate":
         return { kind, title: `Estimate ${estNo}`, subtitle: roomTitle, badge: "Draft", composer_draft };
       case "approval":
@@ -455,6 +789,14 @@ export function MessageAttachmentComposer(props: {
         };
       case "receiving":
         return { kind, title: recvBol, subtitle: recvSummary, badge: "Receiving", composer_draft };
+      case "packing_list":
+        return {
+          kind,
+          title: `Packing list ${packingListNo}`,
+          subtitle: `${toName} · ${packingTotalPieces} pcs`,
+          badge: "Packing list",
+          composer_draft,
+        };
       case "tracking":
         return {
           kind,
@@ -471,22 +813,30 @@ export function MessageAttachmentComposer(props: {
           badge: "Task",
           composer_draft,
         };
-      case "calendar_event":
+      case "calendar_event": {
+        const when =
+          composer_draft.calWhen ||
+          calendarWhenFromDraft(composer_draft.calDate, composer_draft.calStart, composer_draft.calEnd);
+        const where = composer_draft.calWhere.trim();
         return {
           kind,
-          title: calTitle,
-          subtitle: `${calWhen} · ${calWhere}`,
+          title: composer_draft.calTitle.trim() || "Calendar event",
+          subtitle: where ? `${when} · ${where}` : when,
           badge: "Event",
           composer_draft,
         };
+      }
       default:
         return { kind: "invoice", title: "Document", subtitle: roomTitle, composer_draft };
     }
   }
 
   function send() {
+    const draft =
+      kind === "calendar_event" ? saveCalendarEventFromForm() : buildSnapshot();
+    if (kind === "calendar_event" && !draft) return;
     const now = new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-    onSend(buildAttachment(), now);
+    onSend(buildAttachment(draft ?? undefined), now);
     onClose();
   }
 
@@ -588,12 +938,15 @@ export function MessageAttachmentComposer(props: {
 
               <div className="mt-6 grid gap-6 sm:grid-cols-2">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase text-slate-400">From</p>
-                  <input
+                  <ContactFieldSelect
+                    label="From"
+                    scope="from"
+                    contacts={contacts}
                     value={fromName}
-                    onChange={(e) => setFromName(e.target.value)}
-                    className={`${docIn} mt-2 font-medium`}
-                    aria-label="From name"
+                    onPick={applyFromContact}
+                    emptyLabel="Select sender…"
+                    variant="document"
+                    labelClassName="text-[11px] font-semibold uppercase text-slate-400"
                   />
                   <input
                     value={fromAddr}
@@ -609,12 +962,15 @@ export function MessageAttachmentComposer(props: {
                   />
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase text-slate-400">Bill to</p>
-                  <input
+                  <ContactFieldSelect
+                    label="Bill to"
+                    scope="client"
+                    contacts={contacts}
                     value={toName}
-                    onChange={(e) => setToName(e.target.value)}
-                    className={`${docIn} mt-2 font-medium`}
-                    aria-label="Bill to name"
+                    onPick={applyToContact}
+                    emptyLabel="Select client…"
+                    variant="document"
+                    labelClassName="text-[11px] font-semibold uppercase text-slate-400"
                   />
                   <textarea
                     value={toAddr}
@@ -788,12 +1144,26 @@ export function MessageAttachmentComposer(props: {
         <span className="font-semibold">Tip:</span> save as draft in a future build; for now this sends a rich card to the thread (mock).
       </p>
       <Accordion title="My details" defaultOpen>
-        <Field label="Legal / from name" value={fromName} onChange={(e) => setFromName(e.target.value)} />
+        <ContactFieldSelect
+          label="From (vendor / team)"
+          scope="from"
+          contacts={contacts}
+          value={fromName}
+          onPick={applyFromContact}
+          emptyLabel="Select sender…"
+        />
         <Field label="Address" value={fromAddr} onChange={(e) => setFromAddr(e.target.value)} />
         <Field label="Email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} />
       </Accordion>
       <Accordion title="Client details" defaultOpen>
-        <Field label="Bill to name" value={toName} onChange={(e) => setToName(e.target.value)} />
+        <ContactFieldSelect
+          label="Bill to (client)"
+          scope="client"
+          contacts={contacts}
+          value={toName}
+          onPick={applyToContact}
+          emptyLabel="Select client…"
+        />
         <Field label="Address" value={toAddr} onChange={(e) => setToAddr(e.target.value)} />
       </Accordion>
       <Accordion title="Invoice details" defaultOpen>
@@ -870,14 +1240,20 @@ export function MessageAttachmentComposer(props: {
   const formPO = (
     <Accordion title="Purchase order" defaultOpen>
       <Field label="PO #" value={poNo} onChange={(e) => setPoNo(e.target.value)} />
-      <Field label="Vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} />
+      <VendorFieldSelect
+        label="Vendor"
+        vendors={vendors}
+        value={vendor}
+        onChange={(name) => setVendor(name ?? "")}
+        labelClassName="block text-sm font-medium text-slate-600"
+      />
       <Field label="Ship / ex-factory target" type="date" value={poShip} onChange={(e) => setPoShip(e.target.value)} />
       <TextAreaField label="Line items / SKUs" value={poLines} onChange={(e) => setPoLines(e.target.value)} />
     </Accordion>
   );
 
-  const formJob = (
-    <>
+  const formJob =
+    projectId == null ? (
       <Accordion title="Job details" defaultOpen>
         <Field label="Job name" value={jobName} onChange={(e) => setJobName(e.target.value)} />
         <Field label="Subtitle" value={jobSubtitle} onChange={(e) => setJobSubtitle(e.target.value)} />
@@ -885,15 +1261,72 @@ export function MessageAttachmentComposer(props: {
           <Field label="Type" value={jobType} onChange={(e) => setJobType(e.target.value)} />
           <Field label="Status" value={jobStatus} onChange={(e) => setJobStatus(e.target.value)} />
         </div>
-        <Field label="Lead vendor" value={jobLeadVendor} onChange={(e) => setJobLeadVendor(e.target.value)} />
+        <VendorFieldSelect
+          label="Lead vendor"
+          vendors={vendors}
+          value={jobLeadVendor}
+          onChange={(name) => setJobLeadVendor(name ?? "")}
+          labelClassName="block text-sm font-medium text-slate-600"
+        />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Category" value={jobCategory} onChange={(e) => setJobCategory(e.target.value)} />
           <Field label="Style #" value={jobStyleNumber} onChange={(e) => setJobStyleNumber(e.target.value)} />
         </div>
+        <Field label="Colorway" value={jobColorway} onChange={(e) => setJobColorway(e.target.value)} />
+        <Field label="PO #" value={jobPoNumber} onChange={(e) => setJobPoNumber(e.target.value)} />
         <Field label="Due date" type="date" value={jobDue} onChange={(e) => setJobDue(e.target.value)} />
       </Accordion>
-    </>
-  );
+    ) : (
+      <Accordion title="Job details" defaultOpen>
+        {!jobId && !jobName.trim() ? (
+          <p className="text-sm text-slate-500">Select an existing job or create a new one above.</p>
+        ) : (
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Name</dt>
+              <dd className="mt-0.5 font-medium text-slate-900">{jobName || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Subtitle</dt>
+              <dd className="mt-0.5 text-slate-800">{jobSubtitle || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Type</dt>
+              <dd className="mt-0.5 text-slate-800">{jobType || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Status</dt>
+              <dd className="mt-0.5 font-medium text-violet-700">{jobStatus || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Lead vendor</dt>
+              <dd className="mt-0.5 text-slate-800">{jobLeadVendor || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Category</dt>
+              <dd className="mt-0.5 text-slate-800">{jobCategory || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Style #</dt>
+              <dd className="mt-0.5 text-slate-800">{jobStyleNumber || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Colorway</dt>
+              <dd className="mt-0.5 text-slate-800">{jobColorway || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">PO #</dt>
+              <dd className="mt-0.5 text-slate-800">{jobPoNumber || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">Due date</dt>
+              <dd className="mt-0.5 text-slate-800">{jobDue || "—"}</dd>
+            </div>
+          </dl>
+        )}
+        <p className="text-xs text-slate-500">Use Preview to print or check layout before sending to chat.</p>
+      </Accordion>
+    );
 
   const formEstimate = (
     <Accordion title="Estimate" defaultOpen>
@@ -924,6 +1357,93 @@ export function MessageAttachmentComposer(props: {
     </Accordion>
   );
 
+  const formPackingList = (
+    <>
+      <Accordion title="Packing list" defaultOpen>
+        <Field label="Document #" value={packingListNo} onChange={(e) => setPackingListNo(e.target.value)} />
+        <VendorFieldSelect
+          label="Company (header)"
+          vendors={vendors}
+          value={packingCompanyName}
+          onChange={(name) => setPackingCompanyName(name ?? "")}
+          labelClassName="block text-sm font-medium text-slate-600"
+        />
+        <Field label="Project" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+        <Field
+          label="Ship date"
+          type="date"
+          value={packingShipDate}
+          onChange={(e) => setPackingShipDate(e.target.value)}
+        />
+      </Accordion>
+      <Accordion title="Ship from" defaultOpen>
+        <ContactFieldSelect
+          label="Ship from"
+          scope="party"
+          contacts={contacts}
+          value={fromName}
+          onPick={applyFromContact}
+          emptyLabel="Select ship from…"
+        />
+        <Field label="Address" value={fromAddr} onChange={(e) => setFromAddr(e.target.value)} />
+      </Accordion>
+      <Accordion title="Ship to" defaultOpen>
+        <ContactFieldSelect
+          label="Ship to"
+          scope="client"
+          contacts={contacts}
+          value={toName}
+          onPick={applyToContact}
+          emptyLabel="Select client…"
+        />
+        <Field label="Address" value={toAddr} onChange={(e) => setToAddr(e.target.value)} />
+      </Accordion>
+      <Accordion title="Line items" defaultOpen>
+        {lines.map((l, i) => (
+          <div key={l.id} className="grid gap-2 rounded-lg border border-slate-100 p-3 sm:grid-cols-3">
+            <Field
+              label="Description"
+              value={l.description}
+              onChange={(e) => {
+                const next = [...lines];
+                next[i] = { ...l, description: e.target.value };
+                setLines(next);
+              }}
+            />
+            <Field
+              label="Qty"
+              value={l.units}
+              onChange={(e) => {
+                const next = [...lines];
+                next[i] = { ...l, units: e.target.value };
+                setLines(next);
+              }}
+            />
+            <Field
+              label="Cartons"
+              value={l.price}
+              onChange={(e) => {
+                const next = [...lines];
+                next[i] = { ...l, price: e.target.value };
+                setLines(next);
+              }}
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          className="text-xs font-semibold text-violet-600 hover:underline"
+          onClick={() => setLines((prev) => [...prev, { id: String(Date.now()), description: "", units: "1", price: "0" }])}
+        >
+          + Add line
+        </button>
+      </Accordion>
+      <Accordion title="Notes">
+        <TextAreaField label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </Accordion>
+    </>
+  );
+
   const formTracking = (
     <Accordion title="Tracking" defaultOpen>
       <Field label="Carrier" value={trackCarrier} onChange={(e) => setTrackCarrier(e.target.value)} />
@@ -934,16 +1454,50 @@ export function MessageAttachmentComposer(props: {
   const formTask = (
     <Accordion title="Task" defaultOpen>
       <Field label="Title" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} />
-      <Field label="Assignee" value={taskAssignee} onChange={(e) => setTaskAssignee(e.target.value)} />
+      <ContactFieldSelect
+        label="Assignee"
+        scope="all"
+        contacts={contacts}
+        value={taskAssignee}
+        onPick={(c) => setTaskAssignee(c ? contactFieldsFromPick(c, contacts).name : "")}
+        emptyLabel="Select person…"
+      />
     </Accordion>
   );
 
+  const CALENDAR_TYPES: { value: CalendarEventType; label: string }[] = [
+    { value: "meeting", label: "Meeting" },
+    { value: "sample_review", label: "Sample review" },
+    { value: "deadline", label: "Deadline" },
+    { value: "shipping", label: "Shipping" },
+    { value: "production", label: "Production" },
+    { value: "other", label: "Other" },
+  ];
+
   const formCal = (
-    <Accordion title="Calendar event" defaultOpen>
-      <Field label="Title" value={calTitle} onChange={(e) => setCalTitle(e.target.value)} />
-      <Field label="When" value={calWhen} onChange={(e) => setCalWhen(e.target.value)} />
-      <Field label="Where / link" value={calWhere} onChange={(e) => setCalWhere(e.target.value)} />
-    </Accordion>
+    <>
+      <p className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-950">
+        New events are saved to your <strong>Calendar</strong> when you send to chat (this browser).
+      </p>
+      <Accordion title="Event details" defaultOpen>
+        <Field label="Title" value={calTitle} onChange={(e) => setCalTitle(e.target.value)} />
+        <SearchableSelect
+          label="Type"
+          options={CALENDAR_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+          value={calType}
+          onChange={(v) => setCalType(v as CalendarEventType)}
+          placeholder="Search event type…"
+          emptyMessage="No matching type"
+        />
+        <Field label="Date" type="date" value={calDate} onChange={(e) => setCalDate(e.target.value)} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Start" type="time" value={calStart} onChange={(e) => setCalStart(e.target.value)} />
+          <Field label="End" type="time" value={calEnd} onChange={(e) => setCalEnd(e.target.value)} />
+        </div>
+        <Field label="Where / link" value={calWhere} onChange={(e) => setCalWhere(e.target.value)} />
+        <TextAreaField label="Notes" value={calDesc} onChange={(e) => setCalDesc(e.target.value)} />
+      </Accordion>
+    </>
   );
 
   const formBody =
@@ -963,7 +1517,9 @@ export function MessageAttachmentComposer(props: {
                 ? formPayment
                 : kind === "receiving"
                   ? formReceiving
-                  : kind === "tracking"
+                  : kind === "packing_list"
+                    ? formPackingList
+                    : kind === "tracking"
                     ? formTracking
                     : kind === "task"
                       ? formTask
@@ -988,6 +1544,7 @@ export function MessageAttachmentComposer(props: {
       <PreviewShell docLabel="Job" docNumber={jobStyleNumber || "—"}>
         <p className="mt-4 text-lg font-bold text-slate-900">{jobName}</p>
         <p className="mt-1 text-sm text-slate-600">{jobSubtitle}</p>
+        {jobColorway ? <p className="mt-1 text-sm text-slate-600">{jobColorway}</p> : null}
         <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
           <div>
             <dt className="text-[11px] font-semibold uppercase text-slate-400">Type</dt>
@@ -1005,8 +1562,14 @@ export function MessageAttachmentComposer(props: {
             <dt className="text-[11px] font-semibold uppercase text-slate-400">Category</dt>
             <dd className="mt-0.5 text-slate-800">{jobCategory}</dd>
           </div>
+          {jobPoNumber ? (
+            <div>
+              <dt className="text-[11px] font-semibold uppercase text-slate-400">PO #</dt>
+              <dd className="mt-0.5 text-slate-800">{jobPoNumber}</dd>
+            </div>
+          ) : null}
         </dl>
-        <p className="mt-4 text-xs text-slate-500">Due {jobDue}</p>
+        <p className="mt-4 text-xs text-slate-500">Due {jobDue || "—"}</p>
       </PreviewShell>
     ) : kind === "estimate" ? (
       <PreviewShell docLabel="Estimate" docNumber={estNo}>
@@ -1024,6 +1587,44 @@ export function MessageAttachmentComposer(props: {
     ) : kind === "receiving" ? (
       <PreviewShell docLabel="Receiving" docNumber={recvBol}>
         <p className="mt-4 text-sm text-slate-700">{recvSummary}</p>
+      </PreviewShell>
+    ) : kind === "packing_list" ? (
+      <PreviewShell docLabel="Packing list" docNumber={packingListNo}>
+        <p className="mt-2 text-center text-lg font-bold uppercase tracking-wide text-slate-900">
+          {packingCompanyName}
+        </p>
+        <p className="text-center text-xs text-slate-500">Ship date {packingShipDate}</p>
+        <div className="mt-6 grid gap-4 text-sm sm:grid-cols-2">
+          <div>
+            <p className="text-[10px] font-bold uppercase text-slate-400">From</p>
+            <p className="font-semibold text-slate-900">{fromName}</p>
+            <p className="text-slate-600">{fromAddr}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase text-slate-400">Ship to</p>
+            <p className="font-semibold text-slate-900">{toName}</p>
+            <p className="text-slate-600">{toAddr}</p>
+          </div>
+        </div>
+        <table className="mt-6 w-full text-left text-xs">
+          <thead>
+            <tr className="border-b border-slate-200 text-slate-500">
+              <th className="py-2 pr-2">Description</th>
+              <th className="py-2 pr-2 text-right">Qty</th>
+              <th className="py-2 text-right">Ctns</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.id} className="border-b border-slate-100">
+                <td className="py-2 pr-2 text-slate-800">{l.description}</td>
+                <td className="py-2 pr-2 text-right text-slate-600">{l.units}</td>
+                <td className="py-2 text-right text-slate-600">{l.price}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-4 text-right text-sm font-bold text-slate-900">Total {packingTotalPieces} pcs</p>
       </PreviewShell>
     ) : kind === "tracking" ? (
       <PreviewShell docLabel="Tracking" docNumber={trackNo}>
@@ -1057,25 +1658,44 @@ export function MessageAttachmentComposer(props: {
                 ? "Request Payment"
                 : kind === "receiving"
                   ? "Receiving document"
-                  : kind === "tracking"
+                  : kind === "packing_list"
+                    ? "Share Packing List"
+                    : kind === "tracking"
                     ? "Add Tracking"
                     : kind === "task"
                       ? "Add Task"
                       : "Share Calendar Event";
 
   const displayTitle = mode === "edit" ? formTitle.replace(/^Create /, "Edit ") : formTitle;
+  const showPreview = kind !== "calendar_event";
+  const showSourcePicker = Boolean(linkedProject) || kind === "calendar_event";
 
   return (
+    <>
     <div className="fixed inset-0 z-[200] flex items-stretch justify-center bg-black/50 p-0 sm:p-4">
       <button type="button" className="absolute inset-0 z-0 cursor-default" aria-label="Close" onClick={onClose} />
       <div className="relative z-10 flex h-full w-full max-w-[1400px] flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:max-h-[90vh] sm:rounded-2xl">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
-          <div>
+          <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Add to chat</p>
-            <h2 className="text-lg font-bold text-slate-900">{displayTitle}</h2>
-            <p className="text-xs text-slate-500">Room: {roomTitle}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className="text-lg font-bold text-slate-900">{displayTitle}</h2>
+              <span className="rounded-full bg-violet-600 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+                {meta.title}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">Room: {roomTitle}</p>
           </div>
           <div className="flex items-center gap-2">
+            {showPreview ? (
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setPreviewOpen(true)}
+              >
+                Preview
+              </button>
+            ) : null}
             <button type="button" className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50" onClick={onClose}>
               Cancel
             </button>
@@ -1088,54 +1708,135 @@ export function MessageAttachmentComposer(props: {
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <nav
             aria-label="Attachment types"
-            className="group/nav flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-2 lg:w-14 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:border-b-0 lg:border-r lg:px-0 lg:py-2 lg:transition-[width,box-shadow] lg:duration-200 lg:ease-out lg:hover:w-64 lg:hover:shadow-[4px_0_24px_-4px_rgba(0,0,0,0.12)]"
+            className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 p-2 lg:w-60 lg:flex-col lg:gap-0.5 lg:overflow-x-hidden lg:overflow-y-auto lg:border-b-0 lg:border-r"
           >
-            {KIND_META.map((k) => (
-              <button
-                key={k.id}
-                type="button"
-                onClick={() => setKind(k.id)}
-                title={k.title}
-                className={`flex w-full shrink-0 items-center gap-0 rounded-lg py-2.5 transition-colors lg:justify-center lg:gap-0 lg:px-0 lg:group-hover/nav:justify-start lg:group-hover/nav:gap-3 lg:group-hover/nav:px-3 ${
-                  kind === k.id
-                    ? "bg-white text-violet-700 shadow-sm ring-1 ring-violet-200 lg:ring-0 lg:ring-l-4 lg:ring-violet-600"
-                    : "text-slate-600 hover:bg-white/80"
-                }`}
-              >
-                <span
-                  className={`flex size-11 shrink-0 items-center justify-center lg:size-12 ${
-                    kind === k.id ? "text-violet-700" : "text-slate-500"
+            <p className="hidden shrink-0 px-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400 lg:block">
+              Attachment type
+            </p>
+            {KIND_META.map((k) => {
+              const selected = kind === k.id;
+              return (
+                <button
+                  key={k.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-current={selected ? "true" : undefined}
+                  onClick={() => handleKindChange(k.id)}
+                  className={`flex w-full min-w-[10rem] shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors lg:min-w-0 ${
+                    selected
+                      ? "bg-violet-600 text-white shadow-sm ring-2 ring-violet-400/40"
+                      : "text-slate-700 hover:bg-white"
                   }`}
                 >
-                  <KindIcon kind={k.id} className="size-6" />
-                </span>
-                <span className="hidden min-w-0 flex-1 flex-col text-left lg:flex lg:max-w-0 lg:overflow-hidden lg:opacity-0 lg:transition-[max-width,opacity] lg:duration-200 lg:group-hover/nav:max-w-[min(14rem,calc(100vw-8rem))] lg:group-hover/nav:opacity-100">
-                  <span className="truncate text-sm font-semibold">{k.title}</span>
-                  <span className="line-clamp-2 text-[11px] font-normal text-slate-500">{k.description}</span>
-                </span>
-              </button>
-            ))}
+                  <span
+                    className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${
+                      selected ? "bg-white/15 text-white" : "bg-white text-slate-500 shadow-sm"
+                    }`}
+                  >
+                    <KindIcon kind={k.id} className="size-5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-sm font-semibold ${selected ? "text-white" : ""}`}>
+                      {k.title}
+                      {selected ? (
+                        <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-200">
+                          Selected
+                        </span>
+                      ) : null}
+                    </span>
+                    <span
+                      className={`line-clamp-2 text-[11px] ${selected ? "text-violet-100" : "text-slate-500"}`}
+                    >
+                      {k.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </nav>
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-            <div className="min-h-0 flex-1 overflow-y-auto border-slate-200 bg-white p-4 sm:p-6 lg:border-r">
-              <p className="mb-4 text-sm text-slate-600">{meta.description}</p>
-              {formBody}
-            </div>
-
-            <aside className="flex w-full min-h-[40vh] shrink-0 flex-col border-t border-slate-200 bg-slate-100 lg:min-h-0 lg:w-[min(100%,420px)] lg:border-t-0">
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-4 py-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</span>
-                <div className="flex gap-2">
-                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-500">PDF</span>
-                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-500">Email</span>
-                </div>
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-white p-4 sm:p-6" role="tabpanel">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-violet-600 lg:hidden">
+              {meta.title} — selected
+            </p>
+            <p className="mb-4 text-sm text-slate-600">{meta.description}</p>
+            {showSourcePicker ? (
+              <AttachmentSourcePicker
+                label={sourcePickerLabel(kind)}
+                options={sourceOptions}
+                value={selectedSourceId}
+                emptyHint={
+                  kind === "calendar_event"
+                    ? "No calendar events yet — create one below"
+                    : `No saved ${sourcePickerLabel(kind).toLowerCase()} on this project yet`
+                }
+                onSelect={handleSelectSource}
+                onCreateNew={handleCreateNewKind}
+                createLabel={
+                  kind === "job"
+                    ? "+ Create new job"
+                    : kind === "packing_list"
+                      ? "+ Create new packing list"
+                      : kind === "calendar_event"
+                        ? "+ Create new event"
+                        : "+ Create new"
+                }
+                extraActions={
+                  kind === "job" && jobId ? (
+                    <button
+                      type="button"
+                      onClick={() => setJobModal({ kind: "edit", jobId })}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Edit job details
+                    </button>
+                  ) : null
+                }
+              />
+            ) : (
+              <div className="mb-6 rounded-xl border border-amber-100 bg-amber-50/50 p-4">
+                <p className="text-xs text-amber-950">
+                  This conversation is not linked to a project — fill in details manually, or use{" "}
+                  <strong>Create new</strong> to start a blank form.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCreateNewKind}
+                  className="mt-3 rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700"
+                >
+                  + Create new
+                </button>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-4">{previewBody}</div>
-            </aside>
+            )}
+            {formBody}
           </div>
         </div>
       </div>
     </div>
+    {showPreview ? (
+      <AttachmentPreviewModal
+        open={previewOpen}
+        title={displayTitle}
+        subtitle={linkedProjectName ? `Project: ${linkedProjectName}` : roomTitle}
+        onClose={() => setPreviewOpen(false)}
+      >
+        {previewBody}
+      </AttachmentPreviewModal>
+    ) : null}
+    {jobModalJob && linkedProject ? (
+      <JobDetailsModal
+        project={linkedProject}
+        job={jobModalJob}
+        allJobs={projectJobs}
+        clientCode={clientCode}
+        vendors={vendors}
+        isNew={jobModal?.kind === "new"}
+        overlayClassName="z-[210]"
+        onClose={() => setJobModal(null)}
+        onSave={handleComposerJobSave}
+      />
+    ) : null}
+    </>
   );
 }

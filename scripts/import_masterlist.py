@@ -123,8 +123,8 @@ def iso(date_str: str) -> str:
     return f"{date_str}T12:00:00.000Z"
 
 
-def po_number(code: str, year: int, seq: int) -> str:
-    return f"{code}-{year}-{seq:03d}"
+def po_number(code: str, year: int, seq: int, month: int = 5) -> str:
+    return f"{code}-{year}-{month:02d}-{seq:03d}"
 
 
 def ts_literal(s: str) -> str:

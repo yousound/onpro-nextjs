@@ -7,6 +7,7 @@ import type {
   ISODate,
   PrintEmbroideryCostingTrack,
 } from "@/lib/types/project";
+import type { FileRef } from "@/lib/types/contact";
 
 export type JobType =
   | "print_production"
@@ -15,7 +16,21 @@ export type JobType =
   | "branding"
   | "custom";
 
-export type JobDetailsSection = "overview" | "estimate" | "costing" | "approvals" | "bulk";
+export type JobDetailsSection =
+  | "overview"
+  | "estimate"
+  | "development"
+  | "costing"
+  | "approvals"
+  | "bulk";
+
+export type JobLabelLine = {
+  id: string;
+  size: string;
+  style_color_code: string;
+  description: string;
+  scan_value: string;
+};
 
 export type JobEstimateFields = {
   quote_requested_date: ISODate;
@@ -28,6 +43,8 @@ export type JobCostingFields = {
   cost_sheet_prepared_date: ISODate;
   estimate_sent_date: ISODate;
   costing_approved: boolean | null;
+  blanks_purchased_date: ISODate;
+  pg_requested_date: ISODate;
   dye_costing_tracks: DyeCostingTrack[];
   print_embroidery_costing_tracks: PrintEmbroideryCostingTrack[];
   costing_extra_tracks: CostingExtraTrack[];
@@ -86,6 +103,9 @@ export type ProjectJob = {
   style_number: string;
   colorway?: string;
   barcode?: string;
+  po_number?: string | null;
+  label_files?: FileRef[];
+  label_lines?: JobLabelLine[];
   status: JobStatusLabel;
   due_date: string | null;
   updated_at: string;
@@ -124,11 +144,12 @@ export function wipStepToSection(stepId: string, opensIn?: JobDetailsSection): J
     case "cost_sheets":
     case "costing_summary":
     case "deposit_payment":
+    case "tp_completion":
+      return "costing";
     case "tp_setup":
     case "blanks_lab_dip":
     case "order_trims":
-    case "tp_completion":
-      return "costing";
+      return "development";
     case "sent_to_contractors":
     case "strike_off":
       return "approvals";

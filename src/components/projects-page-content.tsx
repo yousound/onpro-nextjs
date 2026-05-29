@@ -21,7 +21,8 @@ import {
 } from "@/lib/mock/project-session";
 import { clientListContacts, loadContacts } from "@/lib/contacts-store";
 import { clientCodeByName } from "@/lib/reference/client-codes";
-import { collectAllPoNumbers, generatePoNumber } from "@/lib/po-number";
+import { generatePoNumber } from "@/lib/po-number";
+import { collectAllAppPoNumbers } from "@/lib/po-context";
 
 const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "IN DEVELOPMENT",
@@ -238,7 +239,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       clientCode = row[2] || clientCodeByName(row[1]) || "XX";
     }
 
-    const po = generatePoNumber(clientCode, collectAllPoNumbers(projects));
+    const po = generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
 
     const nextId = Math.max(0, ...projects.map((p) => p.id)) + 1;
     const dueIso = dueDate ? dateInputToIso(dueDate) : null;
@@ -340,7 +341,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
                 </select>
               </label>
               <p className="rounded-lg border border-border-light bg-surface-body/50 px-3 py-2 text-xs text-text-secondary">
-                PO number is assigned automatically on create (ClientCode-Year-Seq, e.g. GG-2026-001).
+                PO number is assigned automatically on create (ClientCode-Year-Month-Seq, e.g. GG-2026-05-001).
               </p>
               <label className={labelClass}>
                 Due date <span className="font-normal text-text-secondary">(optional)</span>

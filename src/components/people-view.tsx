@@ -325,7 +325,7 @@ export function PeopleView() {
 
       <InviteSentToast payload={inviteToast} onDismiss={() => setInviteToast(null)} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-10 pt-5">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-10 pt-5">
         <div className="mx-auto max-w-[1600px] space-y-8">
           <section>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -355,7 +355,7 @@ export function PeopleView() {
             ) : (
               <div className="relative mt-4">
                 <ul
-                  className="scrollbar-light-gray -mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-3 [-ms-overflow-style:auto] [scrollbar-gutter:stable]"
+                  className="scrollbar-hide -mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-1"
                 >
                   {pendingInvites.map((inv) => (
                     <li

@@ -45,6 +45,9 @@ export function ProjectCard({ project }: { project: Project }) {
             <h3 className="text-lg font-semibold tracking-tight text-text-primary group-hover:text-accent">
               {project.name}
             </h3>
+            {project.po_number ? (
+              <p className="mt-0.5 text-xs font-medium text-text-secondary">PO {project.po_number}</p>
+            ) : null}
             <p className="mt-1 text-xs font-medium uppercase tracking-wide text-text-secondary">
               {subtitle}
             </p>

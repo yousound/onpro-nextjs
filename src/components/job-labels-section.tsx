@@ -1,30 +1,37 @@
 "use client";
 
-import { useState } from "react";
-import type { FileRef } from "@/lib/types/contact";
-import type { JobLabelLine, ProjectJob } from "@/lib/types/wip";
-import { FileUploadList } from "@/components/contact-form-fields";
-import { BarcodePreview, downloadBarcodePng } from "@/components/barcode-preview";
+import { useMemo, useState } from "react";
+import type { JobLabelLine, LabelStationSheet, ProjectJob } from "@/lib/types/wip";
+import { LabelMobileStationSheet } from "@/components/label-mobile-station-sheet";
+import { LabelStickerPreview } from "@/components/label-sticker-preview";
 import { PrintBarcodeLabelsModal } from "@/components/print-barcode-labels-modal";
+import { downloadBuiltLabelsPdf, printBuiltLabels } from "@/lib/label-print";
+import {
+  normalizeLabelStation,
+  sizeKeyFromLabelSize,
+  sizesWithQtyFromStation,
+} from "@/lib/label-station";
+import { labelSizeHint, sizesForLabelLines } from "@/lib/label-sizes";
 import { collectScanValuesFromJobs, generateScanValue, normalizeScanValue } from "@/lib/scan-value";
 import { labelLineSku, labelTitleFromJob, styleColorCode } from "@/lib/style-number";
-import {
-  PANT_SIZE_ALPHA,
-  PANT_SIZE_NUMERIC,
-  SHIRT_SIZE_OPTIONS,
-} from "@/lib/reference/category-codes";
 
 const fieldClass =
   "mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
 const labelClass = "block text-xs font-medium text-text-secondary";
 
-function sizesFromJob(job: Pick<ProjectJob, "addon_shirt_sizes" | "addon_pant_sizes" | "addon_pant_size_mode">): string[] {
-  const shirt = job.addon_shirt_sizes ?? [];
-  const pant = job.addon_pant_sizes ?? [];
-  const combined = [...shirt, ...pant];
-  if (combined.length) return combined;
-  return ["OS"];
+function stickerQtyByLineId(
+  lines: JobLabelLine[],
+  station: LabelStationSheet,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const line of lines) {
+    const key = sizeKeyFromLabelSize(line.size);
+    if (!key) continue;
+    const qty = parseInt((station.size_qty[key] ?? "").replace(/[^\d]/g, ""), 10);
+    if (qty > 0) out[line.id] = qty;
+  }
+  return out;
 }
 
 export function JobLabelsSection({
@@ -36,12 +43,16 @@ export function JobLabelsSection({
   allJobs: ProjectJob[];
   onPatch: (partial: Partial<ProjectJob>) => void;
 }) {
-  const labelFiles = draft.label_files ?? [];
   const labelLines = draft.label_lines ?? [];
+  const station = useMemo(() => normalizeLabelStation(draft.label_station, draft), [draft]);
   const [printOpen, setPrintOpen] = useState(false);
 
   function patchLines(lines: JobLabelLine[]) {
     onPatch({ label_lines: lines });
+  }
+
+  function patchStation(next: LabelStationSheet) {
+    onPatch({ label_station: next });
   }
 
   function patchLine(id: string, partial: Partial<JobLabelLine>) {
@@ -53,20 +64,33 @@ export function JobLabelsSection({
     return collectScanValuesFromJobs([...others, { ...draft, label_lines: labelLines }]);
   }
 
-  function generateAllLines() {
-    const sizes = sizesFromJob(draft);
+  function buildLinesForSizes(sizes: string[]): JobLabelLine[] {
     const desc = labelTitleFromJob(draft);
-    const code = styleColorCode(draft.style_number, draft.colorway ?? "");
+    const code = styleColorCode(draft.style_number, draft.colorway ?? "", draft.color_code);
     let pool = existingScanValues();
-    const lines: JobLabelLine[] = sizes.map((size, i) => ({
-      id: `line-${Date.now()}-${i}`,
-      size,
-      style_color_code: code,
-      description: desc,
-      scan_value: generateScanValue(pool),
-    }));
-    for (const l of lines) pool = [...pool, l.scan_value];
-    onPatch({ label_lines: lines });
+    const lines: JobLabelLine[] = sizes.map((size, i) => {
+      const scan_value = generateScanValue(pool);
+      pool = [...pool, scan_value];
+      return {
+        id: `line-${Date.now()}-${i}`,
+        size,
+        style_color_code: code,
+        description: desc,
+        scan_value,
+      };
+    });
+    return lines;
+  }
+
+  function generateAllLines() {
+    onPatch({ label_lines: buildLinesForSizes(sizesForLabelLines(draft)) });
+  }
+
+  function generateFromStationSheet() {
+    const withQty = sizesWithQtyFromStation(station);
+    const sizes =
+      withQty.length > 0 ? withQty.map((r) => r.size) : sizesForLabelLines(draft);
+    onPatch({ label_lines: buildLinesForSizes(sizes) });
   }
 
   function addLine() {
@@ -76,148 +100,192 @@ export function JobLabelsSection({
       {
         id: `line-${Date.now()}`,
         size: "M",
-        style_color_code: styleColorCode(draft.style_number, draft.colorway ?? ""),
+        style_color_code: styleColorCode(draft.style_number, draft.colorway ?? "", draft.color_code),
         description: labelTitleFromJob(draft),
         scan_value: generateScanValue(pool),
       },
     ]);
   }
 
-  return (
-    <div className="space-y-4 border-t border-border-light pt-4">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Label files</p>
-        <p className="mt-1 text-xs text-text-secondary">Upload finalized label PDFs (e.g. size grid artwork).</p>
-        <div className="mt-2">
-          <FileUploadList
-            label="Label PDFs"
-            files={labelFiles}
-            onChange={(files: FileRef[]) => onPatch({ label_files: files })}
-          />
-        </div>
-        {labelFiles[0]?.url ? (
-          <iframe
-            title="Label preview"
-            src={labelFiles[0].url}
-            className="mt-3 h-48 w-full rounded-lg border border-border-light bg-white"
-          />
-        ) : null}
-      </div>
+  const docTitle = `${draft.name || "Job"} labels`;
+  const qtyByLineId = stickerQtyByLineId(labelLines, station);
+  const hasStickerQty = Object.keys(qtyByLineId).length > 0;
 
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Label lines</p>
-          <div className="flex flex-wrap gap-2">
+  return (
+    <div className="space-y-8">
+      <LabelMobileStationSheet draft={draft} sheet={station} onChange={patchStation} />
+
+      <div className="border-t border-border-light pt-6">
+        <div className="rounded-xl border border-violet-200 bg-violet-50/50 px-4 py-3">
+          <p className="text-sm font-semibold text-text-primary">Barcode stickers by size</p>
+          <p className="mt-1 text-xs text-text-secondary">
+            One sticker per size with scan ID and SKU. Quantities on the sheet above control how many
+            copies print per size.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={generateFromStationSheet}
+              className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white hover:opacity-90"
+            >
+              Generate stickers from sheet
+            </button>
             <button
               type="button"
               onClick={generateAllLines}
-              className="text-xs font-semibold text-accent hover:underline"
+              className="rounded-lg border border-border-light bg-white px-3 py-2 text-xs font-semibold text-text-primary hover:bg-slate-50"
             >
-              Generate all sizes
+              Generate default sizes
             </button>
-            <button type="button" onClick={addLine} className="text-xs font-semibold text-accent hover:underline">
-              + Add line
+            <button
+              type="button"
+              onClick={addLine}
+              className="rounded-lg border border-border-light bg-white px-3 py-2 text-xs font-semibold text-text-primary hover:bg-slate-50"
+            >
+              + Add size
             </button>
             {labelLines.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setPrintOpen(true)}
-                className="rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90"
-              >
-                Print labels…
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    printBuiltLabels(labelLines, hasStickerQty ? qtyByLineId : undefined, {
+                      documentTitle: docTitle,
+                    })
+                  }
+                  className="rounded-lg border border-accent/40 bg-white px-3 py-2 text-xs font-semibold text-accent hover:bg-violet-50"
+                >
+                  Print stickers
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadBuiltLabelsPdf(
+                      labelLines,
+                      docTitle,
+                      hasStickerQty ? qtyByLineId : undefined,
+                    )
+                  }
+                  className="rounded-lg border border-accent/40 bg-white px-3 py-2 text-xs font-semibold text-accent hover:bg-violet-50"
+                >
+                  Sticker PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintOpen(true)}
+                  className="rounded-lg border border-border-light bg-white px-3 py-2 text-xs font-semibold text-text-secondary hover:bg-slate-50"
+                >
+                  Print options…
+                </button>
+              </>
             ) : null}
           </div>
+          <p className="mt-2 text-[11px] text-text-secondary">
+            {labelSizeHint()}
+            {hasStickerQty ? " · Printing uses quantities from the mobile station sheet." : null}
+          </p>
         </div>
-        {labelLines.length === 0 ? (
-          <p className="mt-2 text-sm text-text-secondary">No label lines yet.</p>
-        ) : (
-          <div className="mt-3 space-y-4">
-            {labelLines.map((line) => {
-              const sku = labelLineSku(line.style_color_code, line.size);
-              const scan = normalizeScanValue(line.scan_value);
-              return (
-                <div key={line.id} className="rounded-xl border border-border-light bg-slate-50/80 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold text-text-primary">Size {line.size}</p>
-                      <p className="mt-0.5 font-mono text-[11px] text-text-secondary">SKU {sku}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => patchLines(labelLines.filter((l) => l.id !== line.id))}
-                      className="text-[11px] font-semibold text-red-600 hover:underline"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <p className="mt-2 text-center text-sm lowercase text-text-primary">{line.description}</p>
-                  <div className="mt-1 flex items-center justify-between text-sm font-semibold text-text-primary">
-                    <span>{line.style_color_code}</span>
-                    <span>{line.size}</span>
-                  </div>
-                  <div className="mt-3 flex justify-center">
-                    <BarcodePreview value={scan} />
-                  </div>
-                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                    <label className={labelClass}>
-                      Size
-                      <input
-                        className={fieldClass}
-                        value={line.size}
-                        onChange={(e) => patchLine(line.id, { size: e.target.value })}
-                      />
-                    </label>
-                    <label className={labelClass}>
-                      Item ID (scan)
-                      <input
-                        className={fieldClass}
-                        value={scan}
-                        onChange={(e) =>
-                          patchLine(line.id, { scan_value: normalizeScanValue(e.target.value) })
-                        }
-                      />
-                    </label>
-                    <label className={`${labelClass} sm:col-span-2`}>
-                      Title
-                      <input
-                        className={fieldClass}
-                        value={line.description}
-                        onChange={(e) => patchLine(line.id, { description: e.target.value })}
-                      />
-                    </label>
-                    <label className={labelClass}>
-                      Style-color
-                      <input
-                        className={fieldClass}
-                        value={line.style_color_code}
-                        onChange={(e) => patchLine(line.id, { style_color_code: e.target.value })}
-                      />
-                    </label>
-                    <label className={labelClass}>
-                      SKU (preview)
-                      <input className={fieldClass} value={sku} readOnly aria-readonly />
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => downloadBarcodePng(scan, `barcode-${scan}.png`)}
-                    className="mt-2 text-xs font-semibold text-accent hover:underline"
-                  >
-                    Download barcode PNG
-                  </button>
+
+        {labelLines.length > 0 ? (
+          <div className="mt-5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+              Sticker preview
+            </p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              {labelLines.map((line) => (
+                <div key={line.id} className="relative">
+                  <LabelStickerPreview line={line} />
+                  {qtyByLineId[line.id] ? (
+                    <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+                      ×{qtyByLineId[line.id]}
+                    </span>
+                  ) : null}
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
+        ) : (
+          <p className="mt-4 rounded-xl border border-dashed border-border-light bg-slate-50/80 px-4 py-8 text-center text-sm text-text-secondary">
+            Fill sizes on the sheet above, then click <strong>Generate stickers from sheet</strong>.
+          </p>
         )}
-        <p className="mt-2 text-[11px] text-text-secondary">
-          Shirt sizes: {SHIRT_SIZE_OPTIONS.slice(0, 5).join(", ")}… · Pant:{" "}
-          {PANT_SIZE_ALPHA.slice(0, 4).join(", ")} / {PANT_SIZE_NUMERIC.slice(0, 4).join(", ")}…
-        </p>
+
+        {labelLines.length > 0 ? (
+          <details className="mt-4 rounded-xl border border-border-light bg-surface-body/30">
+            <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-text-primary">
+              Edit sticker lines ({labelLines.length})
+            </summary>
+            <div className="space-y-4 border-t border-border-light px-4 py-4">
+              {labelLines.map((line) => {
+                const sku = labelLineSku(line.style_color_code, line.size);
+                const scan = normalizeScanValue(line.scan_value);
+                return (
+                  <div key={line.id} className="rounded-lg border border-border-light bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-text-primary">Size {line.size}</p>
+                      <button
+                        type="button"
+                        onClick={() => patchLines(labelLines.filter((l) => l.id !== line.id))}
+                        className="text-[11px] font-semibold text-red-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className={labelClass}>
+                        Size
+                        <input
+                          className={fieldClass}
+                          value={line.size}
+                          onChange={(e) => patchLine(line.id, { size: e.target.value })}
+                        />
+                      </label>
+                      <label className={labelClass}>
+                        Item ID (scan)
+                        <input
+                          className={fieldClass}
+                          value={scan}
+                          onChange={(e) =>
+                            patchLine(line.id, { scan_value: normalizeScanValue(e.target.value) })
+                          }
+                        />
+                      </label>
+                      <label className={`${labelClass} sm:col-span-2`}>
+                        Title
+                        <input
+                          className={fieldClass}
+                          value={line.description}
+                          onChange={(e) => patchLine(line.id, { description: e.target.value })}
+                        />
+                      </label>
+                      <label className={labelClass}>
+                        Style-color
+                        <input
+                          className={fieldClass}
+                          value={line.style_color_code}
+                          onChange={(e) => patchLine(line.id, { style_color_code: e.target.value })}
+                        />
+                      </label>
+                      <label className={labelClass}>
+                        SKU
+                        <input className={fieldClass} value={sku} readOnly aria-readonly />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        ) : null}
       </div>
 
-      <PrintBarcodeLabelsModal open={printOpen} lines={labelLines} onClose={() => setPrintOpen(false)} />
+      <PrintBarcodeLabelsModal
+        open={printOpen}
+        lines={labelLines}
+        jobTitle={draft.name}
+        qtyByLineId={hasStickerQty ? qtyByLineId : undefined}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   );
 }

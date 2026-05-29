@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import type { WipStep, WipStepState, JobDetailsSection } from "@/lib/types/wip";
 import { WIP_STEP_STATES } from "@/lib/project-wip-edits";
 import { createCustomWipStep, isDefaultWipStepId, moveWipStep } from "@/lib/wip-project-timeline";
@@ -97,12 +97,18 @@ export function JobTimelineStepsEditor({
     onChange(steps.filter((s) => s.id !== stepId));
   }
 
-  function handleAdd(e: FormEvent) {
-    e.preventDefault();
+  function handleAdd() {
     const label = newLabel.trim();
     if (!label) return;
     onChange([...steps, createCustomWipStep(label)]);
     setNewLabel("");
+  }
+
+  function handleNewStepKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleAdd();
+    }
   }
 
   return (
@@ -215,7 +221,7 @@ export function JobTimelineStepsEditor({
         <p className="mt-3 text-sm text-text-secondary">No steps yet — add one below.</p>
       ) : null}
 
-      <form onSubmit={handleAdd} className="mt-4 flex flex-wrap items-end gap-2 border-t border-border-light pt-4">
+      <div className="mt-4 flex flex-wrap items-end gap-2 border-t border-border-light pt-4">
         <label className="min-w-[12rem] flex-1 text-xs font-medium text-text-secondary">
           New step
           <input
@@ -223,16 +229,18 @@ export function JobTimelineStepsEditor({
             placeholder="e.g. Client sign-off"
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
+            onKeyDown={handleNewStepKeyDown}
           />
         </label>
         <button
-          type="submit"
+          type="button"
           disabled={!newLabel.trim()}
+          onClick={handleAdd}
           className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Add step
         </button>
-      </form>
+      </div>
     </div>
   );
 }

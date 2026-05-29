@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { NotificationsPopover } from "@/components/notifications-popover";
 import { mockCalendarEvents } from "@/lib/mock/calendar-events";
 import { mockDocuments } from "@/lib/mock/documents";
+import { OverviewAssistant } from "@/components/overview-assistant";
 import { buildOverviewDigest, type OverviewFocusItem } from "@/lib/mock/overview-digest";
 
 const MOCK_USER = {
@@ -144,6 +145,8 @@ export function OverviewView() {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-[1200px] flex-col gap-8 px-6 py-8 lg:max-w-none lg:flex-row lg:gap-10 lg:px-10 lg:pb-10">
             <div className="min-w-0 flex-1 space-y-8 lg:max-w-[880px]">
+              <OverviewAssistant />
+
               <section>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold text-text-primary">

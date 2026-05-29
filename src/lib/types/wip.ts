@@ -32,6 +32,20 @@ export type JobLabelLine = {
   scan_value: string;
 };
 
+/** Connect Dots–style mobile station carton label (size qty grid + header fields). */
+export type LabelStationSheet = {
+  brand: string;
+  style: string;
+  color: string;
+  po_number: string;
+  box_number: string;
+  weight: string;
+  size_qty: Record<string, string>;
+  /** Manual override; when empty, sum of size quantities is used. */
+  total_units: string;
+  box_total: string;
+};
+
 export type JobEstimateFields = {
   quote_requested_date: ISODate;
   vendor_costing_received_date: ISODate;
@@ -102,10 +116,13 @@ export type ProjectJob = {
   category: string;
   style_number: string;
   colorway?: string;
+  /** Optional 3-letter color suffix override (e.g. BLK). Otherwise derived from colorway name. */
+  color_code?: string;
   barcode?: string;
   po_number?: string | null;
   label_files?: FileRef[];
   label_lines?: JobLabelLine[];
+  label_station?: LabelStationSheet;
   status: JobStatusLabel;
   due_date: string | null;
   updated_at: string;

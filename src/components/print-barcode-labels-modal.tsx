@@ -2,38 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { JobLabelLine } from "@/lib/types/wip";
-import { BarcodePreview } from "@/components/barcode-preview";
-import { labelLineSku } from "@/lib/style-number";
-import { normalizeScanValue } from "@/lib/scan-value";
-
-type PrintRow = {
-  lineId: string;
-  scanValue: string;
-  sku: string;
-  description: string;
-  stock: number;
-};
+import { labelPrintItemsFromLines, printBuiltLabels } from "@/lib/label-print";
 
 export function PrintBarcodeLabelsModal({
   open,
   lines,
+  jobTitle = "Job",
+  qtyByLineId,
   onClose,
 }: {
   open: boolean;
   lines: JobLabelLine[];
+  jobTitle?: string;
+  /** Pre-fill copy counts (e.g. from mobile station sheet quantities). */
+  qtyByLineId?: Record<string, number>;
   onClose: () => void;
 }) {
-  const rows: PrintRow[] = useMemo(
-    () =>
-      lines.map((l) => ({
-        lineId: l.id,
-        scanValue: normalizeScanValue(l.scan_value),
-        sku: labelLineSku(l.style_color_code, l.size),
-        description: l.description,
-        stock: 0,
-      })),
-    [lines],
-  );
+  const rows = useMemo(() => labelPrintItemsFromLines(lines), [lines]);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [qty, setQty] = useState<Record<string, number>>({});
@@ -44,10 +29,12 @@ export function PrintBarcodeLabelsModal({
     const ids = new Set(rows.map((r) => r.lineId));
     setSelected(ids);
     setQty(
-      Object.fromEntries(rows.map((r) => [r.lineId, Math.max(0, r.stock) || 1])),
+      Object.fromEntries(
+        rows.map((r) => [r.lineId, Math.max(1, qtyByLineId?.[r.lineId] ?? 1)]),
+      ),
     );
     setCaseLabels(false);
-  }, [open, rows]);
+  }, [open, rows, qtyByLineId]);
 
   if (!open) return null;
 
@@ -60,53 +47,23 @@ export function PrintBarcodeLabelsModal({
     });
   }
 
+  function qtyMap(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      if (!selected.has(r.lineId)) continue;
+      out[r.lineId] = qty[r.lineId] ?? 1;
+    }
+    return out;
+  }
+
   function printSelected() {
-    const toPrint = rows.filter((r) => selected.has(r.lineId) && (qty[r.lineId] ?? 0) > 0);
-    if (!toPrint.length) return;
-
-    const w = window.open("", "_blank", "noopener,noreferrer");
-    if (!w) return;
-
-    const labelBlocks = toPrint
-      .flatMap((r) => {
-        const count = qty[r.lineId] ?? 1;
-        const blocks: string[] = [];
-        for (let i = 0; i < count; i++) {
-          blocks.push(`
-            <div class="label">
-              <p class="title">${escapeHtml(r.description)}</p>
-              <p class="sku">${escapeHtml(r.sku)}${caseLabels ? " · CASE" : ""}</p>
-              <p class="meta"><span>${escapeHtml(r.scanValue)}</span><span>${escapeHtml(r.sku.split("_").pop() ?? "")}</span></p>
-              <svg class="barcode" data-value="${escapeHtml(r.scanValue)}"></svg>
-            </div>
-          `);
-        }
-        return blocks;
-      })
-      .join("");
-
-    w.document.write(`<!DOCTYPE html>
-<html><head><title>Barcode labels</title>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<style>
-  @page { margin: 12mm; }
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 8px; }
-  .grid { display: flex; flex-wrap: wrap; gap: 12px; }
-  .label { width: 2.25in; border: 1px solid #e2e8f0; padding: 8px; page-break-inside: avoid; text-align: center; }
-  .title { font-size: 11px; margin: 0 0 4px; text-transform: lowercase; }
-  .sku { font-size: 12px; font-weight: 700; margin: 0 0 6px; }
-  .meta { display: flex; justify-content: space-between; font-size: 10px; font-weight: 600; margin-bottom: 4px; }
-  .barcode { width: 100%; height: 48px; }
-</style></head><body>
-<div class="grid">${labelBlocks}</div>
-<script>
-  document.querySelectorAll('svg.barcode').forEach(function(el) {
-    try { JsBarcode(el, el.getAttribute('data-value'), { format: 'CODE128', displayValue: true, fontSize: 11, height: 40, margin: 2, width: 1.4 }); } catch(e) {}
-  });
-  setTimeout(function() { window.print(); }, 400);
-</script>
-</body></html>`);
-    w.document.close();
+    const map = qtyMap();
+    const filtered = lines.filter((l) => selected.has(l.id) && (map[l.id] ?? 0) > 0);
+    if (!filtered.length) return;
+    printBuiltLabels(filtered, map, {
+      caseLabels,
+      documentTitle: `${jobTitle} labels`,
+    });
   }
 
   return (
@@ -135,7 +92,7 @@ export function PrintBarcodeLabelsModal({
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                <th className="py-2 pr-2 w-8" />
+                <th className="w-8 py-2 pr-2" />
                 <th className="py-2 pr-2">Item ID</th>
                 <th className="py-2 pr-2">SKU</th>
                 <th className="py-2 pr-2">
@@ -149,7 +106,7 @@ export function PrintBarcodeLabelsModal({
                     Case labels
                   </label>
                 </th>
-                <th className="py-2 text-right">Stock</th>
+                <th className="py-2 text-right">Qty</th>
               </tr>
             </thead>
             <tbody>
@@ -165,7 +122,8 @@ export function PrintBarcodeLabelsModal({
                   </td>
                   <td className="py-2 pr-2 font-mono text-slate-900">{r.scanValue}</td>
                   <td className="py-2 pr-2 font-medium text-slate-800">{r.sku}</td>
-                  <td className="py-2 pr-2">
+                  <td className="py-2 pr-2 text-xs text-slate-500">{r.description}</td>
+                  <td className="py-2 text-right">
                     <input
                       type="number"
                       min={0}
@@ -180,7 +138,6 @@ export function PrintBarcodeLabelsModal({
                       aria-label={`Quantity for ${r.sku}`}
                     />
                   </td>
-                  <td className="py-2 text-right text-slate-500">{r.stock}</td>
                 </tr>
               ))}
             </tbody>
@@ -204,18 +161,10 @@ export function PrintBarcodeLabelsModal({
             disabled={!rows.some((r) => selected.has(r.lineId))}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
           >
-            Print
+            Print / PDF
           </button>
         </footer>
       </div>
     </div>
   );
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

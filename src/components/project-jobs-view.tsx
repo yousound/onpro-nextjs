@@ -338,7 +338,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
 
   if (!hydrated) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
         <ContentHeader
           breadcrumbs={
             <nav className="flex items-center gap-2 text-sm text-text-secondary" aria-label="Breadcrumb">
@@ -350,13 +350,13 @@ export function ProjectJobsView({ project }: { project: Project }) {
             </nav>
           }
         />
-        <div className="flex flex-1 items-center justify-center text-sm text-text-secondary">Loading…</div>
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-text-secondary">Loading…</div>
       </div>
     );
   }
 
   const jobsTableSection = (
-    <section className="flex min-h-0 flex-col pb-4 pt-2">
+    <section className="pb-4 pt-2">
       <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
@@ -403,8 +403,8 @@ export function ProjectJobsView({ project }: { project: Project }) {
           })}
         </div>
       </div>
-      <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
-        <div className="min-h-0 max-h-[min(560px,50vh)] overflow-auto bg-white sm:max-h-none sm:flex-1">
+      <div className="overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
+        <div className="overflow-x-auto bg-white">
           <table className="min-w-full bg-white text-left text-sm">
             <thead className="sticky top-0 z-10 border-b border-border-light bg-white text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
               <tr>
@@ -455,7 +455,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
       <ContentHeader
         breadcrumbs={
           <nav className="flex items-center gap-2 text-sm text-text-secondary" aria-label="Breadcrumb">
@@ -468,7 +468,8 @@ export function ProjectJobsView({ project }: { project: Project }) {
         }
       />
 
-      <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col overflow-hidden bg-white px-4 sm:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="mx-auto w-full max-w-[1600px] px-4 pb-8 sm:px-6">
         <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 pt-4 pb-2">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">{merged.name}</h1>
@@ -522,7 +523,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div>
           {activeModule === "details" ? (
             <div className="space-y-5">
               <ProjectDetailsClientCard project={merged} />
@@ -537,6 +538,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
           ) : null}
 
           <ProjectModuleRouter moduleId={activeModule} project={merged} onPatchProject={persistProject} />
+        </div>
         </div>
       </div>
 

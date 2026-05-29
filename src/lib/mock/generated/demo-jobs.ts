@@ -31,11 +31,25 @@ export function buildDemoJobs(
     ],
     label_lines: [
       {
+        id: "demo-ll-s",
+        size: "S",
+        style_color_code: "GGT148-BLK",
+        description: "no humans allowed tee",
+        scan_value: "479944",
+      },
+      {
         id: "demo-ll-m",
         size: "M",
-        style_color_code: "GGT148-B",
-        description: "tee (black)",
-        scan_value: "479944",
+        style_color_code: "GGT148-BLK",
+        description: "no humans allowed tee",
+        scan_value: "479945",
+      },
+      {
+        id: "demo-ll-l",
+        size: "L",
+        style_color_code: "GGT148-BLK",
+        description: "no humans allowed tee",
+        scan_value: "479946",
       },
     ],
     status: "In progress",

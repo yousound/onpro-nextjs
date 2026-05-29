@@ -27,7 +27,7 @@ export function generateStyleNumber(
 }
 
 /** Common colorway → 3-letter codes (matches legacy inventory VID). */
-const COLORWAY_ABBREV: Record<string, string> = {
+export const COLORWAY_ABBREV: Record<string, string> = {
   white: "WHT",
   "off white": "OWT",
   black: "BLK",
@@ -43,6 +43,17 @@ const COLORWAY_ABBREV: Record<string, string> = {
   cream: "CRM",
   natural: "NAT",
 };
+
+/** Display names for colorway picker (title case). */
+export const COMMON_COLORWAY_NAMES = Object.keys(COLORWAY_ABBREV).map((k) =>
+  k.replace(/\b\w/g, (c) => c.toUpperCase()),
+);
+
+export function resolveColorCode(colorway: string, explicitCode?: string): string {
+  const manual = explicitCode?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);
+  if (manual) return manual;
+  return colorwayAbbrev(colorway);
+}
 
 export function colorwayAbbrev(colorway: string): string {
   const key = colorway.trim().toLowerCase();
@@ -65,14 +76,23 @@ export function colorwayAbbrev(colorway: string): string {
 }
 
 /** Style + color code for labels e.g. FT28127-BPK */
-export function styleColorCode(styleNumber: string, colorway: string): string {
+export function styleColorCode(
+  styleNumber: string,
+  colorway: string,
+  colorCode?: string,
+): string {
   const style = styleNumber.trim().toUpperCase();
-  const abbrev = colorwayAbbrev(colorway);
+  if (!style) return "";
+  const abbrev = resolveColorCode(colorway, colorCode);
   return abbrev ? `${style}-${abbrev}` : style;
 }
 
-export function generateBarcode(styleNumber: string, colorway: string): string {
-  return styleColorCode(styleNumber, colorway);
+export function generateBarcode(
+  styleNumber: string,
+  colorway: string,
+  colorCode?: string,
+): string {
+  return styleColorCode(styleNumber, colorway, colorCode);
 }
 
 /** Product description for label e.g. "fitted tee (baby pink)" */

@@ -48,7 +48,12 @@ import {
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
 import { generatePoForJob } from "@/lib/po-context";
-import { generateStyleNumber, styleColorCode } from "@/lib/style-number";
+import {
+  COMMON_COLORWAY_NAMES,
+  generateStyleNumber,
+  resolveColorCode,
+  styleColorCode,
+} from "@/lib/style-number";
 import { wipStepLabel } from "@/lib/wip-project-timeline";
 import { JobTimelineStepsEditor } from "@/components/job-timeline-steps-editor";
 import { WipTimeline } from "@/components/wip-timeline";
@@ -461,8 +466,16 @@ export function JobDetailsModal({
     });
   }
 
+  const styleColorPreview = useMemo(
+    () => styleColorCode(draft.style_number, draft.colorway ?? "", draft.color_code),
+    [draft.style_number, draft.colorway, draft.color_code],
+  );
+
   function handleGenerateBarcode() {
-    patch({ barcode: styleColorCode(draft.style_number, draft.colorway ?? "") });
+    patch({
+      barcode: styleColorPreview,
+      color_code: draft.color_code?.trim() || resolveColorCode(draft.colorway ?? ""),
+    });
   }
 
   function handleSave(e: FormEvent) {
@@ -651,10 +664,40 @@ export function JobDetailsModal({
                 Colorway
                 <input
                   className={fieldClass}
+                  list="job-colorway-options"
                   value={draft.colorway ?? ""}
-                  placeholder="e.g. Olive"
+                  placeholder="e.g. Black, Baby pink"
                   onChange={(e) => patch({ colorway: e.target.value })}
                 />
+                <datalist id="job-colorway-options">
+                  {COMMON_COLORWAY_NAMES.map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+                <p className="mt-1 text-[11px] text-text-secondary">
+                  Pick a standard name or type your own. Code preview:{" "}
+                  <span className="font-mono font-semibold text-text-primary">
+                    {resolveColorCode(draft.colorway ?? "", draft.color_code) || "—"}
+                  </span>
+                </p>
+              </label>
+
+              <label className={labelClass}>
+                Color code (3 letters)
+                <input
+                  className={fieldClass}
+                  value={draft.color_code ?? ""}
+                  placeholder="Auto from colorway, or e.g. BLK"
+                  maxLength={3}
+                  onChange={(e) =>
+                    patch({
+                      color_code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3),
+                    })
+                  }
+                />
+                <p className="mt-1 text-[11px] text-text-secondary">
+                  Override when the colorway name is custom (Heather grey → HGR, etc.).
+                </p>
               </label>
 
               <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
@@ -702,18 +745,24 @@ export function JobDetailsModal({
               <div>
                 <label className={labelClass}>
                   Style-color code
-                  <input className={readOnlyFieldClass} readOnly value={draft.barcode ?? ""} aria-readonly />
+                  <input
+                    className={fieldClass}
+                    value={draft.barcode ?? ""}
+                    placeholder={styleColorPreview || "GGT148-BLK"}
+                    onChange={(e) => patch({ barcode: e.target.value.toUpperCase() })}
+                  />
                 </label>
+                <p className="mt-1 text-[11px] text-text-secondary">
+                  Full SKU base: style # + color code. This is not the 6-digit barcode scan ID on stickers.
+                </p>
                 <button
                   type="button"
                   onClick={handleGenerateBarcode}
                   className="mt-2 rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-violet-50"
                 >
-                  Generate style-color code
+                  Apply from colorway ({styleColorPreview || "set color first"})
                 </button>
               </div>
-
-              <JobLabelsSection draft={draft} allJobs={allJobs} onPatch={patch} />
 
               {draft.scope_kind === "addon" ? (
                 <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
@@ -858,6 +907,14 @@ export function JobDetailsModal({
                 steps={draft.timeline}
                 onChange={(timeline) => patch({ timeline })}
               />
+            </SectionCard>
+
+            <SectionCard
+              id="job-section-labels"
+              title="Labels & barcodes"
+              highlight={highlightId === "job-section-labels"}
+            >
+              <JobLabelsSection draft={draft} allJobs={allJobs} onPatch={patch} />
             </SectionCard>
 
             {ACCORDION_SECTIONS.map((section) => (

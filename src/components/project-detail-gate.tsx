@@ -34,7 +34,7 @@ export function ProjectDetailGate({
   if (!project) notFound();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
       <Suspense
         fallback={
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white text-sm text-text-secondary">

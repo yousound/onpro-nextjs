@@ -75,6 +75,7 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
     scope_kind: job.scope_kind ?? "original",
     job_type: job.job_type ?? (project !== undefined ? "print_production" : job.job_type),
     colorway: job.colorway ?? "",
+    color_code: job.color_code ?? "",
     barcode: job.barcode ?? "",
     po_number: job.po_number ?? null,
     label_files: job.label_files ? [...job.label_files] : [],

@@ -5,7 +5,6 @@ import { useMemo } from "react";
 import type { LabelStationSheet, ProjectJob } from "@/lib/types/wip";
 import {
   MOBILE_STATION_SIZES,
-  displayTotalUnits,
   normalizeLabelStation,
   totalUnitsFromStation,
 } from "@/lib/label-station";
@@ -94,8 +93,6 @@ function StationSheetPreview({
   onPatch: (partial: Partial<LabelStationSheet>) => void;
 }) {
   const computedTotal = totalUnitsFromStation(sheet);
-  const totalDisplay = displayTotalUnits(sheet);
-  const boxOf = sheet.box_total.trim() || totalDisplay || String(computedTotal);
 
   function patchQty(key: string, value: string) {
     onPatch({ size_qty: { ...sheet.size_qty, [key]: value.replace(/[^\d]/g, "") } });
@@ -197,13 +194,12 @@ function StationSheetPreview({
             <input
               className={`${underlineInput} max-w-[4.5rem] text-center`}
               value={sheet.box_total}
-              placeholder={totalDisplay || (computedTotal > 0 ? String(computedTotal) : undefined)}
               onChange={(e) => onPatch({ box_total: e.target.value.replace(/[^\d]/g, "") })}
               aria-label="Box total"
             />
           ) : (
             <span className={`max-w-[4.5rem] flex-1 border-b-[3px] border-black pb-1 text-center text-xl font-black sm:text-2xl`}>
-              {boxOf}
+              {sheet.box_total || "\u00a0"}
             </span>
           )}
         </div>

@@ -1,12 +1,13 @@
 import type { JobLabelLine } from "@/lib/types/wip";
-import { labelLineSku } from "@/lib/style-number";
+import { labelLineSku, stickerBottomLine, stickerTopLine } from "@/lib/style-number";
 import { normalizeScanValue } from "@/lib/scan-value";
 
 export type LabelPrintItem = {
   lineId: string;
   scanValue: string;
   sku: string;
-  description: string;
+  topLine: string;
+  bottomLine: string;
   size: string;
   qty: number;
 };
@@ -27,7 +28,8 @@ export function labelPrintItemsFromLines(
     lineId: l.id,
     scanValue: normalizeScanValue(l.scan_value),
     sku: labelLineSku(l.style_color_code, l.size),
-    description: l.description,
+    topLine: stickerTopLine(l),
+    bottomLine: stickerBottomLine(l),
     size: l.size,
     qty: Math.max(1, qtyByLineId?.[l.id] ?? 1),
   }));
@@ -38,10 +40,12 @@ function labelBlocksHtml(items: LabelPrintItem[], caseLabels: boolean): string {
     .flatMap((r) => {
       const blocks: string[] = [];
       for (let i = 0; i < r.qty; i++) {
+        const top = r.topLine || r.sku;
+        const bottom = caseLabels ? `${r.bottomLine} · CASE` : r.bottomLine;
         blocks.push(`
           <div class="label">
-            <p class="title">${escapeHtml(r.description)}</p>
-            <p class="sku">${escapeHtml(r.sku)}${caseLabels ? " · CASE" : ""}</p>
+            <p class="top-line">${escapeHtml(top)}</p>
+            <p class="bottom-line">${escapeHtml(bottom)}</p>
             <p class="meta"><span>${escapeHtml(r.scanValue)}</span><span>${escapeHtml(r.size)}</span></p>
             <svg class="barcode" data-value="${escapeHtml(r.scanValue)}"></svg>
           </div>
@@ -86,8 +90,20 @@ const PRINT_STYLES = `
     text-align: center;
     background: white;
   }
-  .title { font-size: 11px; margin: 0 0 4px; text-transform: lowercase; }
-  .sku { font-size: 12px; font-weight: 700; margin: 0 0 6px; }
+  .top-line {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 0 0 2px;
+    line-height: 1.2;
+  }
+  .bottom-line {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #475569;
+    margin: 0 0 6px;
+  }
   .meta {
     display: flex;
     justify-content: space-between;

@@ -30,7 +30,7 @@ function sizeColumn(display: string, qty: string): string {
 
 function stationSheetHtml(sheet: LabelStationSheet, logoUrl: string): string {
   const total = displayTotalUnits(sheet) || "—";
-  const boxOf = sheet.box_total.trim() || total;
+  const boxOf = sheet.box_total.trim();
   const sizeBlocks = MOBILE_STATION_SIZES.map(({ key, display }) =>
     sizeColumn(display, sheet.size_qty[key] ?? ""),
   ).join("");
@@ -60,7 +60,7 @@ function stationSheetHtml(sheet: LabelStationSheet, logoUrl: string): string {
           <span class="field-lbl">BOX</span>
           <span class="field-val box-num">${escapeHtml(sheet.box_number) || "&nbsp;"}</span>
           <span class="field-lbl box-of">OF</span>
-          <span class="field-val box-num">${escapeHtml(boxOf)}</span>
+          <span class="field-val box-num">${escapeHtml(boxOf) || "&nbsp;"}</span>
         </div>
         ${underlineField("WEIGHT", sheet.weight)}
       </section>

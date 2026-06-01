@@ -153,6 +153,12 @@ export function createPackingSlipDraft(
 }
 
 export function exportPackingSlipCsv(slip: PackingSlipDocument): void {
+  const variant = slip.variant ?? "products_go";
+  const baseHeaders = ["BOX"];
+  if (variant === "products_go") baseHeaders.push("IID#");
+  if (variant === "shipper") baseHeaders.push("WEIGHT", "DIMS");
+  baseHeaders.push("STYLE #", "DESCRIPTION", "COLOR", "SIZE", "QTY", "CARTONS", "PO #");
+
   const rows: string[][] = [
     [packingSlipCompanyName(slip).toUpperCase(), "PACKING LIST"],
     [slip.document_number, ""],
@@ -166,11 +172,17 @@ export function exportPackingSlipCsv(slip: PackingSlipDocument): void {
     ["Tracking", slip.tracking_number],
     ["Project PO", slip.project_po_number ?? ""],
     [],
-    ["STYLE #", "DESCRIPTION", "COLOR", "SIZE", "QTY", "CARTONS", "PO #"],
+    baseHeaders,
   ];
 
   for (const line of slip.lines) {
-    rows.push([
+    const row: string[] = [String(line.box_number ?? "")];
+    if (variant === "products_go") row.push(line.iid_number ?? "");
+    if (variant === "shipper") {
+      row.push(line.box_weight ?? "");
+      row.push(line.box_dimensions ?? "");
+    }
+    row.push(
       line.style_number,
       line.description,
       line.colorway,
@@ -178,7 +190,8 @@ export function exportPackingSlipCsv(slip: PackingSlipDocument): void {
       String(line.quantity),
       String(line.cartons || ""),
       line.po_number,
-    ]);
+    );
+    rows.push(row);
   }
 
   const csv = rows

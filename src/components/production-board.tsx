@@ -78,10 +78,19 @@ export function ProductionBoard({ projects: projectsProp }: { projects: Project[
 
   const columns: ColumnDef<ProductionJobRow>[] = useMemo(
     () => [
+      {
+        id: "job_number",
+        header: "Job #",
+        size: 100,
+        accessorFn: (r) => r.job_number ?? "",
+        cell: ({ getValue }) => (
+          <span className="font-mono font-bold text-accent">{(getValue() as string) || "—"}</span>
+        ),
+      },
       { id: "job", header: "Job", size: 160, accessorFn: (r) => r.name, cell: ({ row }) => row.original.name || "—" },
       { id: "project", header: "Project", size: 140, accessorFn: (r) => r.projectName },
       { id: "client", header: "Client", size: 120, accessorFn: (r) => r.clientName },
-      { id: "po", header: "PO #", size: 130, accessorFn: (r) => r.po_number ?? "" },
+      { id: "po", header: "PO #", size: 130, accessorFn: (r) => r.client_po_number?.trim() || r.po_number || "" },
       { id: "status", header: "Status", size: 110, accessorFn: (r) => r.status },
       {
         id: "progress",

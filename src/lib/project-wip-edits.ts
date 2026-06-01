@@ -1,6 +1,7 @@
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
 import { normalizeJob } from "@/lib/job-defaults";
+import { generateJobNumberForProject } from "@/lib/job-number";
 import { MOCK_DEMO_SEED_VERSION, MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { getJobsForProject, getProjectTimeline } from "@/lib/mock/project-jobs";
 import { repairJobTimeline } from "@/lib/wip-project-timeline";
@@ -21,6 +22,22 @@ function normalizeLoadedJob(seed: ProjectJob, patch: ProjectJob | undefined, pro
   );
 }
 
+function backfillJobNumbers(jobs: ProjectJob[], project?: Project): ProjectJob[] {
+  if (!project) return jobs;
+  const assigned: ProjectJob[] = [];
+  let needsWrite = false;
+  for (const j of jobs) {
+    if (j.job_number?.trim()) {
+      assigned.push(j);
+      continue;
+    }
+    const next = generateJobNumberForProject(project, assigned);
+    assigned.push({ ...j, job_number: next });
+    needsWrite = true;
+  }
+  return needsWrite ? assigned : jobs;
+}
+
 export function loadProjectJobs(projectId: number, project?: Project): ProjectJob[] {
   const seed = getJobsForProject(projectId);
   const seedVersion = readMockLs<number>(MOCK_LS.demoSeedVersion);
@@ -28,11 +45,13 @@ export function loadProjectJobs(projectId: number, project?: Project): ProjectJo
     seedVersion === MOCK_DEMO_SEED_VERSION
       ? readMockLs<ProjectJob[]>(MOCK_LS.projectJobs(projectId))
       : null;
-  if (!saved?.length) {
-    return seed.map((j) => normalizeLoadedJob(j, undefined, project));
-  }
-  const byId = new Map(saved.map((j) => [j.id, j]));
-  return seed.map((j) => normalizeLoadedJob(j, byId.get(j.id), project));
+  const normalized = !saved?.length
+    ? seed.map((j) => normalizeLoadedJob(j, undefined, project))
+    : (() => {
+        const byId = new Map(saved.map((j) => [j.id, j]));
+        return seed.map((j) => normalizeLoadedJob(j, byId.get(j.id), project));
+      })();
+  return backfillJobNumbers(normalized, project);
 }
 
 export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {

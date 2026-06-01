@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FocusEvent, type MouseEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import type { Conversation } from "@/lib/types/messages";
 import {
   attachmentsForConversation,
@@ -20,6 +21,9 @@ import { MessageAttachmentComposer } from "@/components/message-attachment-compo
 import type { AttachmentComposerDraft } from "@/lib/attachment-composer-draft";
 import { fallbackDraftFromSmartAttachment } from "@/lib/attachment-composer-draft";
 import { getProjectById } from "@/lib/mock/projects";
+import Link from "next/link";
+import { PromoteToMailroomModal } from "@/components/promote-to-mailroom-modal";
+import { loadMailroomState } from "@/lib/mailroom-state";
 
 function kindLabel(kind: string) {
   const map: Record<string, string> = {
@@ -109,8 +113,22 @@ function extIcon(ext: string) {
 }
 
 export function MessagesView({ conversations }: { conversations: Conversation[] }) {
+  const searchParams = useSearchParams();
+  const requestedConversationParam = searchParams.get("conversation");
+  const requestedConversationId = useMemo(() => {
+    if (!requestedConversationParam) return null;
+    const n = Number(requestedConversationParam);
+    return Number.isFinite(n) ? n : null;
+  }, [requestedConversationParam]);
+
   const [extraConversations, setExtraConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState(conversations[0]?.id ?? 0);
+  const [activeId, setActiveId] = useState(
+    requestedConversationId ?? conversations[0]?.id ?? 0,
+  );
+
+  useEffect(() => {
+    if (requestedConversationId != null) setActiveId(requestedConversationId);
+  }, [requestedConversationId]);
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerSessionKey, setComposerSessionKey] = useState(0);
   const [composerInitialDraft, setComposerInitialDraft] = useState<AttachmentComposerDraft | null>(null);
@@ -127,7 +145,14 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   const [draftMessage, setDraftMessage] = useState("");
   const [inboxPeekOpen, setInboxPeekOpen] = useState(false);
   const [inboxSearchQuery, setInboxSearchQuery] = useState("");
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const [mailroomLinks, setMailroomLinks] = useState<Record<number, string>>({});
   const threadInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const s = loadMailroomState();
+    setMailroomLinks(s.message_links ?? {});
+  }, []);
 
   const allConversations = useMemo(
     () => [...conversations, ...extraConversations],
@@ -305,6 +330,24 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <AttachmentsOnboardingModal open={attachOnboardingOpen} onDismiss={dismissAttachOnboarding} />
+      {promoteOpen && active ? (
+        <PromoteToMailroomModal
+          conversation={active}
+          messages={thread.map((m) => ({
+            id: m.id,
+            conversation_id: m.conversation_id,
+            body: m.body,
+            side: m.side,
+            time_label: m.time_label,
+          }))}
+          connectedEmail="me@connectdots"
+          onClose={() => setPromoteOpen(false)}
+          onPromoted={(threadId) => {
+            setMailroomLinks((prev) => ({ ...prev, [active.id]: threadId }));
+            setPromoteOpen(false);
+          }}
+        />
+      ) : null}
       <AttachmentReaderModal
         open={readerOpen}
         attachment={readerAttachment}
@@ -576,14 +619,39 @@ export function MessagesView({ conversations }: { conversations: Conversation[] 
         <section className="flex min-w-0 min-h-0 flex-1 flex-col bg-slate-50/80">
           {active ? (
             <>
-              <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
-                  {initials(peerName)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold text-slate-900">{peerName}</div>
-                  <div className="text-xs text-emerald-600">online</div>
+              <div className="shrink-0 border-b border-slate-200 bg-white">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
+                    {initials(peerName)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold text-slate-900">{peerName}</div>
+                    <div className="text-xs text-emerald-600">online</div>
+                  </div>
+                  {active && mailroomLinks[active.id] ? (
+                    <Link
+                      href={`/mailroom?thread=${encodeURIComponent(mailroomLinks[active.id])}`}
+                      className="shrink-0 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
+                    >
+                      🔗 Open in Mailroom
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPromoteOpen(true)}
+                      disabled={!active || thread.length === 0}
+                      className="shrink-0 rounded-full bg-violet-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-40"
+                      title="Summarize this conversation and create a Mailroom thread"
+                    >
+                      ✨ Summarize & promote
+                    </button>
+                  )}
                 </div>
+                {active && mailroomLinks[active.id] ? (
+                  <div className="border-t border-violet-100 bg-violet-50/50 px-4 py-1.5 text-[11px] text-violet-700">
+                    This conversation has been promoted to the Mailroom for agent triage.
+                  </div>
+                ) : null}
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
                 <div className={`mx-auto w-full ${threadShellTransition} ${threadShellMax}`}>

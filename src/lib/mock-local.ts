@@ -21,12 +21,18 @@ export const MOCK_LS = {
   internalTeamMembersExtraForProject: (id: number) =>
     `onpro.mock.v1.project.${id}.internalTeamExtras`,
   selectedJobId: (projectId: number) => `onpro.mock.v1.project.${projectId}.selectedJobId`,
+  /** Saved cost-sheet templates by category code. */
+  costTemplates: "onpro.mock.v1.costTemplates",
+  /** Vendor price book — recent prices per vendor. */
+  vendorPrices: "onpro.mock.v1.vendorPrices",
+  /** Mailroom agent state — OAuth + per-suggestion status. */
+  mailroomState: "onpro.mock.v1.mailroomState",
   /** Bump when demo seed job ids / timelines change — ignores stale projectJobs in LS. */
   demoSeedVersion: "onpro.mock.v1.demoSeedVersion",
 } as const;
 
 /** Increment when regenerating demo projects/jobs so browsers drop stale WIP edits. */
-export const MOCK_DEMO_SEED_VERSION = 2;
+export const MOCK_DEMO_SEED_VERSION = 3;
 
 export function readMockLs<T>(key: string): T | null {
   if (typeof window === "undefined") return null;

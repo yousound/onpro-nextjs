@@ -122,7 +122,7 @@ export function PrintBarcodeLabelsModal({
                   </td>
                   <td className="py-2 pr-2 font-mono text-slate-900">{r.scanValue}</td>
                   <td className="py-2 pr-2 font-medium text-slate-800">{r.sku}</td>
-                  <td className="py-2 pr-2 text-xs text-slate-500">{r.description}</td>
+                  <td className="py-2 pr-2 text-xs text-slate-500">{r.bottomLine || r.topLine}</td>
                   <td className="py-2 text-right">
                     <input
                       type="number"

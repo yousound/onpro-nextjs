@@ -38,6 +38,8 @@ export interface Client {
 export interface Sample {
   id: number;
   type: SampleType;
+  requested_date: ISODate;
+  due_date: ISODate;
   received_date: ISODate;
   comments_sent_date: ISODate;
   status: SampleStatus;

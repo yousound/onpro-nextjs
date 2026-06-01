@@ -4,7 +4,12 @@ import { useMemo, useState } from "react";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
-import type { PackingSlipDocument, PackingSlipLine } from "@/lib/types/packing-slip";
+import type {
+  PackingSlipDocument,
+  PackingSlipLine,
+  PackingSlipVariant,
+} from "@/lib/types/packing-slip";
+import { printPackingSlip } from "@/lib/packing-slip-print";
 import { loadContacts } from "@/lib/contacts-store";
 import { loadProjectJobs } from "@/lib/project-wip-edits";
 import {
@@ -102,6 +107,15 @@ function ContactAddressNote({ address }: { address: string }) {
 function PackingSlipPreview({ slip }: { slip: PackingSlipDocument }) {
   return (
     <div className="rounded-xl border border-border-light bg-white p-4 text-sm print:p-8">
+      <div className="flex justify-end print:hidden">
+        <button
+          type="button"
+          onClick={() => printPackingSlip(slip)}
+          className="rounded-lg border border-border-light px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-slate-50"
+        >
+          Print
+        </button>
+      </div>
       <div className="border-b border-border-light bg-slate-50 px-4 py-6 text-center">
         <p className="text-lg font-bold tracking-wide text-text-primary">
           {packingSlipCompanyName(slip).toUpperCase()}
@@ -146,49 +160,71 @@ function PackingSlipPreview({ slip }: { slip: PackingSlipDocument }) {
           ) : null}
         </div>
       )}
-      <table className="mt-4 w-full border-collapse text-left text-xs">
-        <thead>
-          <tr className="border-b border-border-light bg-slate-100">
-            <th className="px-2 py-2 font-semibold">Style #</th>
-            <th className="px-2 py-2 font-semibold">Description</th>
-            <th className="px-2 py-2 font-semibold">Color</th>
-            <th className="px-2 py-2 font-semibold">Size</th>
-            <th className="px-2 py-2 text-right font-semibold">Qty</th>
-            <th className="px-2 py-2 text-right font-semibold">Ctns</th>
-            <th className="px-2 py-2 font-semibold">PO #</th>
-          </tr>
-        </thead>
-        <tbody>
-          {slip.lines.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="px-2 py-4 text-center text-text-secondary">
-                No line items
-              </td>
-            </tr>
-          ) : (
-            slip.lines.map((line) => (
-              <tr key={line.id} className="border-b border-border-light">
-                <td className="px-2 py-2 font-medium">{line.style_number}</td>
-                <td className="px-2 py-2">{line.description}</td>
-                <td className="px-2 py-2">{line.colorway}</td>
-                <td className="px-2 py-2">{line.size}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{line.quantity}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{line.cartons || "—"}</td>
-                <td className="px-2 py-2">{line.po_number || "—"}</td>
+      {(() => {
+        const variant = slip.variant ?? "products_go";
+        const extraCols =
+          variant === "products_go" ? 1 : variant === "shipper" ? 2 : 0;
+        const colCount = 8 + extraCols;
+        return (
+          <table className="mt-4 w-full border-collapse text-left text-xs">
+            <thead>
+              <tr className="border-b border-border-light bg-slate-100">
+                <th className="px-2 py-2 font-semibold">Box</th>
+                {variant === "products_go" ? <th className="px-2 py-2 font-semibold">IID#</th> : null}
+                {variant === "shipper" ? <th className="px-2 py-2 font-semibold">Weight</th> : null}
+                {variant === "shipper" ? <th className="px-2 py-2 font-semibold">Dims</th> : null}
+                <th className="px-2 py-2 font-semibold">Style #</th>
+                <th className="px-2 py-2 font-semibold">Description</th>
+                <th className="px-2 py-2 font-semibold">Color</th>
+                <th className="px-2 py-2 font-semibold">Size</th>
+                <th className="px-2 py-2 text-right font-semibold">Qty</th>
+                <th className="px-2 py-2 text-right font-semibold">Ctns</th>
+                <th className="px-2 py-2 font-semibold">PO #</th>
               </tr>
-            ))
-          )}
-        </tbody>
-        <tfoot>
-          <tr className="bg-slate-50 font-semibold">
-            <td colSpan={4} className="px-2 py-2 text-right">
-              Total pieces
-            </td>
-            <td className="px-2 py-2 text-right tabular-nums">{totalPieces(slip)}</td>
-            <td colSpan={2} />
-          </tr>
-        </tfoot>
-      </table>
+            </thead>
+            <tbody>
+              {slip.lines.length === 0 ? (
+                <tr>
+                  <td colSpan={colCount} className="px-2 py-4 text-center text-text-secondary">
+                    No line items
+                  </td>
+                </tr>
+              ) : (
+                slip.lines.map((line) => (
+                  <tr key={line.id} className="border-b border-border-light">
+                    <td className="px-2 py-2 tabular-nums">{line.box_number ?? "—"}</td>
+                    {variant === "products_go" ? (
+                      <td className="px-2 py-2 font-mono text-[11px]">{line.iid_number || "—"}</td>
+                    ) : null}
+                    {variant === "shipper" ? (
+                      <td className="px-2 py-2">{line.box_weight || "—"}</td>
+                    ) : null}
+                    {variant === "shipper" ? (
+                      <td className="px-2 py-2">{line.box_dimensions || "—"}</td>
+                    ) : null}
+                    <td className="px-2 py-2 font-medium">{line.style_number}</td>
+                    <td className="px-2 py-2">{line.description}</td>
+                    <td className="px-2 py-2">{line.colorway}</td>
+                    <td className="px-2 py-2">{line.size}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{line.quantity}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{line.cartons || "—"}</td>
+                    <td className="px-2 py-2">{line.po_number || "—"}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="bg-slate-50 font-semibold">
+                <td colSpan={colCount - 3} className="px-2 py-2 text-right">
+                  Total pieces
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums">{totalPieces(slip)}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          </table>
+        );
+      })()}
       {slip.notes ? (
         <p className="mt-3 text-xs text-text-secondary">
           <span className="font-semibold">Notes: </span>
@@ -224,6 +260,7 @@ function PackingSlipEditor({
   }
 
   function addLine() {
+    const nextBox = (draft.lines.reduce((m, l) => Math.max(m, l.box_number ?? 0), 0) || 0) + 1;
     onChange({
       ...draft,
       lines: [
@@ -237,9 +274,15 @@ function PackingSlipEditor({
           quantity: 1,
           po_number: draft.project_po_number ?? "",
           cartons: 0,
+          box_number: nextBox,
         },
       ],
     });
+  }
+
+  const variant: PackingSlipVariant = draft.variant ?? "products_go";
+  function setVariant(v: PackingSlipVariant) {
+    onChange({ ...draft, variant: v });
   }
 
   function removeLine(id: string) {
@@ -251,6 +294,13 @@ function PackingSlipEditor({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-semibold text-text-primary">Edit packing list</h4>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => printPackingSlip(draft)}
+            className="rounded-lg border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-slate-50"
+          >
+            Print preview
+          </button>
           <button
             type="button"
             onClick={onCancel}
@@ -266,6 +316,30 @@ function PackingSlipEditor({
             Save packing list
           </button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] font-semibold uppercase text-text-secondary">Layout:</span>
+        {(
+          [
+            { value: "products_go", label: "Products GO (IID#)" },
+            { value: "shipper", label: "Shipper (Dims + Weight)" },
+            { value: "basic", label: "Basic" },
+          ] as const
+        ).map((v) => (
+          <button
+            key={v.value}
+            type="button"
+            onClick={() => setVariant(v.value)}
+            className={`rounded-full px-3 py-1 text-[11px] font-semibold ring-1 transition ${
+              variant === v.value
+                ? "bg-accent text-white ring-accent"
+                : "bg-white text-text-secondary ring-border-light hover:bg-slate-50"
+            }`}
+          >
+            {v.label}
+          </button>
+        ))}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -339,6 +413,10 @@ function PackingSlipEditor({
         <table className="min-w-full text-left text-xs">
           <thead className="bg-slate-50 text-[10px] font-semibold uppercase text-text-secondary">
             <tr>
+              <th className="px-2 py-2">Box</th>
+              {variant === "products_go" ? <th className="px-2 py-2">IID#</th> : null}
+              {variant === "shipper" ? <th className="px-2 py-2">Weight</th> : null}
+              {variant === "shipper" ? <th className="px-2 py-2">Dims</th> : null}
               <th className="px-2 py-2">Style #</th>
               <th className="px-2 py-2">Description</th>
               <th className="px-2 py-2">Color</th>
@@ -352,6 +430,47 @@ function PackingSlipEditor({
           <tbody>
             {draft.lines.map((line) => (
               <tr key={line.id} className="border-t border-border-light">
+                <td className="px-1 py-1">
+                  <input
+                    type="number"
+                    min={1}
+                    className="w-12 rounded border border-border-light px-1 py-1 text-right"
+                    value={line.box_number ?? ""}
+                    onChange={(e) =>
+                      patchLine(line.id, { box_number: parseInt(e.target.value, 10) || undefined })
+                    }
+                  />
+                </td>
+                {variant === "products_go" ? (
+                  <td className="px-1 py-1">
+                    <input
+                      className="w-full min-w-[5rem] rounded border border-border-light px-1 py-1"
+                      placeholder="IID-XXXX"
+                      value={line.iid_number ?? ""}
+                      onChange={(e) => patchLine(line.id, { iid_number: e.target.value || undefined })}
+                    />
+                  </td>
+                ) : null}
+                {variant === "shipper" ? (
+                  <td className="px-1 py-1">
+                    <input
+                      className="w-full min-w-[4rem] rounded border border-border-light px-1 py-1"
+                      placeholder="25 lbs"
+                      value={line.box_weight ?? ""}
+                      onChange={(e) => patchLine(line.id, { box_weight: e.target.value || undefined })}
+                    />
+                  </td>
+                ) : null}
+                {variant === "shipper" ? (
+                  <td className="px-1 py-1">
+                    <input
+                      className="w-full min-w-[5rem] rounded border border-border-light px-1 py-1"
+                      placeholder="24x14x14"
+                      value={line.box_dimensions ?? ""}
+                      onChange={(e) => patchLine(line.id, { box_dimensions: e.target.value || undefined })}
+                    />
+                  </td>
+                ) : null}
                 <td className="px-1 py-1">
                   <input
                     className="w-full min-w-[4rem] rounded border border-border-light px-1 py-1"

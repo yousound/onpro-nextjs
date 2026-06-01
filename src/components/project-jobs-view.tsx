@@ -109,7 +109,7 @@ function ModalShell({
   );
 }
 
-const JOB_COL_COUNT = 10;
+const JOB_COL_COUNT = 11;
 
 type JobScopeFilter = "all" | JobScopeKind;
 
@@ -146,6 +146,9 @@ function JobTableRow({
       }}
       className="cursor-pointer border-b border-l-4 border-l-transparent border-border-light bg-white transition hover:bg-slate-50/80"
     >
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs font-bold text-accent">
+        {job.job_number ?? "—"}
+      </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold text-text-primary">{job.name}</span>
@@ -161,7 +164,7 @@ function JobTableRow({
       <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{job.category}</td>
       <td className="hidden px-4 py-3 text-text-secondary xl:table-cell">{job.style_number}</td>
       <td className="hidden whitespace-nowrap px-4 py-3 text-xs font-medium text-text-secondary lg:table-cell">
-        {job.po_number ?? "—"}
+        {(job.client_po_number?.trim() || job.po_number) ?? "—"}
       </td>
       <td className="whitespace-nowrap px-4 py-3">
         <span
@@ -408,6 +411,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
           <table className="min-w-full bg-white text-left text-sm">
             <thead className="sticky top-0 z-10 border-b border-border-light bg-white text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
               <tr>
+                <th className="whitespace-nowrap px-4 py-3">Job #</th>
                 <th className="px-4 py-3">Job</th>
                 <th className="hidden px-4 py-3 md:table-cell">Type</th>
                 <th className="hidden px-4 py-3 lg:table-cell">Lead vendor</th>

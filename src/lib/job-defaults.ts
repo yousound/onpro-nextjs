@@ -1,5 +1,6 @@
-import type { BulkProductionTrack, Project } from "@/lib/types/project";
-import type { ProjectJob } from "@/lib/types/wip";
+import type { BulkProductionTrack, Project, Sample } from "@/lib/types/project";
+import type { CostingSheet, ProjectJob } from "@/lib/types/wip";
+import { emptyCostingSheet } from "@/lib/costing-sheet";
 import {
   defaultBulkProductionTrack,
   defaultCostingExtraTrack,
@@ -50,6 +51,8 @@ export function defaultJobTechPack(project?: Project): NonNullable<ProjectJob["t
     artwork_tech_pack_request_date: project?.artwork_tech_pack_request_date ?? null,
     artwork_tech_pack_due_date: project?.artwork_tech_pack_due_date ?? null,
     artwork_tech_pack_complete_date: project?.artwork_tech_pack_complete_date ?? null,
+    artwork_files: [],
+    dropbox_links: [],
   };
 }
 
@@ -68,6 +71,21 @@ export function defaultJobBulkTracks(project?: Project): BulkProductionTrack[] {
   return [defaultBulkProductionTrack("Production schedule 1")];
 }
 
+export function defaultCostingSheet(job?: ProjectJob): CostingSheet {
+  return emptyCostingSheet(
+    job?.job_type === "cut_sew" ? "print_production" : "print_production",
+    "USA",
+  );
+}
+
+function backfillSample(s: Sample): Sample {
+  return {
+    ...s,
+    requested_date: s.requested_date ?? null,
+    due_date: s.due_date ?? null,
+  };
+}
+
 /** Merge persisted job with defaults for new fields (backward compat). */
 export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
   return {
@@ -84,7 +102,10 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
     costing: {
       ...defaultJobCosting(project),
       ...job.costing,
-      colorways: job.costing?.colorways ?? defaultJobCosting(project).colorways,
+      colorways: (job.costing?.colorways ?? defaultJobCosting(project).colorways).map((cw) => ({
+        ...cw,
+        samples: cw.samples.map(backfillSample),
+      })),
       dye_costing_tracks:
         job.costing?.dye_costing_tracks?.length
           ? job.costing.dye_costing_tracks
@@ -105,5 +126,8 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
       job.bulk_production_tracks?.length
         ? job.bulk_production_tracks
         : defaultJobBulkTracks(project),
+    vendor_quotes: job.vendor_quotes ?? [],
+    costing_sheet: job.costing_sheet ?? defaultCostingSheet(job),
+    estimates: job.estimates ?? [],
   };
 }

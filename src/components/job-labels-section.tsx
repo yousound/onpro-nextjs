@@ -13,7 +13,12 @@ import {
 } from "@/lib/label-station";
 import { labelSizeHint, sizesForLabelLines } from "@/lib/label-sizes";
 import { collectScanValuesFromJobs, generateScanValue, normalizeScanValue } from "@/lib/scan-value";
-import { labelLineSku, labelTitleFromJob, styleColorCode } from "@/lib/style-number";
+import {
+  labelLineSku,
+  labelTitleFromJob,
+  resolveColorCode,
+  styleColorCode,
+} from "@/lib/style-number";
 
 const fieldClass =
   "mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
@@ -67,6 +72,7 @@ export function JobLabelsSection({
   function buildLinesForSizes(sizes: string[]): JobLabelLine[] {
     const desc = labelTitleFromJob(draft);
     const code = styleColorCode(draft.style_number, draft.colorway ?? "", draft.color_code);
+    const colorCode = resolveColorCode(draft.colorway ?? "", draft.color_code);
     let pool = existingScanValues();
     const lines: JobLabelLine[] = sizes.map((size, i) => {
       const scan_value = generateScanValue(pool);
@@ -77,6 +83,10 @@ export function JobLabelsSection({
         style_color_code: code,
         description: desc,
         scan_value,
+        category_label: draft.category || undefined,
+        colorway_name: draft.colorway || undefined,
+        color_code: colorCode || undefined,
+        style_number: draft.style_number || undefined,
       };
     });
     return lines;
@@ -95,6 +105,7 @@ export function JobLabelsSection({
 
   function addLine() {
     const pool = existingScanValues();
+    const code = resolveColorCode(draft.colorway ?? "", draft.color_code);
     patchLines([
       ...labelLines,
       {
@@ -103,6 +114,10 @@ export function JobLabelsSection({
         style_color_code: styleColorCode(draft.style_number, draft.colorway ?? "", draft.color_code),
         description: labelTitleFromJob(draft),
         scan_value: generateScanValue(pool),
+        category_label: draft.category || undefined,
+        colorway_name: draft.colorway || undefined,
+        color_code: code || undefined,
+        style_number: draft.style_number || undefined,
       },
     ]);
   }

@@ -24,7 +24,8 @@ type NavItem = {
     | "messages"
     | "documents"
     | "team"
-    | "reports";
+    | "reports"
+    | "mailroom";
   disabled?: boolean;
 };
 
@@ -34,6 +35,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: "overview" },
   { href: "/messages", label: "Messages", icon: "messages" },
+  { href: "/mailroom", label: "Mailroom", icon: "mailroom" },
   { href: "/projects", label: "Projects", icon: "projects" },
   { href: "/production", label: "Jobs", icon: "jobs" },
   { href: "/calendar", label: "Calendar", icon: "calendar" },
@@ -109,6 +111,14 @@ function NavIcon({ kind }: { kind: NavItem["icon"] }) {
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
           <path d="M18 20V10M12 20V4M6 20v-6" />
+        </svg>
+      );
+    case "mailroom":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+          <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <path d="M3 8l9 6 9-6" />
+          <circle cx="19" cy="6" r="2" fill="currentColor" stroke="none" />
         </svg>
       );
     default:

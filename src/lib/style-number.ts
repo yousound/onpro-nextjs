@@ -109,6 +109,53 @@ export function labelTitleFromJob(job: { name?: string; category?: string; color
   return labelDescription(job.category ?? "", job.colorway ?? "");
 }
 
+/**
+ * Bold top line for a barcode sticker, e.g. "FT28127 — BPK (Baby Pink)".
+ * Falls back gracefully if any piece is missing.
+ */
+export function stickerTopLine(line: {
+  style_number?: string;
+  style_color_code: string;
+  color_code?: string;
+  colorway_name?: string;
+}): string {
+  const styleRaw = (line.style_number ?? line.style_color_code.split("-")[0] ?? "").trim().toUpperCase();
+  const codeRaw = (line.color_code ?? line.style_color_code.split("-").slice(1).join("-") ?? "")
+    .trim()
+    .toUpperCase();
+  const colorway = line.colorway_name?.trim();
+  const titleColor = colorway
+    ? colorway
+        .toLowerCase()
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+    : "";
+  if (!styleRaw) return "";
+  const parts: string[] = [styleRaw];
+  if (codeRaw) parts.push(codeRaw);
+  const head = parts.join(" — ");
+  return titleColor ? `${head} (${titleColor})` : head;
+}
+
+/**
+ * Smaller bottom line for a barcode sticker, e.g. "FITTED TEE · FT28127 · BPK".
+ * Uses an interpunct separator and uppercases the category for visual balance.
+ */
+export function stickerBottomLine(line: {
+  category_label?: string;
+  description?: string;
+  style_number?: string;
+  style_color_code: string;
+  color_code?: string;
+}): string {
+  const cat = (line.category_label ?? line.description ?? "").trim().toUpperCase();
+  const style = (line.style_number ?? line.style_color_code.split("-")[0] ?? "").trim().toUpperCase();
+  const code = (line.color_code ?? line.style_color_code.split("-").slice(1).join("-") ?? "")
+    .trim()
+    .toUpperCase();
+  const parts = [cat, style, code].filter(Boolean);
+  return parts.join(" · ");
+}
+
 /** Full SKU / VID e.g. FT18123-WHT_S */
 export function labelLineSku(styleColorCode: string, size: string): string {
   const base = styleColorCode.trim().toUpperCase();

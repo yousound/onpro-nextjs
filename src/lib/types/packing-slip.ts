@@ -1,5 +1,7 @@
 /** Generated packing list / slip for outbound shipment (project-level). */
 
+export type PackingSlipVariant = "products_go" | "shipper" | "basic";
+
 export type PackingSlipLine = {
   id: string;
   style_number: string;
@@ -9,6 +11,14 @@ export type PackingSlipLine = {
   quantity: number;
   po_number: string;
   cartons: number;
+  /** Box number this row belongs to (1-based). */
+  box_number?: number;
+  /** "Products GO" variant — Glo Gang style item identifier. */
+  iid_number?: string;
+  /** "Shipper" variant — Camber style — gross weight per box, e.g. "25 lbs". */
+  box_weight?: string;
+  /** "Shipper" variant — box dimensions, e.g. "24x14x14". */
+  box_dimensions?: string;
 };
 
 export type PackingSlipDocument = {
@@ -32,5 +42,7 @@ export type PackingSlipDocument = {
   tracking_number: string;
   project_po_number: string | null;
   notes: string | null;
+  /** Layout style — drives which columns are visible & required. */
+  variant?: PackingSlipVariant;
   lines: PackingSlipLine[];
 };

@@ -34,7 +34,6 @@ export async function getServerBackendMode(): Promise<BackendMode | undefined> {
 }
 
 export async function isLiveBackendEnabled(): Promise<boolean> {
-  const mode = await getServerBackendMode();
-  return isSupabaseBackendEnabled(mode);
+  return shouldUseLiveBackend();
 }
 

@@ -4,11 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { BackendModeToggle } from "@/components/backend-mode-toggle";
 import { DirectoryAvatar } from "@/components/directory-avatar";
 import { OnProLogoIntroModal } from "@/components/onpro-logo-intro-modal";
 import { useCurrentUser } from "@/components/profile-provider";
-import { isSupabaseConfigured } from "@/lib/config/backend";
 import { isClientMockBackend } from "@/lib/config/backend-mode";
 import { displayAvatarUrl } from "@/lib/current-user-display";
 const MOCK_SIDEBAR = {
@@ -141,7 +139,7 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const { user: profileUser, loading: profileLoading } = useCurrentUser();
 
-  const useMockAvatar = isClientMockBackend() || (!profileLoading && !isSupabaseConfigured());
+  const useMockAvatar = isClientMockBackend();
   const sidebarUser = profileUser
     ? {
         name: profileUser.fullName,
@@ -153,7 +151,7 @@ export function AppSidebar() {
       ? MOCK_SIDEBAR
       : profileLoading
         ? { name: "…", org: "", avatarSrc: null as string | null, initials: "…" }
-        : { name: "Account", org: "Settings", avatarSrc: null as string | null, initials: "?" };
+        : { name: "Account", org: "Sign in", avatarSrc: null as string | null, initials: "?" };
   const [introOpen, setIntroOpen] = useState(false);
 
   return (
@@ -179,7 +177,6 @@ export function AppSidebar() {
           />
           {!collapsed ? <span className="truncate font-semibold text-text-primary">OnPro</span> : null}
         </button>
-        <BackendModeToggle collapsed={collapsed} />
       </div>
 
       <OnProLogoIntroModal open={introOpen} onDismiss={() => setIntroOpen(false)} />

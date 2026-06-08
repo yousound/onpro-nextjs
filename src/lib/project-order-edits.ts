@@ -68,7 +68,7 @@ export function ensureDefaultOrders(
 export function loadAllOrdersAcrossProjects(
   projectIds: number[],
   projectsById: Map<number, Project>,
-  operatorCode: string,
+  _operatorCode: string,
 ): ProjectOrder[] {
   const all: ProjectOrder[] = [];
   for (const id of projectIds) {

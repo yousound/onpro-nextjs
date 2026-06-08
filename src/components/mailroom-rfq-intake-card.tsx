@@ -84,7 +84,7 @@ export function MailroomRfqIntakeProvider({
   onDismissPanel,
   children,
 }: ProviderProps) {
-  const user = useCurrentUser();
+  const { user } = useCurrentUser();
   const vendors = useProjectVendors();
   const teamRaw = useProjectTeam();
   const team = useMemo(() => teamContactsWithSelf(teamRaw, user), [teamRaw, user]);

@@ -188,7 +188,7 @@ export function TeamFieldSelect({
   emptyLabel?: string;
   labelClassName?: string;
 }) {
-  const user = useCurrentUser();
+  const { user } = useCurrentUser();
   const team = useMemo(() => teamContactsWithSelf(teamProp, user), [teamProp, user]);
   const options = useMemo(() => teamSearchOptions(team), [team]);
   const { selectValue, inList, current } = vendorSelectBindings(value, options.map((o) => o.value));

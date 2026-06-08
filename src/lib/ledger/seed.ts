@@ -46,8 +46,8 @@ export const LEDGER_SEED: LedgerSeed = {
       id: "cap-supabase-api",
       label: "Supabase backend & Next.js API (Node)",
       status: "in_progress",
-      statusLabel: "~78% Complete",
-      completionFraction: 0.78,
+      statusLabel: "~84% Complete",
+      completionFraction: 0.84,
       valueCents: 2_000_000,
       weight: 20,
     },
@@ -192,7 +192,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Live Supabase path + data loaders",
       detail:
-        "• Header Live/Mock toggle (`onpro_backend_mode` cookie); clears live cache on switch\n• SSR Supabase client + middleware; login page; `.env.example` for `NEXT_PUBLIC_SUPABASE_*`\n• `live-cache.ts` + `LiveDataHydrator` for client hydration after server fetch\n• `fetchProjects` / `fetchContacts` / `fetchJobs` via `src/lib/data/` + mappers\n• Mock stores gated: `project-session`, `contacts-store`, `project-wip-edits` respect Live\n• `002_project_jobs.sql` aligned with desktop job modal / WIP sections\n• **BACKEND.md** — schema pointers, iOS `SupabaseService`, integration notes",
+        "• Header Live/Mock toggle (`onpro_backend_mode` cookie) — **dev only**; hidden on Vercel\n• **Production Live-only** — Supabase env → Live data; mock cookie ignored (`backend-mode.ts`)\n• **Vercel deploy** — `c9025b8` to `main` (4 Jun); migrations **002–013** in repo\n• SSR Supabase client + middleware; login page; `.env.example` for `NEXT_PUBLIC_SUPABASE_*`\n• `live-cache.ts` + `LiveDataHydrator` for client hydration after server fetch\n• `fetchProjects` / `fetchContacts` / `fetchJobs` via `src/lib/data/` + mappers\n• Mock stores gated: `project-session`, `contacts-store`, `project-wip-edits` respect Live\n• **BACKEND.md** — schema pointers, iOS `SupabaseService`, integration notes",
       status: "in_progress",
     },
     {
@@ -203,7 +203,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Gmail Mailroom + agent inbox + conversational chat",
       detail:
-        "• Google OAuth + `003_user_gmail.sql` (`user_gmail_connections`)\n• Routes: connect, callback, threads, summarize, apply, status, **chat** (`/api/mailroom/chat`)\n• Live threads from Gmail only; promoted in-app threads removed from Live list\n• `email-body.ts` — HTML→plain, normalize for UI + OpenAI summarize\n• Summarize: OpenAI JSON suggestions (0–4) or mock `suggestionsForThread`\n• Agent apply → generated items (invoice, job, PO, task, etc.) + mailroom state\n• **Conversational chat** — answers questions first; task/doc cards only on explicit asks (not keyword “task” in questions); OpenAI + `chat-intent.ts` fallback\n• Connect hero (`mailroom-connect-hero.tsx`); promote-to-mailroom from Messages",
+        "• Google OAuth + `003_user_gmail.sql` (`user_gmail_connections`)\n• Routes: connect, callback, threads, summarize, apply, status, **chat** (`/api/mailroom/chat`)\n• Live threads from Gmail only; **images/attachments** in thread; dedupe on import\n• **Summarize-only** — new mail never auto-summarized; `012_mailroom_thread_scans.sql` cache (~1 year)\n• Summary UI — entity pills + footer hint removed; single Summarize helper line\n• **RFQ intake** — team/vendor selects; owner always in team + defaults self; vendor on project create; removed “On this thread” chips\n• Attachment **Show details** → document preview modal\n• Agent apply → generated items + mailroom state; conversational chat (`chat-intent.ts`)\n• Connect hero; promote-to-mailroom from Messages",
       status: "in_progress",
     },
     {
@@ -214,7 +214,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Onboarding + profiles + avatars",
       detail:
-        "• `004_profiles_onboarding.sql` — operator **4 steps** (workspace → business → team → launch); client 2-step → Messages\n• **Signup intent** — client vs operator on landing/login before account creation\n• Client onboarding **step 2** — workspace join cards when email matches operator workspace\n• Routes: `/api/onboarding/status`, `/operator`, `/client`, `/init`, `/workspace-matches`, `/join-workspace`; middleware gate; `ensureSelfTeamContact`\n• `005_storage_avatars.sql` + upload; `006_workspace_welcome.sql`\n• Settings → Your account; sidebar avatar + display name",
+        "• `004_profiles_onboarding.sql` — operator **4 steps** (workspace → business → team → launch); client 2-step → Messages\n• **Member onboarding** — `/api/onboarding/member` for team/vendor invite accept\n• **Step 3 polish** — centered blurb + celebration graphic alignment\n• **First login** → **`/` (OnPro AI)** after onboarding (not Projects)\n• **Signup intent** — client vs operator on landing/login before account creation\n• Client onboarding **step 2** — workspace join cards when email matches operator workspace\n• Routes: `/api/onboarding/status`, `/operator`, `/client`, `/init`, `/workspace-matches`, `/join-workspace`; middleware gate; `ensureSelfTeamContact`\n• `005_storage_avatars.sql` + upload; `006_workspace_welcome.sql`; `/api/profile` GET/PATCH",
       status: "in_progress",
     },
     {
@@ -225,7 +225,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Contacts directory, import, modals",
       detail:
-        "• **Contacts** nav (route `/people`): Live `POST /api/contacts`, persist + permissions\n• Add client / teammate / vendor modals — section nav in **left violet aside**\n• Pending invite detail modal; connect hero copy; detail header polish (removed “People: …” line)\n• **CSV import** — AI + fallback; editable review; auto-chunk batches (200 rows); sample file\n• **Live invites** — `/api/invites/create`, resolve token on login, copy-link toast\n• Project roster dedupe",
+        "• **Contacts** nav (route `/people`): Live `POST /api/contacts`, persist + permissions\n• Add client / teammate / vendor modals — teammate copy **“Add a teammate to Contacts.”**\n• **Resend invite** — `POST /api/invites/resend` on pending contact cards\n• **Delete safety** — project delete never removes Contacts; `self_contact_id` protected\n• **CSV import** — AI + fallback; editable review; auto-chunk batches (200 rows); sample file\n• **Live invites** — `/api/invites/create`, resolve token on login, copy-link toast\n• Project roster dedupe",
       status: "in_progress",
     },
     {
@@ -236,7 +236,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Workspace welcome + OnPro AI positioning",
       detail:
-        "• `WorkspaceWelcomeGate` after onboarding; dismiss → `profiles.workspace_welcome_dismissed_at` + mock/session fallback\n• X-only close; Gmail recommended; quick actions from chat (create project, import contacts, etc.)\n• Sidebar **OnPro AI** first (was Overview); command palette updated\n• `/api/assistant/briefing` + `/api/assistant/chat`; Live briefing from real snapshot (no fictional overnight mock)\n• **Briefing section prefs** — `007_assistant_prefs.sql`; user opt-out per section on Update me (default: projects, jobs, messages); merge session + DB\n• Removed OpenAI footer from assistant card\n• `assistant-message-parts.tsx`, `workspace-welcome-reply.ts` intent routing\n• Greeting uses signed-in profile first name (`ProfileProvider`)",
+        "• `WorkspaceWelcomeGate` after onboarding; dismiss → `profiles.workspace_welcome_dismissed_at` + mock/session fallback\n• **Your teams** — workspace match list on OnPro AI when signup email matches operators (`013`)\n• Sidebar **OnPro AI** first (was Overview); command palette updated\n• `/api/assistant/briefing` + `/api/assistant/chat`; Live briefing from real snapshot\n• **Google Calendar** on overview right rail — workspace team events; hydration loop fix\n• **Project dedupe** — `workspace-split-jobs.ts` won’t duplicate existing projects\n• **Briefing section prefs** — `007_assistant_prefs.sql`; opt-out per section on Update me\n• `assistant-message-parts.tsx`, `workspace-welcome-reply.ts` intent routing",
       status: "in_progress",
     },
     {
@@ -269,7 +269,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Jobs UX — create flow + modal polish",
       detail:
-        "• `+ New job` on Jobs header; `CreateJobLauncher` + **project picker** on all add-job paths\n• `job-details-modal.tsx` — wide-tall overlay; **section nav in left violet column**; share menu\n• `demo-seed-jobs.ts` strip in Live; `live-cache` / `project-detail-gate` — jobs not wiped on hydrate\n• **Project detail Jobs tab** — `loadProjectJobs()` + `onpro-jobs-changed` (matches Production board)\n• Production board refresh after create; job count across projects\n• Open: **job modal save → Supabase** (still localStorage + cache)",
+        "• `+ New job` on Jobs header; `CreateJobLauncher` + **project picker** on all add-job paths\n• `job-details-modal.tsx` — wide-tall overlay; **section nav in left violet column**; share menu\n• **Live job defaults** — no hardcoded `GGT149` style #; mock timeline tasks stripped; `job-status-badge.tsx`\n• `demo-seed-jobs.ts` strip in Live; `live-cache` / `project-detail-gate` — jobs not wiped on hydrate\n• **Project detail Jobs tab** — `loadProjectJobs()` + `onpro-jobs-changed` (matches Production board)\n• Open: **job modal save → Supabase** (still localStorage + cache)",
       status: "in_progress",
     },
     {
@@ -302,7 +302,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Runbooks, messaging decision, UI polish",
       detail:
-        "• Notifications bell only when items exist; toasts at top; sidebar alert dots removed\n• **Owner notifications** — workspace member join events (`/api/workspace/member-events`)\n• Messages — **Add Member** on conversations (`add-conversation-member-modal.tsx`); in-app still mock/LS (see `docs/MESSAGING_DECISION.md`)\n• Modal UX — removed bottom emoji illustrations across polished modals (`ProjectModalIllustration` dropped)\n• **Ledger UI** — expandable work rows, month-only period labels, retainer-only June invoice\n• `docs/MESSAGING_DECISION.md`, `docs/supabase-storage-avatars.md`, `docs/development-ledger/` sprint notes",
+        "• **Live Messages** — `009_in_app_messages.sql` + `/api/messages/*`; image storage `010`; no fake online indicators\n• **Google Calendar** — read path + next-6-meetings sidebar; calendar event AI modal\n• **Documents** — preview modal; image delete + confirm; project delete cascades images\n• Notifications bell only when items exist; owner join events (`/api/workspace/member-events`)\n• Messages — **Add Member** on conversations\n• Modal UX — removed bottom emoji illustrations across polished modals\n• **Ledger UI** — expandable work rows, month-only period labels, retainer-only June invoice\n• `docs/MESSAGING_DECISION.md`, `docs/development-ledger/` sprint notes",
       status: "in_progress",
     },
     {
@@ -313,7 +313,7 @@ export const LEDGER_SEED: LedgerSeed = {
       invoiceId: "inv-onpro-jun-2026",
       description: "Client signup + workspace linking",
       detail:
-        "• `008_workspace_memberships.sql` — memberships, `pending_invites`, `workspace_member_events`, `contacts.linked_auth_user_id`\n• RPCs: `find_workspaces_for_email`, `join_workspace`, `revoke_workspace_membership`, `resolve_invite_token`; RLS for member project read\n• APIs: `/api/onboarding/workspace-matches`, `/join-workspace`, `/api/invites/*`, `/api/workspace/memberships`, `/member-events`\n• Client confirm-to-join via email match; owner revoke access on contact detail\n• Open: iOS parity, messages RLS via membership",
+        "• `008_workspace_memberships.sql` — memberships, `pending_invites`, `workspace_member_events`, `contacts.linked_auth_user_id`\n• **`013_workspace_member_team_vendor.sql`** — Team + Vendor email match + join; member project read RLS\n• RPCs: `find_workspaces_for_email`, `join_workspace`, `revoke_workspace_membership`, `resolve_invite_token`\n• APIs: workspace-matches, join-workspace, `/api/invites/*` (create, resolve, **resend**), memberships, member-events\n• Invite token links for client / team / vendor; client confirm-to-join; owner revoke on contact detail\n• Open: iOS parity, messages RLS edge cases",
       status: "in_progress",
     },
     {
@@ -341,9 +341,9 @@ export const LEDGER_SEED: LedgerSeed = {
       periodLabel: "June 2026",
       sortKey: "2026-06-supabase",
       projectId: "onpro",
-      description: "Supabase + Node APIs (~78% cap system)",
+      description: "Supabase + Node APIs (~84% cap system)",
       detail:
-        "Shipped in Live: auth/middleware (~100%); projects POST/PATCH (~95%); contacts/permissions (~90%); profiles, onboarding, avatars (~95%); **workspace memberships + invites (~85%, 008)**; **assistant prefs (~92%, 007)**; Mailroom Gmail + summarize/apply/chat (~88%); assistant briefing/chat (~90%); jobs **read + client hydrate** (~42% — modal save still LS).\nStill 0%: Messages DB, documents/calendar tables, job WIP write path, messages RLS via membership.",
+        "Shipped in Live: auth/middleware (~100%); projects POST/PATCH + orders 011 (~95%); contacts/permissions + resend (~92%); profiles, onboarding, member flow, `/api/profile` (~96%); **workspace memberships + invites (~90%, 008 + 013)**; assistant prefs + Your teams (~92%); Mailroom Gmail + RFQ + 012 scans (~92%); assistant briefing/chat + dedupe (~90%); jobs read + hydrate (~45% — modal save still LS); **messages Live read/send (~72%, 009 + 010)**; **Google Calendar read (~55%)**; **documents preview/delete (~35%)**.\nStill open: job WIP write path, documents index DB, calendar write-back, messages RLS polish.",
       valueCents: 2_000_000,
       status: "in_progress",
     },

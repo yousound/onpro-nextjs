@@ -17,6 +17,7 @@ import {
 } from "@/components/onboarding/onboarding-ui";
 import type { OnboardingStatus } from "@/lib/types/onboarding";
 import type { WorkspaceMatch } from "@/lib/types/workspace";
+import { dispatchProfileChanged } from "@/lib/data/refresh-live-contacts";
 import { markWorkspaceWelcomePending } from "@/lib/workspace-welcome-session";
 
 const STEPS: OnboardingStepItem[] = [
@@ -91,6 +92,7 @@ export function MemberOnboarding({ initial }: { initial: OnboardingStatus }) {
         const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? "Could not save");
       }
+      dispatchProfileChanged();
 
       if (inviteToken) {
         const joinRes = await fetch("/api/onboarding/join-workspace", {
@@ -163,6 +165,7 @@ export function MemberOnboarding({ initial }: { initial: OnboardingStatus }) {
           complete: true,
         }),
       });
+      dispatchProfileChanged();
       setStep(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not finish");
@@ -172,6 +175,7 @@ export function MemberOnboarding({ initial }: { initial: OnboardingStatus }) {
   }
 
   function goToApp() {
+    dispatchProfileChanged();
     markWorkspaceWelcomePending();
     const sep = redirectAfter.includes("?") ? "&" : "?";
     router.push(`${redirectAfter}${sep}welcome=1`);

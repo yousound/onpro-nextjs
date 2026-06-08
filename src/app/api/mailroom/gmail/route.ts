@@ -35,7 +35,10 @@ export async function GET() {
       email: null,
       mode: "oauth_not_configured",
       oauthConfigured: false,
-      message: "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env.local, then connect Gmail.",
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to Vercel Environment Variables (Production), then redeploy."
+          : "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env.local, then restart the dev server.",
     });
   }
 

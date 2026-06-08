@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isSupabaseConfigured } from "@/lib/config/backend";
 import {
   completeOperatorOnboarding,
+  ensureSelfTeamContact,
   provisionOnboardingTeamInvites,
 } from "@/lib/supabase/onboarding";
 import { fetchProfile, updateProfileFields } from "@/lib/supabase/profile";
@@ -54,10 +55,14 @@ export async function POST(request: Request) {
 
     await updateProfileFields(supabase, user.id, user.email, patch);
 
-    const profile = await fetchProfile(supabase, user.id);
+    let profile = await fetchProfile(supabase, user.id);
+    if (profile?.full_name?.trim() || profile?.username?.trim()) {
+      await ensureSelfTeamContact(supabase, user.id, profile);
+      profile = (await fetchProfile(supabase, user.id)) ?? profile;
+    }
 
     let inviteLinks: Awaited<ReturnType<typeof provisionOnboardingTeamInvites>> = [];
-    if (body.step === 3 && body.invites?.length) {
+    if (body.invites?.length) {
       const origin = new URL(request.url).origin;
       inviteLinks = await provisionOnboardingTeamInvites(
         supabase,

@@ -90,9 +90,8 @@ export function MailroomConnectHero({
             </a>
           ) : (
             <p className="max-w-md text-sm font-medium text-amber-800">
-              Add <code className="text-xs">GOOGLE_CLIENT_ID</code> and{" "}
-              <code className="text-xs">GOOGLE_CLIENT_SECRET</code> to{" "}
-              <code className="text-xs">.env.local</code>, then restart the dev server.
+              {statusMessage ??
+                "Gmail OAuth is not configured on the server. Ask your admin to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."}
             </p>
           )}
 

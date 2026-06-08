@@ -107,6 +107,7 @@ import {
   disconnectGmailViaApi,
   fetchGmailStatusViaApi,
   fetchMailroomThreadsViaApi,
+  GmailStatusError,
   mailroomApiEnabled,
   sendMailroomChatViaApi,
   invalidateMailroomSummarizeCache,
@@ -413,12 +414,17 @@ export function MailroomView() {
       } catch (e) {
         console.warn("[mailroom] Gmail status load failed", e);
         if (!cancelled) {
+          const needsSignIn = e instanceof GmailStatusError && e.status === 401;
           setGmailStatus({
             loading: false,
             connected: false,
             email: null,
-            oauthConfigured: false,
-            message: "Sign in and connect Gmail to load your inbox.",
+            oauthConfigured: needsSignIn,
+            message: needsSignIn
+              ? "Please sign in to OnPro first, then connect Gmail."
+              : e instanceof Error
+                ? e.message
+                : "Could not reach Mailroom. Refresh and try again.",
           });
           setGmailThreads([]);
         }

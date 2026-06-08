@@ -1,5 +1,5 @@
 import { isSupabaseBackendEnabled } from "@/lib/config/backend";
-import { clientBackendMode } from "@/lib/config/backend-mode";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import type { AgentApplyResult } from "@/lib/agent-apply-core";
 import type {
   AgentSuggestion,
@@ -37,16 +37,28 @@ export type MailroomThreadsResponse = {
 };
 
 export function mailroomApiEnabled(): boolean {
-  return isSupabaseBackendEnabled(clientBackendMode());
+  return isSupabaseBackendEnabled() && isClientLiveBackend();
+}
+
+export class GmailStatusError extends Error {
+  status: number;
+  mode?: string;
+
+  constructor(message: string, status: number, mode?: string) {
+    super(message);
+    this.name = "GmailStatusError";
+    this.status = status;
+    this.mode = mode;
+  }
 }
 
 export async function fetchGmailStatusViaApi(): Promise<GmailStatusResponse> {
   const res = await fetch("/api/mailroom/gmail", { cache: "no-store" });
+  const body = (await res.json().catch(() => ({}))) as GmailStatusResponse & { error?: string };
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error ?? res.statusText);
+    throw new GmailStatusError(body.error ?? res.statusText, res.status, body.mode);
   }
-  return res.json() as Promise<GmailStatusResponse>;
+  return body;
 }
 
 export async function fetchMailroomThreadsViaApi(): Promise<MailroomThreadsResponse> {

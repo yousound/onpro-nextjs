@@ -1,3 +1,4 @@
+import { expandParsedImportRows } from "@/lib/csv/expand-import-rows";
 import { normalizeImportSegment } from "@/lib/csv/normalize-import-segment";
 import { IMPORT_AI_MAX_CHARS, IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
 import { openAiChatJson } from "@/lib/openai/chat-completion";
@@ -47,6 +48,13 @@ Each row includes segment: "team" | "vendor" | "client" | null.
 - When you can infer confidently: internal operators → team; factories/suppliers → vendor; buyers/brands → client.
 - When segment is missing, blank, or ambiguous, set segment to null (do NOT guess client). Add a warning.
 
+CRITICAL — one person per row:
+- Output exactly ONE row per distinct person/contact in the CSV.
+- NEVER merge multiple people into one row because they share a company, domain (@gmail.com, @acme.com), or organization name.
+- If one CSV row lists multiple email addresses, output MULTIPLE rows (duplicate company fields, one email each).
+- Put exactly ONE email address in "email". Use other_emails only for secondary addresses on the SAME person, not for different people.
+- Put a person's name in contact_name, never concatenated into the email field.
+
 Fields per row:
 - segment (team|vendor|client|null)
 - kind: "company" | "individual"
@@ -65,9 +73,8 @@ Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.`,
     { temperature: 0.2 },
   );
 
-  const rows = (result.rows ?? [])
+  const normalized = (result.rows ?? [])
     .filter((r) => r && (r.email?.trim() || r.name?.trim()))
-    .slice(0, IMPORT_ROW_LIMIT)
     .map((r) => {
       const segment = parseSegmentFromAi(r.segment);
       return {
@@ -80,6 +87,8 @@ Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.`,
         team_role: segment === "team" ? normalizeTeamRole(r.team_role) ?? "staff" : undefined,
       };
     });
+
+  const rows = expandParsedImportRows(normalized).slice(0, IMPORT_ROW_LIMIT);
 
   const labeled = rows.filter((r) => r.segment);
   const unlabeled = rows.length - labeled.length;

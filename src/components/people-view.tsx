@@ -16,6 +16,7 @@ import {
 import type { Contact } from "@/lib/types/contact";
 import { loadContacts, clientListContacts, searchContacts } from "@/lib/contacts-store";
 import { commitContactPermissions } from "@/lib/data/commit-contacts";
+import { mergeSeedLiveContacts } from "@/lib/data/live-cache";
 import { useDeleteContact } from "@/lib/use-delete-contact";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { effectiveContactPermissions, permissionsLabel } from "@/lib/contact-permissions";
@@ -270,6 +271,30 @@ export function PeopleView({
 
   useEffect(() => {
     function onContactsChanged() {
+      if (isClientLiveBackend()) {
+        void (async () => {
+          try {
+            const res = await fetch("/api/contacts", { cache: "no-store" });
+            if (res.ok) {
+              const data = (await res.json()) as { contacts?: Contact[] };
+              if (Array.isArray(data.contacts)) {
+                mergeSeedLiveContacts(data.contacts);
+              }
+            }
+          } catch {
+            /* keep cached list */
+          }
+          setContacts(loadContacts());
+          setContactsVersion((v) => v + 1);
+          void fetch("/api/invites")
+            .then((r) => r.json())
+            .then((data: { invites?: PendingInvite[] }) => {
+              if (Array.isArray(data.invites)) setPendingInvites(data.invites);
+            })
+            .catch(() => {});
+        })();
+        return;
+      }
       setContacts(loadContacts());
       setContactsVersion((v) => v + 1);
     }

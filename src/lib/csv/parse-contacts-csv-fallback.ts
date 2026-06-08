@@ -1,3 +1,4 @@
+import { expandParsedImportRows } from "@/lib/csv/expand-import-rows";
 import { IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
 import { parseCsvTable } from "@/lib/csv/parse-csv-lines";
 import { normalizeImportSegment } from "@/lib/csv/normalize-import-segment";
@@ -94,7 +95,7 @@ export function parseContactsCsvFallback(csvText: string): ParsedImportContactRo
     });
   }
 
-  return out.slice(0, IMPORT_ROW_LIMIT);
+  return expandParsedImportRows(out).slice(0, IMPORT_ROW_LIMIT);
 }
 
 function codeRaw(raw: string, displayName: string): string {

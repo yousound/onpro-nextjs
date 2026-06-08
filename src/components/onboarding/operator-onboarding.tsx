@@ -18,6 +18,10 @@ import {
   onboardingFieldClass,
   onboardingLabelClass,
 } from "@/components/onboarding/onboarding-ui";
+import {
+  dispatchProfileChanged,
+  refreshLiveContactsFromApi,
+} from "@/lib/data/refresh-live-contacts";
 import { markWorkspaceWelcomePending } from "@/lib/workspace-welcome-session";
 import type { OnboardingInviteLink } from "@/lib/supabase/onboarding";
 import {
@@ -88,6 +92,10 @@ export function OperatorOnboarding({ initial }: { initial: OnboardingStatus }) {
     try {
       const result = await saveOperatorStep({ step: next, ...payload });
       if (result.inviteLinks?.length) setInviteLinks(result.inviteLinks);
+      dispatchProfileChanged();
+      if (payload.invites || next >= 2) {
+        await refreshLiveContactsFromApi();
+      }
       setStep(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -106,6 +114,8 @@ export function OperatorOnboarding({ initial }: { initial: OnboardingStatus }) {
         body: JSON.stringify({ action: "complete" }),
       });
       if (!res.ok) throw new Error("Could not complete onboarding");
+      dispatchProfileChanged();
+      await refreshLiveContactsFromApi();
       markWorkspaceWelcomePending();
       router.push("/?welcome=1");
       router.refresh();

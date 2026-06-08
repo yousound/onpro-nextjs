@@ -419,7 +419,7 @@ export function MailroomView() {
             loading: false,
             connected: false,
             email: null,
-            oauthConfigured: needsSignIn,
+            oauthConfigured: true,
             message: needsSignIn
               ? "Please sign in to OnPro first, then connect Gmail."
               : e instanceof Error

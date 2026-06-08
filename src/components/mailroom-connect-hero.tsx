@@ -80,7 +80,7 @@ export function MailroomConnectHero({
               <GmailButtonIcon />
               Connect Gmail
             </button>
-          ) : oauthConfigured ? (
+          ) : (
             <a
               href="/api/mailroom/gmail/connect"
               className="inline-flex items-center gap-2.5 rounded-xl bg-[#7c3aed] px-6 py-3 text-sm font-semibold text-white shadow-md shadow-violet-500/25 transition hover:bg-[#6d28d9]"
@@ -88,11 +88,6 @@ export function MailroomConnectHero({
               <GmailButtonIcon />
               Connect Gmail
             </a>
-          ) : (
-            <p className="max-w-md text-sm font-medium text-amber-800">
-              {statusMessage ??
-                "Gmail OAuth is not configured on the server. Ask your admin to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."}
-            </p>
           )}
 
           <button
@@ -107,6 +102,17 @@ export function MailroomConnectHero({
           </button>
         </div>
 
+        {!isMock && !connected && !oauthConfigured ? (
+          <p className="mt-4 max-w-md text-sm font-medium text-amber-800">
+            {statusMessage ??
+              "Gmail OAuth is not configured on the server. Ask your admin to add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."}
+          </p>
+        ) : null}
+
+        {!isMock && !connected && statusMessage && oauthConfigured ? (
+          <p className="mt-4 max-w-md text-sm text-slate-500">{statusMessage}</p>
+        ) : null}
+
         <p
           id="mailroom-how-it-works"
           className="mt-10 flex max-w-lg items-start justify-center gap-2 text-left text-sm leading-relaxed text-slate-400 sm:text-center"
@@ -115,9 +121,6 @@ export function MailroomConnectHero({
           <span>
             We only read your emails to draft and organize information. Nothing is sent or applied
             automatically. You approve everything first.
-            {statusMessage && !oauthConfigured && !isMock ? (
-              <span className="mt-2 block text-xs text-slate-400">{statusMessage}</span>
-            ) : null}
           </span>
         </p>
       </div>

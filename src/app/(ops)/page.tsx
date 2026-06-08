@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { LiveDataHydrator } from "@/components/live-data-hydrator";
 import { OverviewView } from "@/components/overview-view";
 import { calendarTodayYmd } from "@/lib/calendar-google";
@@ -12,9 +13,7 @@ import type { ProjectJob } from "@/lib/types/wip";
 
 export default async function Home() {
   const live = await isLiveBackendEnabled();
-  if (!live) {
-    return <OverviewView liveMode={false} />;
-  }
+  if (!live) redirect("/login");
 
   const projects = await fetchProjects();
   const contacts = await fetchContacts();

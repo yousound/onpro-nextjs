@@ -1,18 +1,27 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
-import { isSupabaseConfigured } from "@/lib/config/backend";
-import { isLiveBackendFeatureEnabled, readBackendModeFromCookieString } from "@/lib/config/backend-mode";
+import {
+  BACKEND_MODE_COOKIE,
+  readBackendModeFromCookieString,
+  shouldUseLiveBackend,
+} from "@/lib/config/backend-mode";
 import { isMissingOnboardingColumnError } from "@/lib/supabase/profile-migration";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  const backendMode = readBackendModeFromCookieString(request.headers.get("cookie") ?? undefined);
-  const mockDataMode = backendMode === "mock" || !isLiveBackendFeatureEnabled();
-
-  if (!isSupabaseConfigured() || mockDataMode) {
+  if (!shouldUseLiveBackend()) {
     return supabaseResponse;
+  }
+
+  const backendMode = readBackendModeFromCookieString(request.headers.get("cookie") ?? undefined);
+  if (backendMode === "mock") {
+    supabaseResponse.cookies.set(BACKEND_MODE_COOKIE, "live", {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: "lax",
+    });
   }
 
   const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {

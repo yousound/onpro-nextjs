@@ -73,3 +73,14 @@ export function clearMockLs(key: string): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(key);
 }
+
+/** Wipe all `onpro.mock.*` keys — use on sign-out when leaving demo data behind. */
+export function clearAllMockLocalStorage(): void {
+  if (typeof window === "undefined") return;
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith("onpro.mock.")) keys.push(key);
+  }
+  for (const key of keys) localStorage.removeItem(key);
+}

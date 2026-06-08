@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DirectoryAvatar } from "@/components/directory-avatar";
 import { OnboardingAvatarUpload } from "@/components/onboarding/onboarding-ui";
@@ -9,7 +8,9 @@ import { useCurrentUser } from "@/components/profile-provider";
 import type { CurrentUserDisplay } from "@/lib/current-user-display";
 import { displayAvatarUrl } from "@/lib/current-user-display";
 import { isSupabaseConfigured } from "@/lib/config/backend";
-import { isClientMockBackend } from "@/lib/config/backend-mode";
+import { BACKEND_MODE_COOKIE } from "@/lib/config/backend-mode";
+import { clearLiveCache } from "@/lib/data/live-cache";
+import { clearAllMockLocalStorage } from "@/lib/mock-local";
 import { createClient } from "@/lib/supabase/client";
 import type { UserProfileUpdate } from "@/lib/types/profile";
 
@@ -31,8 +32,7 @@ type ProfileForm = {
 };
 
 function settingsAvatarUrl(avatarUrl: string | null): string | null {
-  const useMock = isClientMockBackend() || !isSupabaseConfigured();
-  return displayAvatarUrl(avatarUrl, { useMockPlaceholder: useMock });
+  return displayAvatarUrl(avatarUrl, { useMockPlaceholder: !isSupabaseConfigured() });
 }
 
 function formFromProfile(source: {
@@ -52,7 +52,6 @@ function formFromProfile(source: {
 }
 
 export function SettingsView() {
-  const router = useRouter();
   const { user: currentUser, loading, saveProfile } = useCurrentUser();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -106,11 +105,11 @@ export function SettingsView() {
     if (isSupabaseConfigured()) {
       const supabase = createClient();
       await supabase.auth.signOut();
-      router.push("/onboarding");
-      router.refresh();
-      return;
     }
-    router.push("/projects");
+    clearAllMockLocalStorage();
+    clearLiveCache();
+    document.cookie = `${BACKEND_MODE_COOKIE}=; path=/; max-age=0`;
+    window.location.href = "/login";
   }
 
   async function handleSave() {
@@ -303,7 +302,7 @@ export function SettingsView() {
                 onClick={() => void handleSignOut()}
                 className="w-full rounded-xl px-4 py-3 text-left text-sm font-medium text-red-600 hover:bg-red-50"
               >
-                {isSupabaseConfigured() ? "Sign out" : "Exit (mock mode)"}
+                Sign out
               </button>
             </div>
           </section>

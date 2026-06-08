@@ -7,14 +7,8 @@ import { useState } from "react";
 import { DirectoryAvatar } from "@/components/directory-avatar";
 import { OnProLogoIntroModal } from "@/components/onpro-logo-intro-modal";
 import { useCurrentUser } from "@/components/profile-provider";
-import { isClientMockBackend } from "@/lib/config/backend-mode";
+import { isSupabaseConfigured } from "@/lib/config/backend";
 import { displayAvatarUrl } from "@/lib/current-user-display";
-const MOCK_SIDEBAR = {
-  name: "Demo user",
-  org: "Mock mode",
-  avatarSrc: "/user-avatar-demo.png",
-  initials: "DU",
-};
 
 type NavItem = {
   href: string;
@@ -139,19 +133,18 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const { user: profileUser, loading: profileLoading } = useCurrentUser();
 
-  const useMockAvatar = isClientMockBackend();
   const sidebarUser = profileUser
     ? {
         name: profileUser.fullName,
         org: profileUser.companyName || "Add company in Settings",
-        avatarSrc: displayAvatarUrl(profileUser.avatarUrl, { useMockPlaceholder: useMockAvatar }),
+        avatarSrc: displayAvatarUrl(profileUser.avatarUrl, {
+          useMockPlaceholder: !isSupabaseConfigured(),
+        }),
         initials: profileUser.initials,
       }
-    : useMockAvatar
-      ? MOCK_SIDEBAR
-      : profileLoading
-        ? { name: "…", org: "", avatarSrc: null as string | null, initials: "…" }
-        : { name: "Account", org: "Sign in", avatarSrc: null as string | null, initials: "?" };
+    : profileLoading
+      ? { name: "…", org: "", avatarSrc: null as string | null, initials: "…" }
+      : { name: "Sign in", org: "Settings → Account", avatarSrc: null as string | null, initials: "?" };
   const [introOpen, setIntroOpen] = useState(false);
 
   return (

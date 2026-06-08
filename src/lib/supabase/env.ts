@@ -1,13 +1,15 @@
+import { getSupabasePublicConfig } from "@/lib/config/supabase-public";
+
 export function getSupabaseUrl(): string {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  if (!url) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
-  return url;
+  const cfg = getSupabasePublicConfig();
+  if (cfg?.url) return cfg.url;
+  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
 }
 
 export function getSupabaseAnonKey(): string {
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!key) throw new Error("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  return key;
+  const cfg = getSupabasePublicConfig();
+  if (cfg?.anonKey) return cfg.anonKey;
+  throw new Error("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
 }
 
 export function getSupabaseServiceRoleKey(): string | null {

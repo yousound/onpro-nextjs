@@ -7,6 +7,7 @@ export type BackendMode = "live" | "mock";
 declare global {
   interface Window {
     __ONPRO_LIVE_BACKEND__?: boolean;
+    __ONPRO_SUPABASE__?: { url: string; anonKey: string };
   }
 }
 

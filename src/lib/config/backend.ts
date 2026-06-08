@@ -1,15 +1,13 @@
 import type { BackendMode } from "@/lib/config/backend-mode";
 import { shouldUseLiveBackend } from "@/lib/config/backend-mode";
+import { getSupabasePublicConfig } from "@/lib/config/supabase-public";
 
 /**
  * Backend feature flags. When Supabase env is missing, the app uses mocks (see BACKEND.md).
+ * On Vercel, server injects `window.__ONPRO_SUPABASE__` so Live works at runtime without rebuild.
  */
 export function isSupabaseConfigured(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!url || !key) return false;
-  if (url.includes("your-project") || key.includes("your-anon")) return false;
-  return true;
+  return getSupabasePublicConfig() != null;
 }
 
 /**

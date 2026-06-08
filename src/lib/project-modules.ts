@@ -1,6 +1,7 @@
 export const PROJECT_MODULE_IDS = [
   "details",
   "internal",
+  "documents",
   "invoices",
   "shipping",
   "payments",
@@ -12,6 +13,7 @@ export type ProjectModuleId = (typeof PROJECT_MODULE_IDS)[number];
 export const PROJECT_MODULE_TABS: { id: ProjectModuleId; label: string }[] = [
   { id: "details", label: "Project details" },
   { id: "internal", label: "Internal" },
+  { id: "documents", label: "Documents" },
   { id: "invoices", label: "Invoices" },
   { id: "shipping", label: "Shipping & receiving" },
   { id: "payments", label: "Payments" },

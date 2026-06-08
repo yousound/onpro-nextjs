@@ -13,6 +13,22 @@ export function eventsForDate(events: CalendarEvent[], ymd: string): CalendarEve
   return events.filter((e) => e.date === ymd);
 }
 
+/** Next N events from now (inclusive), sorted by start time — for quick jump navigation. */
+export function upcomingCalendarEvents(
+  events: CalendarEvent[],
+  limit = 6,
+  now: Date = new Date(),
+): CalendarEvent[] {
+  const nowMs = now.getTime();
+  return [...events]
+    .filter((e) => {
+      const start = new Date(e.start_time).getTime();
+      return Number.isFinite(start) && start >= nowMs;
+    })
+    .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+    .slice(0, limit);
+}
+
 export function calendarColumnsForDay(events: CalendarEvent[]): string[] {
   const set = new Set<string>([...CALENDAR_COLUMN_ORDER]);
   for (const e of events) {

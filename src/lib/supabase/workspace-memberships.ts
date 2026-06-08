@@ -1,0 +1,162 @@
+import type { WorkspaceMatch, WorkspaceMemberEvent, WorkspaceMembership } from "@/lib/types/workspace";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type MatchRow = {
+  operator_user_id: string;
+  contact_id: number;
+  workspace_name: string;
+  contact_display_name: string;
+  project_count: number;
+  already_joined: boolean;
+};
+
+export async function findWorkspacesForEmail(
+  supabase: SupabaseClient,
+  email: string,
+  memberUserId: string,
+): Promise<WorkspaceMatch[]> {
+  const { data, error } = await supabase.rpc("find_workspaces_for_email", {
+    p_email: email.trim(),
+    p_member_user_id: memberUserId,
+  });
+
+  if (error) throw error;
+
+  return ((data as MatchRow[] | null) ?? []).map((row) => ({
+    operatorUserId: row.operator_user_id,
+    contactId: row.contact_id,
+    workspaceName: row.workspace_name,
+    contactDisplayName: row.contact_display_name,
+    projectCount: Number(row.project_count),
+    alreadyJoined: Boolean(row.already_joined),
+  }));
+}
+
+export async function joinWorkspace(
+  supabase: SupabaseClient,
+  params: {
+    operatorUserId: string;
+    contactId: number;
+    memberUserId: string;
+    source?: "invite" | "email_claim" | "owner_added";
+    memberEmail?: string;
+    memberName?: string;
+  },
+): Promise<WorkspaceMembership> {
+  const { data, error } = await supabase.rpc("join_workspace", {
+    p_operator_user_id: params.operatorUserId,
+    p_contact_id: params.contactId,
+    p_member_user_id: params.memberUserId,
+    p_source: params.source ?? "email_claim",
+    p_member_email: params.memberEmail ?? null,
+    p_member_name: params.memberName ?? null,
+  });
+
+  if (error) throw error;
+
+  const row = data as {
+    id: number;
+    operator_user_id: string;
+    member_user_id: string;
+    contact_id: number;
+    status: WorkspaceMembership["status"];
+    source: WorkspaceMembership["source"];
+    created_at: string;
+    updated_at: string;
+  };
+
+  return {
+    id: row.id,
+    operatorUserId: row.operator_user_id,
+    memberUserId: row.member_user_id,
+    contactId: row.contact_id,
+    status: row.status,
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function revokeWorkspaceMembership(
+  supabase: SupabaseClient,
+  membershipId: number,
+  operatorUserId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("revoke_workspace_membership", {
+    p_membership_id: membershipId,
+    p_operator_user_id: operatorUserId,
+  });
+  if (error) throw error;
+}
+
+export async function fetchMembershipForContact(
+  supabase: SupabaseClient,
+  operatorUserId: string,
+  contactId: number,
+): Promise<WorkspaceMembership | null> {
+  const { data, error } = await supabase
+    .from("workspace_memberships")
+    .select("*")
+    .eq("operator_user_id", operatorUserId)
+    .eq("contact_id", contactId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    id: data.id as number,
+    operatorUserId: data.operator_user_id as string,
+    memberUserId: data.member_user_id as string,
+    contactId: data.contact_id as number,
+    status: data.status as WorkspaceMembership["status"],
+    source: data.source as WorkspaceMembership["source"],
+    createdAt: data.created_at as string,
+    updatedAt: data.updated_at as string,
+  };
+}
+
+export async function fetchUnreadMemberEvents(
+  supabase: SupabaseClient,
+  operatorUserId: string,
+): Promise<WorkspaceMemberEvent[]> {
+  const { data, error } = await supabase
+    .from("workspace_member_events")
+    .select("*")
+    .eq("operator_user_id", operatorUserId)
+    .is("read_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    if (error.message.includes("workspace_member_events")) return [];
+    throw error;
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id as number,
+    operatorUserId: row.operator_user_id as string,
+    memberUserId: (row.member_user_id as string | null) ?? null,
+    contactId: (row.contact_id as number | null) ?? null,
+    eventType: row.event_type as WorkspaceMemberEvent["eventType"],
+    memberEmail: (row.member_email as string | null) ?? null,
+    memberName: (row.member_name as string | null) ?? null,
+    readAt: (row.read_at as string | null) ?? null,
+    createdAt: row.created_at as string,
+  }));
+}
+
+export async function markMemberEventsRead(
+  supabase: SupabaseClient,
+  operatorUserId: string,
+  eventIds: number[],
+): Promise<void> {
+  if (eventIds.length === 0) return;
+  const { error } = await supabase
+    .from("workspace_member_events")
+    .update({ read_at: new Date().toISOString() })
+    .eq("operator_user_id", operatorUserId)
+    .in("id", eventIds);
+  if (error) throw error;
+}

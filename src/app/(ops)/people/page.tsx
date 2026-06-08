@@ -1,19 +1,22 @@
-import { Suspense } from "react";
-import { PageHeader } from "@/components/page-header";
-import { PeopleView } from "@/components/people-view";
+import { LiveDataHydrator } from "@/components/live-data-hydrator";
+import { PeoplePageContent } from "@/components/people-page-content";
+import { isLiveBackendEnabled } from "@/lib/config/backend";
+import { fetchContacts } from "@/lib/data/contacts";
+import { fetchProjects } from "@/lib/data/projects";
+import { ensureSelfTeamContactForSession } from "@/lib/server/ensure-self-contact";
 
-export default function PeoplePage() {
+export default async function PeoplePage() {
+  const live = await isLiveBackendEnabled();
+  if (live) await ensureSelfTeamContactForSession();
+  const initialContacts = await fetchContacts();
+  const initialProjects = live ? await fetchProjects() : undefined;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-      <div className="shrink-0">
-        <PageHeader
-          title="People"
-          subtitle="Everyone you work with—team, vendors, and clients. Add clients from here; set access per project under each project's People & access tab."
-        />
-      </div>
-      <Suspense fallback={null}>
-        <PeopleView />
-      </Suspense>
-    </div>
+    <>
+      {live ? (
+        <LiveDataHydrator contacts={initialContacts} projects={initialProjects} />
+      ) : null}
+      <PeoplePageContent initialContacts={initialContacts} initialProjects={initialProjects} />
+    </>
   );
 }

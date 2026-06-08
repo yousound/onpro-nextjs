@@ -1,26 +1,30 @@
-import { Suspense } from "react";
-import { PageHeader } from "@/components/page-header";
-import { ProductionBoard } from "@/components/production-board";
-import { getProjects } from "@/lib/mock/projects";
+import { LiveDataHydrator } from "@/components/live-data-hydrator";
+import { ProductionPageContent } from "@/components/production-page-content";
+import { isLiveBackendEnabled } from "@/lib/config/backend";
+import { fetchContacts } from "@/lib/data/contacts";
+import { fetchJobsForProject } from "@/lib/data/jobs";
+import { fetchProjects } from "@/lib/data/projects";
+import type { ProjectJob } from "@/lib/types/wip";
 
-export default function ProductionPage() {
-  const projects = getProjects();
+export default async function ProductionPage() {
+  const projects = await fetchProjects();
+  const live = await isLiveBackendEnabled();
+  let jobsByProject: Record<number, ProjectJob[]> | undefined;
+  let contacts;
+  if (live) {
+    jobsByProject = {};
+    for (const p of projects) {
+      jobsByProject[p.id] = await fetchJobsForProject(p.id, p);
+    }
+    contacts = await fetchContacts();
+  }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-      <div className="shrink-0">
-        <PageHeader
-          title="Jobs"
-          subtitle="See where each job stands across your pipeline—columns follow each project’s dates and milestones."
-        />
-      </div>
-      <Suspense
-        fallback={
-          <div className="p-6 text-sm text-text-secondary">Loading production board…</div>
-        }
-      >
-        <ProductionBoard projects={projects} />
-      </Suspense>
-    </div>
+    <>
+      {live ? (
+        <LiveDataHydrator projects={projects} contacts={contacts} jobsByProject={jobsByProject} />
+      ) : null}
+      <ProductionPageContent projects={projects} initialJobsByProject={jobsByProject} />
+    </>
   );
 }

@@ -41,4 +41,9 @@ export interface CalendarEvent {
   department: string | null;
   notes: string | null;
   receiving_options: string | null;
+  /** Google Calendar event id (Live sync). */
+  external_id?: string | null;
+  /** Team member / account that owns this synced event. */
+  calendar_owner_email?: string | null;
+  calendar_owner_name?: string | null;
 }

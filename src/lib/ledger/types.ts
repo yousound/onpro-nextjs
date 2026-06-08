@@ -36,7 +36,10 @@ export interface LedgerWorkRecord {
   /** Sortable key, e.g. "2026-01" */
   sortKey: string;
   projectId: LedgerProjectId;
+  /** Short label in the work-accounting table. */
   description: string;
+  /** Optional deliverable breakdown (shown under description on /ledger invoices). */
+  detail?: string;
   valueCents?: number;
   valueLabel?: string;
   /** Optional link to a billing invoice row */

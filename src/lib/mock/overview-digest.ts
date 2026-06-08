@@ -144,16 +144,3 @@ export function buildOverviewDigest(todayYmd: string): OverviewDigest {
   };
 }
 
-/** Sidebar red-dot alerts (mock): same signals as the overview digest. */
-export function getSidebarNavAlertMap(todayYmd: string): Record<string, boolean> {
-  const d = buildOverviewDigest(todayYmd);
-  return {
-    "/": d.focusItems.length > 0,
-    "/messages": d.totalUnreadMessages > 0,
-    "/projects": d.overdueProjectCount > 0,
-    "/production": d.jobsInProgressCount > 0,
-    "/calendar": d.calendarNext7d > 0,
-    "/documents": false,
-    "/people": d.pendingInvites > 0,
-  };
-}

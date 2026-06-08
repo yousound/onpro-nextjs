@@ -10,9 +10,11 @@ import {
 } from "@tanstack/react-table";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob } from "@/lib/types/wip";
-import { getProjects } from "@/lib/mock/projects";
+import { isClientMockBackend } from "@/lib/config/backend-mode";
 import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
+import { loadProjectOrders } from "@/lib/project-order-edits";
+import type { ProjectOrder } from "@/lib/types/wip";
 import { formatShortDate } from "@/lib/format";
 import { WipProgressSummary } from "@/components/wip-timeline";
 import { JobDetailsModal } from "@/components/job-details-modal";
@@ -20,47 +22,56 @@ import { normalizeJob } from "@/lib/job-defaults";
 import { clientCodeByName } from "@/lib/reference/client-codes";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { JOB_WIP_COLUMNS, formatJobWipCell } from "@/lib/job-wip-columns";
+import { JobStatusBadge } from "@/components/job-status-badge";
+import { parseInspectJob } from "@/lib/job-inspect";
 
 export type ProductionJobRow = ProjectJob & {
   projectName: string;
   clientName: string;
+  orderNumber: string;
+  orderDue: string | null;
+  orderPo: string;
 };
-
-function parseInspectJob(raw: string | null): { projectId: number; jobId: string } | null {
-  if (!raw) return null;
-  const [pid, jid] = raw.split(":");
-  const projectId = Number(pid);
-  if (!Number.isFinite(projectId) || !jid) return null;
-  return { projectId, jobId: jid };
-}
 
 function rowKey(row: Pick<ProductionJobRow, "project_id" | "id">): string {
   return `${row.project_id}:${row.id}`;
 }
 
-export function ProductionBoard({ projects: projectsProp }: { projects: Project[] }) {
+export function ProductionBoard({
+  projects: projectsProp,
+  refreshKey = 0,
+}: {
+  projects: Project[];
+  refreshKey?: number;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [modalJob, setModalJob] = useState<{ project: Project; job: ProjectJob } | null>(null);
 
-  const projects = useMemo(
-    () => mergeProjectLists(projectsProp.length ? projectsProp : getProjects(), readSessionProjects()),
-    [projectsProp],
-  );
+  const projects = useMemo(() => {
+    if (!isClientMockBackend()) return projectsProp;
+    return mergeProjectLists(projectsProp, readSessionProjects());
+  }, [projectsProp]);
 
   const jobRows = useMemo(() => {
     const rows: ProductionJobRow[] = [];
     for (const p of projects) {
+      const orders = loadProjectOrders(p.id, p);
+      const orderById = new Map(orders.map((o) => [o.id, o]));
       for (const j of loadProjectJobs(p.id, p)) {
+        const order: ProjectOrder | undefined = j.order_id ? orderById.get(j.order_id) : orders[0];
         rows.push({
           ...j,
           projectName: p.name,
           clientName: p.client.name,
+          orderNumber: order?.order_number ?? "—",
+          orderDue: order?.due_date ?? null,
+          orderPo: order?.client_po_number?.trim() || order?.po_number?.trim() || "",
         });
       }
     }
     return rows;
-  }, [projects]);
+  }, [projects, refreshKey]);
 
   const vendors = useMemo(() => vendorContacts(loadContacts()), []);
 
@@ -91,7 +102,14 @@ export function ProductionBoard({ projects: projectsProp }: { projects: Project[
       { id: "project", header: "Project", size: 140, accessorFn: (r) => r.projectName },
       { id: "client", header: "Client", size: 120, accessorFn: (r) => r.clientName },
       { id: "po", header: "PO #", size: 130, accessorFn: (r) => r.client_po_number?.trim() || r.po_number || "" },
-      { id: "status", header: "Status", size: 110, accessorFn: (r) => r.status },
+      {
+        id: "status",
+        header: "Status",
+        size: 110,
+        cell: ({ row }) => (
+          <JobStatusBadge job={row.original} orderDueYmd={row.original.orderDue} />
+        ),
+      },
       {
         id: "progress",
         header: "Progress",
@@ -100,9 +118,9 @@ export function ProductionBoard({ projects: projectsProp }: { projects: Project[
       },
       {
         id: "due",
-        header: "Due",
+        header: "Order due",
         size: 100,
-        accessorFn: (r) => r.due_date,
+        accessorFn: (r) => r.orderDue,
         cell: ({ getValue }) => formatShortDate(getValue() as string | null),
       },
       ...JOB_WIP_COLUMNS.map(
@@ -151,13 +169,21 @@ export function ProductionBoard({ projects: projectsProp }: { projects: Project[
     setModalJob({ project: modalJob.project, job: saved });
   }
 
+  function handleDeleteJob() {
+    if (!modalJob) return;
+    const label = modalJob.job.name.trim() || "this job";
+    if (!window.confirm(`Delete "${label}"? This cannot be undone.`)) return;
+    const current = loadProjectJobs(modalJob.project.id, modalJob.project);
+    saveProjectJobs(
+      modalJob.project.id,
+      current.filter((j) => j.id !== modalJob.job.id),
+    );
+    closeJobModal();
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-white p-4 lg:p-6">
-        <p className="mb-3 text-xs text-text-secondary">
-          Click a row to open Job Details. Share a link with{" "}
-          <code className="rounded bg-surface-body px-1">?inspectJob=projectId:jobId</code>
-        </p>
         <table className="min-w-max border-collapse bg-white text-left text-xs">
           <thead>
             {table.getHeaderGroups().map((hg) => (
@@ -215,12 +241,14 @@ export function ProductionBoard({ projects: projectsProp }: { projects: Project[
           project={modalJob.project}
           job={normalizeJob(modalJob.job, modalJob.project)}
           allJobs={loadProjectJobs(modalJob.project.id, modalJob.project)}
+          orders={loadProjectOrders(modalJob.project.id, modalJob.project)}
           clientCode={clientCodeByName(modalJob.project.client.name) ?? "GG"}
           vendors={vendors}
           onClose={closeJobModal}
           onSave={(saved) => {
             handleSaveJob(saved);
           }}
+          onDelete={handleDeleteJob}
         />
       ) : null}
     </div>

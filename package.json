@@ -13,6 +13,8 @@
     "import-masterlist": "python3 scripts/import_masterlist.py"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.78.0",
     "@tanstack/react-table": "^8.21.3",
     "@types/jsbarcode": "^3.11.4",
     "jsbarcode": "^3.12.3",

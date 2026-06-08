@@ -24,10 +24,26 @@ import {
   JobDetailsSection,
   JobType,
   ProjectJob,
+  ProjectOrder,
   wipStepToSection,
 } from "@/lib/types/wip";
+import { findDuplicateSku } from "@/lib/sku";
 import { jobTimelineEditorLabel } from "@/lib/types/wip";
+import { JobShareMenu } from "@/components/job-share-menu";
+import { ModalSectionLayout, ModalSectionNavList } from "@/components/modal-section-layout";
+import {
+  CheckMini,
+  ProjectModalAside,
+  ProjectModalBadge,
+  ProjectModalOverlay,
+  ProjectModalPanelFooter,
+  ProjectModalPanelHeader,
+  projectModalFieldClass,
+  projectModalLabelClass,
+  projectModalTextareaClass,
+} from "@/components/project-modal-ui";
 import { VendorFieldSelect } from "@/components/vendor-select";
+import { sanitizeJobDisplayName } from "@/lib/job-display-name";
 import { normalizeJob } from "@/lib/job-defaults";
 import { applyDevelopmentPatch, developmentFromJob } from "@/lib/job-development";
 import {
@@ -53,12 +69,7 @@ import {
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
 import { generatePoForJob } from "@/lib/po-context";
-import {
-  COMMON_COLORWAY_NAMES,
-  generateStyleNumber,
-  resolveColorCode,
-  styleColorCode,
-} from "@/lib/style-number";
+import { COMMON_COLORWAY_NAMES, resolveColorCode, styleColorCode } from "@/lib/style-number";
 import { wipStepLabel } from "@/lib/wip-project-timeline";
 import { JobTimelineStepsEditor } from "@/components/job-timeline-steps-editor";
 import { WipTimeline } from "@/components/wip-timeline";
@@ -77,11 +88,16 @@ import type {
   Estimate,
   VendorQuote,
 } from "@/lib/types/wip";
+import {
+  isJobLate,
+  JOB_STATUS_SELECT_OPTIONS,
+  jobStatusDisplay,
+} from "@/lib/job-status";
+import { JobStatusBadge } from "@/components/job-status-badge";
 
-const fieldClass =
-  "mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
-
-const labelClass = "block text-xs font-medium text-text-secondary";
+const fieldClass = projectModalFieldClass;
+const labelClass = projectModalLabelClass;
+const textareaClass = projectModalTextareaClass;
 
 const SAMPLE_STATUS_OPTIONS: SampleStatus[] = [
   "PENDING",
@@ -187,6 +203,14 @@ function cloneJob(job: ProjectJob): ProjectJob {
   };
 }
 
+function JobBadgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="size-5" aria-hidden>
+      <path d="M10 2h4a2 2 0 0 1 2 2v2h4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6h4V4a2 2 0 0 1 2-2zm2 4V4h-4v2h4z" />
+    </svg>
+  );
+}
+
 function SectionCard({
   title,
   id,
@@ -203,12 +227,12 @@ function SectionCard({
   return (
     <section
       id={id}
-      className={`rounded-2xl border border-border-light bg-white p-4 shadow-sm transition-shadow ${
-        highlight ? "ring-2 ring-accent/70 ring-offset-2" : ""
+      className={`rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm transition-shadow ${
+        highlight ? "ring-2 ring-[#7c3aed]/40 ring-offset-2" : ""
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">{title}</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
         {headerExtra ? <div className="shrink-0">{headerExtra}</div> : null}
       </div>
       <div className="mt-3 space-y-3">{children}</div>
@@ -238,12 +262,12 @@ function SectionPanel({
   return (
     <section
       id={id}
-      className={`overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm transition-shadow ${
-        highlight ? "ring-2 ring-accent/70 ring-offset-2" : ""
+      className={`overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm transition-shadow ${
+        highlight ? "ring-2 ring-[#7c3aed]/40 ring-offset-2" : ""
       }`}
     >
-      <div className="border-b border-border-light px-4 py-3">
-        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">{title}</h3>
+      <div className="border-b border-slate-100 px-4 py-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
       </div>
       <div className="space-y-4 px-4 py-4">{children}</div>
     </section>
@@ -335,7 +359,9 @@ export type JobDetailsModalProps = {
   project: Project;
   job: ProjectJob;
   allJobs: ProjectJob[];
+  orders?: ProjectOrder[];
   clientCode: string;
+  operatorCode?: string;
   vendors: Contact[];
   focus?: JobDetailsFocus;
   isNew?: boolean;
@@ -343,22 +369,31 @@ export type JobDetailsModalProps = {
   overlayClassName?: string;
   onClose: () => void;
   onSave: (job: ProjectJob) => void;
+  onDelete?: () => void;
+  deleting?: boolean;
 };
 
 export function JobDetailsModal({
   project,
   job,
   allJobs,
+  orders = [],
   clientCode,
+  operatorCode = "MAT",
   vendors,
   focus,
   isNew,
   overlayClassName = "z-[100]",
   onClose,
   onSave,
+  onDelete,
+  deleting = false,
 }: JobDetailsModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [draft, setDraft] = useState(() => cloneJob(normalizeJob(job, isNew ? undefined : project)));
+  const [draft, setDraft] = useState(() => {
+    const normalized = cloneJob(normalizeJob(job, isNew ? undefined : project));
+    return { ...normalized, name: sanitizeJobDisplayName(normalized.name) };
+  });
   const [categoryDropdown, setCategoryDropdown] = useState(() =>
     isNew ? "" : resolveCategoryDropdown(job.category),
   );
@@ -367,26 +402,13 @@ export function JobDetailsModal({
   );
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
-  const existingStyles = useMemo(
-    () =>
-      allJobs
-        .filter((j) => j.id !== draft.id)
-        .map((j) => j.style_number)
-        .filter(Boolean),
-    [allJobs, draft.id],
-  );
-
-  const autoStyleNumber = useMemo(
-    () => generateStyleNumber(clientCode, categoryDropdown, existingStyles),
-    [clientCode, categoryDropdown, existingStyles],
-  );
-
   useEffect(() => {
-    setDraft((prev) => {
-      if (prev.style_number && prev.style_number.trim()) return prev;
-      return { ...prev, style_number: autoStyleNumber };
-    });
-  }, [autoStyleNumber]);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   useEffect(() => {
     if (!focus) return;
@@ -554,11 +576,18 @@ export function JobDetailsModal({
 
   function handleSave(e: FormEvent) {
     e.preventDefault();
-    const po = draft.po_number?.trim() || null;
+    const sku = draft.sku?.trim() || null;
+    if (sku) {
+      const dup = findDuplicateSku(sku, allJobs, draft.id);
+      if (dup) {
+        window.alert(`SKU ${sku} is already used on “${dup.name || dup.style_number}”.`);
+        return;
+      }
+    }
     const saved: ProjectJob = {
       ...draft,
       category: categoryDropdown,
-      po_number: po,
+      sku: sku || null,
       scope_note: draft.scope_note?.trim() || undefined,
       updated_at: new Date().toISOString(),
     };
@@ -640,149 +669,170 @@ export function JobDetailsModal({
     patch({ bulk_production_tracks: tracks });
   }
 
-  const title = isNew ? "New job" : "Job Details";
+  const linkedOrder = useMemo(
+    () =>
+      draft.order_id
+        ? orders.find((o) => o.id === draft.order_id)
+        : orders[0],
+    [draft.order_id, orders],
+  );
+  const orderDueYmd = linkedOrder?.due_date ?? null;
+  const statusLabel = jobStatusDisplay(draft, orderDueYmd);
+
+  const subtitleParts = [
+    project.name,
+    draft.job_number ? `Job ${draft.job_number}` : null,
+    statusLabel,
+  ].filter(Boolean);
+  const sectionNavItems = visibleModalSections(draft.job_type).map((id) => ({
+    id,
+    label: SECTION_LABEL[id],
+  }));
 
   return (
-    <div
-      className={`fixed inset-0 flex items-end justify-center bg-black/45 p-4 sm:items-center ${overlayClassName}`}
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <ProjectModalOverlay
+      titleId="job-details-modal-title"
+      onClose={onClose}
+      overlayClassName={overlayClassName}
+      size="wide-tall"
+      aside={
+        <ProjectModalAside
+          badge={
+            <ProjectModalBadge>
+              <JobBadgeIcon />
+            </ProjectModalBadge>
+          }
+          title={
+            <>
+              Track every step
+              <br />
+              of the run.
+            </>
+          }
+          body="Update timeline dates, costing, approvals, and production details — all tied to this job’s WIP."
+          nav={
+            <ModalSectionNavList
+              sections={sectionNavItems}
+              activeSection={activeSection}
+              onSectionChange={(id) => handleJumpToSection(id as JobModalSection)}
+              navLabel="Job sections"
+              variant="polished"
+              tone="aside"
+            />
+          }
+        />
+      }
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="job-details-modal-title"
-        className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-card shadow-xl"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-border-light px-5 py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 id="job-details-modal-title" className="text-lg font-semibold text-text-primary">
-              {title}
-            </h2>
-            {draft.job_number ? (
-              <span className="rounded-full bg-accent/10 px-2.5 py-0.5 font-mono text-[11px] font-bold text-accent ring-1 ring-accent/30">
-                {draft.job_number}
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-1.5 text-base font-semibold text-text-primary">
-            {project.name}
-            <span className="ml-2 text-xs font-normal text-text-secondary">
-              Saved in this browser only (mock)
-            </span>
-          </p>
+      <ProjectModalPanelHeader
+        title={draft.name.trim() || (isNew ? "New job" : "Job details")}
+        subtitle={subtitleParts.join(" · ")}
+        titleId="job-details-modal-title"
+        onClose={onClose}
+      />
+      {!isNew ? (
+        <div className="flex shrink-0 justify-end border-b border-slate-100 px-5 py-2 sm:px-6">
+          <JobShareMenu project={project} job={draft} />
         </div>
-
-        <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSave}>
-          <div className="flex min-h-0 flex-1">
-            <aside className="hidden w-56 shrink-0 overflow-y-auto border-r border-border-light bg-surface-body/40 py-3 sm:block">
-              <nav aria-label="Job sections" className="space-y-0.5 px-2">
-                {visibleModalSections(draft.job_type).map((id) => {
-                  const isActive = activeSection === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => handleJumpToSection(id)}
-                      className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
-                        isActive
-                          ? "bg-accent/10 text-accent ring-1 ring-accent/30"
-                          : "text-text-secondary hover:bg-slate-100 hover:text-text-primary"
-                      }`}
-                    >
-                      {SECTION_LABEL[id]}
-                    </button>
-                  );
-                })}
-              </nav>
-            </aside>
-
-            <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              <nav
-                aria-label="Job sections"
-                className="-mx-1 flex flex-wrap gap-1.5 overflow-x-auto pb-1 sm:hidden"
-              >
-                {visibleModalSections(draft.job_type).map((id) => {
-                  const isActive = activeSection === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => handleJumpToSection(id)}
-                      className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ring-1 transition ${
-                        isActive
-                          ? "bg-accent text-white ring-accent"
-                          : "bg-slate-100 text-text-secondary ring-border-light hover:text-text-primary"
-                      }`}
-                    >
-                      {SECTION_LABEL[id]}
-                    </button>
-                  );
-                })}
-              </nav>
-
+      ) : null}
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSave}>
+        <ModalSectionLayout
+          sections={sectionNavItems}
+          activeSection={activeSection}
+          onSectionChange={(id) => handleJumpToSection(id as JobModalSection)}
+          navLabel="Job sections"
+          variant="polished"
+          sidebar="none"
+          contentRef={scrollRef}
+        >
+          <div className="space-y-4">
               <div hidden={activeSection !== "overview"}>
             <SectionCard
               id="job-section-overview"
-              title="Overview"
+              title="Job details"
               highlight={highlightId === "job-section-overview"}
             >
-              <label className={labelClass}>
-                Due date
-                <input
-                  type="date"
-                  className={fieldClass}
-                  value={isoToDateInput(draft.due_date)}
-                  onChange={(e) => patch({ due_date: dateInputToIso(e.target.value) })}
-                />
-              </label>
-
               <label className={labelClass}>
                 Job name
                 <input
                   className={fieldClass}
                   value={draft.name}
+                  placeholder="Style name"
                   onChange={(e) => patch({ name: e.target.value })}
                 />
               </label>
 
-              <label className={labelClass}>
-                Subtitle
-                <input
-                  className={fieldClass}
-                  value={draft.subtitle}
-                  onChange={(e) => patch({ subtitle: e.target.value })}
-                />
-              </label>
-
               <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className={labelClass}>
-                    Job type
-                    <select
-                      className={fieldClass}
-                      value={draft.job_type ?? "print_production"}
-                      onChange={(e) => handleJobTypeChange(e.target.value as JobType)}
-                    >
-                      {JOB_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={applyTimelineTemplateForType}
-                    className="mt-1 text-[11px] font-semibold text-accent hover:underline"
+                <label className={labelClass}>
+                  <span className="flex items-center gap-2">
+                    Status
+                    <JobStatusBadge job={draft} orderDueYmd={orderDueYmd} />
+                  </span>
+                  <select
+                    className={fieldClass}
+                    value={draft.status}
+                    onChange={(e) =>
+                      patch({ status: e.target.value as ProjectJob["status"] })
+                    }
                   >
-                    Apply default timeline for this type
-                  </button>
-                </div>
+                    {JOB_STATUS_SELECT_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  {isJobLate(draft, orderDueYmd) ? (
+                    <p className="mt-1 text-xs text-red-600">
+                      Past due — shows as Late until marked Completed.
+                    </p>
+                  ) : null}
+                </label>
+                <label className={labelClass}>
+                  Job due date
+                  <input
+                    type="date"
+                    className={fieldClass}
+                    value={isoToDateInput(draft.due_date)}
+                    onChange={(e) =>
+                      patch({ due_date: dateInputToIso(e.target.value) })
+                    }
+                  />
+                </label>
+              </div>
 
+              {orders.length > 0 ? (
+                <label className={labelClass}>
+                  Order
+                  <select
+                    className={fieldClass}
+                    value={draft.order_id ?? ""}
+                    onChange={(e) => patch({ order_id: e.target.value || undefined })}
+                  >
+                    <option value="">—</option>
+                    {orders.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.order_number}
+                        {o.due_date ? ` · due ${isoToDateInput(o.due_date)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className={labelClass}>
+                  Job type
+                  <select
+                    className={fieldClass}
+                    value={draft.job_type ?? "print_production"}
+                    onChange={(e) => handleJobTypeChange(e.target.value as JobType)}
+                  >
+                    {JOB_TYPE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className={labelClass}>
                   Category
                   <select
@@ -797,21 +847,31 @@ export function JobDetailsModal({
                     ))}
                   </select>
                 </label>
+                <div className="flex flex-col justify-end">
+                  <VendorFieldSelect
+                    label="Supplier"
+                    vendors={vendors}
+                    value={draft.lead_vendor}
+                    onChange={(name) => patch({ lead_vendor: name ?? "" })}
+                  />
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={applyTimelineTemplateForType}
+                className="text-[11px] font-semibold text-accent hover:underline"
+              >
+                Lead times — apply template for this job type
+              </button>
 
               <label className={labelClass}>
                 Style #
                 <input
                   className={fieldClass}
                   value={draft.style_number}
-                  placeholder={autoStyleNumber}
+                  placeholder="e.g. GGT01"
                   onChange={(e) => patch({ style_number: e.target.value.toUpperCase() })}
                 />
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Auto-suggested:{" "}
-                  <span className="font-mono font-semibold text-text-primary">{autoStyleNumber}</span>{" "}
-                  — override if needed.
-                </p>
               </label>
 
               <label className={labelClass}>
@@ -854,84 +914,95 @@ export function JobDetailsModal({
                 </p>
               </label>
 
-              <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">PO #</p>
-                <label className={`${labelClass} mt-2`}>
-                  Client PO (if provided)
-                  <input
-                    className={fieldClass}
-                    value={draft.client_po_number ?? ""}
-                    onChange={(e) => patch({ client_po_number: e.target.value.trim() || null })}
-                    placeholder="Client-supplied PO overrides ours"
-                  />
-                </label>
-                <label className={`${labelClass} mt-2`}>
-                  Our PO (auto-generated)
-                  <input
-                    className={fieldClass}
-                    value={draft.po_number ?? ""}
-                    onChange={(e) => patch({ po_number: e.target.value.trim() || null })}
-                    placeholder="Auto-assigned on create"
-                  />
-                </label>
-                <p className="mt-2 text-[11px] text-text-secondary">
-                  Effective PO:{" "}
-                  <span className="font-mono font-semibold text-text-primary">
-                    {(draft.client_po_number?.trim() || draft.po_number?.trim()) || "—"}
-                  </span>
+              <label className={labelClass}>
+                Size breakdown qty
+                <textarea
+                  className={textareaClass}
+                  rows={2}
+                  value={draft.size_breakdown ?? ""}
+                  placeholder="e.g. S-12, M-24, L-18, XL-6"
+                  onChange={(e) => patch({ size_breakdown: e.target.value })}
+                />
+              </label>
+
+              <label className={labelClass}>
+                Description
+                <textarea
+                  className={textareaClass}
+                  rows={2}
+                  value={draft.description ?? ""}
+                  onChange={(e) => patch({ description: e.target.value })}
+                />
+              </label>
+
+              <label className={labelClass}>
+                Price
+                <input
+                  className={fieldClass}
+                  value={draft.price ?? ""}
+                  onChange={(e) => patch({ price: e.target.value })}
+                  placeholder="Unit or line price"
+                />
+              </label>
+
+              <label className={labelClass}>
+                SKU #
+                <input
+                  className={fieldClass}
+                  value={draft.sku ?? ""}
+                  placeholder="Unique SKU (optional)"
+                  onChange={(e) => patch({ sku: e.target.value.toUpperCase() })}
+                />
+                <p className="mt-1 text-[11px] text-text-secondary">
+                  Must be unique across your workspace.
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2">
+              </label>
+
+              {(draft.custom_fields ?? []).map((cf, idx) => (
+                <div key={`${cf.key}-${idx}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <input
+                    className={fieldClass}
+                    value={cf.key}
+                    placeholder="Field name"
+                    onChange={(e) => {
+                      const next = [...(draft.custom_fields ?? [])];
+                      next[idx] = { ...cf, key: e.target.value };
+                      patch({ custom_fields: next });
+                    }}
+                  />
+                  <input
+                    className={fieldClass}
+                    value={cf.value}
+                    onChange={(e) => {
+                      const next = [...(draft.custom_fields ?? [])];
+                      next[idx] = { ...cf, value: e.target.value };
+                      patch({ custom_fields: next });
+                    }}
+                  />
                   <button
                     type="button"
-                    onClick={handleGeneratePo}
-                    className="rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-violet-50"
+                    onClick={() =>
+                      patch({
+                        custom_fields: (draft.custom_fields ?? []).filter((_, i) => i !== idx),
+                      })
+                    }
+                    className="text-xs font-semibold text-red-600"
                   >
-                    Generate new PO
+                    Remove
                   </button>
-                  {siblingJobs.length > 0 ? (
-                    <label className="flex items-center gap-2 text-xs font-medium text-text-secondary">
-                      Link to job PO
-                      <select
-                        className="rounded-lg border border-border-light bg-white px-2 py-1.5 text-xs font-semibold text-text-primary"
-                        defaultValue=""
-                        onChange={(e) => {
-                          if (e.target.value) handleLinkPo(e.target.value);
-                          e.target.value = "";
-                        }}
-                      >
-                        <option value="">Select…</option>
-                        {siblingJobs.map((j) => (
-                          <option key={j.id} value={j.id}>
-                            {j.name || j.style_number} {j.po_number ? `(${j.po_number})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
                 </div>
-              </div>
-
-              <div>
-                <label className={labelClass}>
-                  Style-color code
-                  <input
-                    className={fieldClass}
-                    value={draft.barcode ?? ""}
-                    placeholder={styleColorPreview || "GGT148-BLK"}
-                    onChange={(e) => patch({ barcode: e.target.value.toUpperCase() })}
-                  />
-                </label>
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Full SKU base: style # + color code. This is not the 6-digit barcode scan ID on stickers.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleGenerateBarcode}
-                  className="mt-2 rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-violet-50"
-                >
-                  Apply from colorway ({styleColorPreview || "set color first"})
-                </button>
-              </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  patch({
+                    custom_fields: [...(draft.custom_fields ?? []), { key: "", value: "" }],
+                  })
+                }
+                className="rounded-lg border border-dashed border-border-light px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent"
+              >
+                + Add field
+              </button>
 
               {draft.scope_kind === "addon" ? (
                 <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
@@ -1000,7 +1071,7 @@ export function JobDetailsModal({
                     <label className={labelClass}>
                       Custom note
                       <textarea
-                        className={fieldClass}
+                        className={textareaClass}
                         rows={2}
                         value={draft.addon_custom_note ?? ""}
                         onChange={(e) => patch({ addon_custom_note: e.target.value })}
@@ -1011,17 +1082,12 @@ export function JobDetailsModal({
               ) : null}
 
               <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Vendor & garment</p>
-                <div className="mt-3 space-y-3">
-                  <VendorFieldSelect
-                    label="Lead vendor"
-                    vendors={vendors}
-                    value={draft.lead_vendor}
-                    onChange={(name) => patch({ lead_vendor: name ?? "" })}
-                  />
-                  <div className="grid gap-3 sm:grid-cols-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                  Brand & garment style
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className={labelClass}>
-                      Garment brand
+                      Brand
                       <input
                         className={fieldClass}
                         value={draft.garment_brand ?? ""}
@@ -1052,7 +1118,6 @@ export function JobDetailsModal({
                         onChange={(e) => patch({ garment_size: e.target.value })}
                       />
                     </label>
-                  </div>
                 </div>
               </div>
 
@@ -1146,7 +1211,7 @@ export function JobDetailsModal({
                         <label className={`${labelClass} mt-3 block`}>
                           Mock-up notes
                           <textarea
-                            className={fieldClass}
+                            className={textareaClass}
                             rows={3}
                             value={estimate.mock_up_notes ?? ""}
                             onChange={(e) =>
@@ -1791,7 +1856,7 @@ export function JobDetailsModal({
                                   <label className={`${labelClass} sm:col-span-2`}>
                                     Comments
                                     <textarea
-                                      className={fieldClass}
+                                      className={textareaClass}
                                       rows={2}
                                       value={s.comments ?? ""}
                                       onChange={(e) =>
@@ -2077,26 +2142,22 @@ export function JobDetailsModal({
               </SectionPanel>
               </div>
             ))}
-            </div>
           </div>
+        </ModalSectionLayout>
 
-          <div className="flex shrink-0 justify-end gap-2 border-t border-border-light px-5 py-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-text-secondary hover:bg-slate-100"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-            >
-              Save
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <ProjectModalPanelFooter
+          deleteLabel={
+            !isNew && onDelete ? (deleting ? "Deleting…" : "Delete job") : undefined
+          }
+          onDelete={!isNew ? onDelete : undefined}
+          deleteDisabled={deleting}
+          secondaryLabel="Cancel"
+          onSecondary={onClose}
+          primaryLabel="Save job"
+          primaryIcon={<CheckMini />}
+          primaryDisabled={deleting}
+        />
+      </form>
+    </ProjectModalOverlay>
   );
 }

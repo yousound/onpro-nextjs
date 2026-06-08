@@ -3,14 +3,19 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { BackendModeToggle } from "@/components/backend-mode-toggle";
+import { DirectoryAvatar } from "@/components/directory-avatar";
 import { OnProLogoIntroModal } from "@/components/onpro-logo-intro-modal";
-import { getSidebarNavAlertMap } from "@/lib/mock/overview-digest";
-
-const SIDEBAR_USER = {
-  name: "Jerry M",
-  org: "Fillio Design",
+import { useCurrentUser } from "@/components/profile-provider";
+import { isSupabaseConfigured } from "@/lib/config/backend";
+import { isClientMockBackend } from "@/lib/config/backend-mode";
+import { displayAvatarUrl } from "@/lib/current-user-display";
+const MOCK_SIDEBAR = {
+  name: "Demo user",
+  org: "Mock mode",
   avatarSrc: "/user-avatar-demo.png",
+  initials: "DU",
 };
 
 type NavItem = {
@@ -30,17 +35,17 @@ type NavItem = {
 };
 
 /**
- * Overview first (default home), then the rest of the desktop shell.
+ * OnPro AI (home) first, then the rest of the desktop shell.
  */
 const NAV: NavItem[] = [
-  { href: "/", label: "Overview", icon: "overview" },
+  { href: "/", label: "OnPro AI", icon: "overview" },
   { href: "/messages", label: "Messages", icon: "messages" },
   { href: "/mailroom", label: "Mailroom", icon: "mailroom" },
   { href: "/projects", label: "Projects", icon: "projects" },
   { href: "/production", label: "Jobs", icon: "jobs" },
   { href: "/calendar", label: "Calendar", icon: "calendar" },
   { href: "/documents", label: "Documents", icon: "documents" },
-  { href: "/people", label: "People", icon: "team" },
+  { href: "/people", label: "Contacts", icon: "team" },
   { href: "#", label: "Reports", icon: "reports", disabled: true },
 ];
 
@@ -134,12 +139,22 @@ function NavIcon({ kind }: { kind: NavItem["icon"] }) {
 export function AppSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const [introOpen, setIntroOpen] = useState(false);
+  const { user: profileUser, loading: profileLoading } = useCurrentUser();
 
-  const navAlerts = useMemo(() => {
-    const ymd = new Date().toISOString().slice(0, 10);
-    return getSidebarNavAlertMap(ymd);
-  }, []);
+  const useMockAvatar = isClientMockBackend() || (!profileLoading && !isSupabaseConfigured());
+  const sidebarUser = profileUser
+    ? {
+        name: profileUser.fullName,
+        org: profileUser.companyName || "Add company in Settings",
+        avatarSrc: displayAvatarUrl(profileUser.avatarUrl, { useMockPlaceholder: useMockAvatar }),
+        initials: profileUser.initials,
+      }
+    : useMockAvatar
+      ? MOCK_SIDEBAR
+      : profileLoading
+        ? { name: "…", org: "", avatarSrc: null as string | null, initials: "…" }
+        : { name: "Account", org: "Settings", avatarSrc: null as string | null, initials: "?" };
+  const [introOpen, setIntroOpen] = useState(false);
 
   return (
     <aside
@@ -151,7 +166,7 @@ export function AppSidebar() {
         <button
           type="button"
           onClick={() => setIntroOpen(true)}
-          className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out hover:bg-slate-200/95 hover:text-slate-900"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out hover:bg-slate-200/95 hover:text-slate-900"
           aria-label="About OnPro"
         >
           <Image
@@ -164,6 +179,7 @@ export function AppSidebar() {
           />
           {!collapsed ? <span className="truncate font-semibold text-text-primary">OnPro</span> : null}
         </button>
+        <BackendModeToggle collapsed={collapsed} />
       </div>
 
       <OnProLogoIntroModal open={introOpen} onDismiss={() => setIntroOpen(false)} />
@@ -195,33 +211,12 @@ export function AppSidebar() {
             <Link
               key={item.label}
               href={item.href}
-              title={
-                collapsed
-                  ? `${item.label}${navAlerts[item.href] ? " · Has alerts" : ""}`
-                  : undefined
-              }
-              {...(collapsed
-                ? {
-                    "aria-label": `${item.label}${navAlerts[item.href] ? ", has alerts" : ""}`,
-                  }
-                : {})}
+              title={collapsed ? item.label : undefined}
+              {...(collapsed ? { "aria-label": item.label } : {})}
               className={`${base} ${activeCls} ${collapsed ? "justify-center px-2" : ""}`}
             >
-              <span className="relative shrink-0">
-                <NavIcon kind={item.icon} />
-                {navAlerts[item.href] ? (
-                  <span
-                    className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-red-500 ring-2 ring-surface-card"
-                    aria-hidden
-                  />
-                ) : null}
-              </span>
-              {!collapsed ? (
-                <span className="truncate">
-                  {item.label}
-                  {navAlerts[item.href] ? <span className="sr-only">, has alerts</span> : null}
-                </span>
-              ) : null}
+              <NavIcon kind={item.icon} />
+              {!collapsed ? <span className="truncate">{item.label}</span> : null}
             </Link>
           );
         })}
@@ -230,25 +225,25 @@ export function AppSidebar() {
       <div className="border-t border-border-light p-2">
         <Link
           href="/settings"
-          title={collapsed ? `${SIDEBAR_USER.name} — ${SIDEBAR_USER.org}` : undefined}
+          title={collapsed ? `${sidebarUser.name} — ${sidebarUser.org}` : undefined}
           className={`flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-200/90 ${
             collapsed ? "justify-center" : ""
           }`}
         >
-          <Image
-            src={SIDEBAR_USER.avatarSrc}
-            alt=""
-            width={40}
-            height={40}
-            className="size-10 shrink-0 rounded-full object-cover ring-2 ring-white shadow-md ring-slate-200/80"
+          <DirectoryAvatar
+            name={sidebarUser.name}
+            avatarUrl={sidebarUser.avatarSrc}
+            size="sm"
           />
           {!collapsed ? (
             <span className="min-w-0 flex-1">
               <span className="flex items-center justify-between gap-1">
-                <span className="truncate text-sm font-semibold text-text-primary">{SIDEBAR_USER.name}</span>
+                <span className="truncate text-sm font-semibold text-text-primary">{sidebarUser.name}</span>
                 <ChevronDownGlyph className="shrink-0 text-text-secondary" />
               </span>
-              <span className="mt-0.5 block truncate text-xs text-text-secondary">{SIDEBAR_USER.org}</span>
+              {sidebarUser.org ? (
+                <span className="mt-0.5 block truncate text-xs text-text-secondary">{sidebarUser.org}</span>
+              ) : null}
             </span>
           ) : null}
         </Link>

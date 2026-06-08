@@ -15,9 +15,12 @@ import {
   jobAttachmentTitle,
 } from "@/lib/attachment-composer-job";
 import { JobDetailsModal } from "@/components/job-details-modal";
+import { NewJobModal } from "@/components/new-job-modal";
 import { normalizeJob } from "@/lib/job-defaults";
 import { MOCK_LS, readMockLs } from "@/lib/mock-local";
-import { getProjectById } from "@/lib/mock/projects";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
+import { readSessionProjects } from "@/lib/mock/project-session";
 import { AttachmentPreviewModal } from "@/components/attachment-preview-modal";
 import { AttachmentSourcePicker } from "@/components/attachment-source-picker";
 import {
@@ -28,8 +31,10 @@ import {
   sourcePickerLabel,
   type AttachmentSourceContext,
 } from "@/lib/attachment-composer-sources";
+import { resolveClientProjectList } from "@/lib/mock/project-session";
 import { createNewJobSeed } from "@/lib/project-job-create";
-import { createPackingSlipDraft } from "@/lib/packing-slip";
+import { createPackingSlipDraft, packingSlipOriginFromUser } from "@/lib/packing-slip";
+import { useCurrentUser } from "@/components/profile-provider";
 import {
   blankCalendarComposerFields,
   buildCalendarEventFromComposer,
@@ -275,6 +280,8 @@ export function MessageAttachmentComposer(props: {
     onSend,
     layout = "workspace",
   } = props;
+  const { user } = useCurrentUser();
+  const packingOrigin = useMemo(() => packingSlipOriginFromUser(user), [user]);
   const [kind, setKind] = useState<ChatAttachmentKind>("invoice");
 
   const [invoiceNo, setInvoiceNo] = useState("INV-2026-0142");
@@ -371,14 +378,22 @@ export function MessageAttachmentComposer(props: {
   const [jobModal, setJobModal] = useState<
     { kind: "new"; seed: ProjectJob } | { kind: "edit"; jobId: string } | null
   >(null);
+  const [jobModalProjectId, setJobModalProjectId] = useState<number | null>(null);
 
   const linkedProject = useMemo((): Project | null => {
     if (projectId == null) return null;
-    const base = getProjectById(projectId);
+    const base = isClientLiveBackend()
+      ? getLiveCachedProjects().find((p) => p.id === projectId)
+      : readSessionProjects().find((p) => p.id === projectId);
     if (!base) return null;
     const patch = readMockLs<Partial<Project>>(MOCK_LS.project(projectId));
     return { ...base, ...(patch && typeof patch === "object" ? patch : {}) };
   }, [projectId, open, sessionKey, jobsRevision]);
+
+  const allProjects = useMemo(
+    () => resolveClientProjectList(linkedProject ? [linkedProject] : []),
+    [linkedProject],
+  );
 
   const projectJobs = useMemo(() => {
     if (!linkedProject) return [];
@@ -457,12 +472,49 @@ export function MessageAttachmentComposer(props: {
     [kind, sourceContext],
   );
 
+  const jobModalProject = useMemo(() => {
+    if (jobModalProjectId != null) {
+      return allProjects.find((p) => p.id === jobModalProjectId) ?? linkedProject;
+    }
+    return linkedProject;
+  }, [jobModalProjectId, allProjects, linkedProject]);
+
+  const jobModalProjectJobs = useMemo(() => {
+    if (!jobModalProject) return [];
+    return loadProjectJobs(jobModalProject.id, jobModalProject);
+  }, [jobModalProject, jobsRevision]);
+
+  const jobModalClientCode = useMemo(
+    () =>
+      jobModalProject ? clientCodeByName(jobModalProject.client.name) ?? "GG" : clientCode,
+    [jobModalProject, clientCode],
+  );
+
   const jobModalJob = useMemo(() => {
-    if (!jobModal || !linkedProject) return null;
-    if (jobModal.kind === "new") return normalizeJob(jobModal.seed, undefined);
+    if (!jobModal) return null;
+    if (jobModal.kind === "new") {
+      return jobModalProject
+        ? normalizeJob(jobModal.seed, jobModalProject)
+        : normalizeJob(jobModal.seed, undefined);
+    }
+    if (!linkedProject) return null;
     const found = projectJobs.find((j) => j.id === jobModal.jobId);
     return found ? normalizeJob(found, linkedProject) : null;
-  }, [jobModal, linkedProject, projectJobs]);
+  }, [jobModal, jobModalProject, linkedProject, projectJobs]);
+
+  function setNewJobModalForProject(projectId: number) {
+    const target = allProjects.find((p) => p.id === projectId);
+    if (!target) return;
+    setJobModalProjectId(projectId);
+    setJobModal({
+      kind: "new",
+      seed: createNewJobSeed(target, loadProjectJobs(target.id, target)),
+    });
+  }
+
+  function handleJobModalProjectChange(projectId: number) {
+    setNewJobModalForProject(projectId);
+  }
 
   function applyDraftFrom(d: AttachmentComposerDraft) {
     setKind(d.kind);
@@ -577,21 +629,45 @@ export function MessageAttachmentComposer(props: {
   useEffect(() => {
     if (!open) {
       setJobModal(null);
+      setJobModalProjectId(null);
       setPreviewOpen(false);
     }
   }, [open, sessionKey]);
 
+  function handleComposerJobDelete() {
+    if (jobModal?.kind !== "edit") return;
+    const target = linkedProject ?? jobModalProject;
+    if (!target) return;
+    const job = loadProjectJobs(target.id, target).find((j) => j.id === jobModal.jobId);
+    if (!job) return;
+    const label = job.name.trim() || "this job";
+    if (!window.confirm(`Delete "${label}"? This cannot be undone.`)) return;
+    const existing = loadProjectJobs(target.id, target);
+    saveProjectJobs(
+      target.id,
+      existing.filter((j) => j.id !== job.id),
+    );
+    setJobModal(null);
+    setJobModalProjectId(null);
+  }
+
   function handleComposerJobSave(saved: ProjectJob) {
-    if (!linkedProject) return;
+    const target =
+      allProjects.find((p) => p.id === saved.project_id) ?? linkedProject ?? jobModalProject;
+    if (!target) return;
+    const existing = loadProjectJobs(target.id, target);
     const next =
       jobModal?.kind === "new"
-        ? [...projectJobs, saved]
-        : projectJobs.map((j) => (j.id === saved.id ? saved : j));
-    saveProjectJobs(linkedProject.id, next);
+        ? [...existing, saved]
+        : existing.map((j) => (j.id === saved.id ? saved : j));
+    saveProjectJobs(target.id, next);
     setJobsRevision((r) => r + 1);
-    applyProjectJob(saved);
-    setSelectedSourceId(`job:${saved.id}`);
+    if (linkedProject && target.id === linkedProject.id) {
+      applyProjectJob(saved);
+      setSelectedSourceId(`job:${saved.id}`);
+    }
     setJobModal(null);
+    setJobModalProjectId(null);
   }
 
   const invoiceTotal = useMemo(() => {
@@ -703,10 +779,10 @@ export function MessageAttachmentComposer(props: {
   }
 
   function handleCreateNewKind() {
-    if (kind === "job" && linkedProject) {
+    if (kind === "job" && allProjects.length > 0) {
       setSelectedSourceId("");
       applyProjectJob(null);
-      setJobModal({ kind: "new", seed: createNewJobSeed(linkedProject, projectJobs) });
+      setNewJobModalForProject(linkedProject?.id ?? allProjects[0]!.id);
       return;
     }
     if (kind === "calendar_event") {
@@ -721,7 +797,7 @@ export function MessageAttachmentComposer(props: {
     }
     const fresh = newAttachmentDraftForKind(kind, sourceContext);
     if (kind === "packing_list" && linkedProject) {
-      const slip = createPackingSlipDraft(linkedProject, projectJobs, loadContacts());
+      const slip = createPackingSlipDraft(linkedProject, projectJobs, loadContacts(), packingOrigin);
       applyDraftFrom(draftFromPackingSlip(slip, roomTitle, fresh));
       return;
     }
@@ -1824,17 +1900,34 @@ export function MessageAttachmentComposer(props: {
         {previewBody}
       </AttachmentPreviewModal>
     ) : null}
-    {jobModalJob && linkedProject ? (
+    {jobModalJob && jobModalProject && jobModal?.kind === "new" ? (
+      <NewJobModal
+        key={jobModalProject.id}
+        projects={allProjects}
+        project={jobModalProject}
+        onProjectChange={handleJobModalProjectChange}
+        job={jobModalJob}
+        allJobs={jobModalProjectJobs}
+        clientCode={jobModalClientCode}
+        vendors={vendors}
+        overlayClassName="z-[210]"
+        onClose={() => {
+          setJobModal(null);
+          setJobModalProjectId(null);
+        }}
+        onSave={handleComposerJobSave}
+      />
+    ) : jobModalJob && linkedProject ? (
       <JobDetailsModal
         project={linkedProject}
         job={jobModalJob}
         allJobs={projectJobs}
         clientCode={clientCode}
         vendors={vendors}
-        isNew={jobModal?.kind === "new"}
         overlayClassName="z-[210]"
         onClose={() => setJobModal(null)}
         onSave={handleComposerJobSave}
+        onDelete={jobModal?.kind === "edit" ? handleComposerJobDelete : undefined}
       />
     ) : null}
     </>

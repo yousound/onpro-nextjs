@@ -2,20 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { mockProjects } from "@/lib/mock/projects";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
+import { readSessionProjects } from "@/lib/mock/project-session";
 import { contactDisplayName, loadContacts, searchContacts, clientListContacts } from "@/lib/contacts-store";
 import { contactToDirectoryRow } from "@/components/add-contact-modals";
 
 type Item = { id: string; label: string; href: string; group: string; subtitle?: string };
 
 const NAV_ITEMS: Item[] = [
-  { id: "nav-overview", label: "Overview", href: "/", group: "Go to" },
+  { id: "nav-overview", label: "OnPro AI", href: "/", group: "Go to" },
   { id: "nav-messages", label: "Messages", href: "/messages", group: "Go to" },
   { id: "nav-projects", label: "Projects", href: "/projects", group: "Go to" },
   { id: "nav-calendar", label: "Calendar", href: "/calendar", group: "Go to" },
   { id: "nav-documents", label: "Documents", href: "/documents", group: "Go to" },
   { id: "nav-settings", label: "Settings", href: "/settings", group: "Go to" },
-  { id: "nav-people", label: "People", href: "/people", group: "Go to" },
+  { id: "nav-people", label: "Contacts", href: "/people", group: "Go to" },
   { id: "nav-production", label: "Production board (desktop)", href: "/production", group: "Go to" },
 ];
 
@@ -24,16 +26,15 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
 
-  const projectItems: Item[] = useMemo(
-    () =>
-      mockProjects.map((p) => ({
-        id: `project-${p.id}`,
-        label: `${p.name} — ${p.client.name}`,
-        href: `/projects/${p.id}`,
-        group: "Projects",
-      })),
-    [],
-  );
+  const projectItems: Item[] = useMemo(() => {
+    const list = isClientLiveBackend() ? getLiveCachedProjects() : readSessionProjects();
+    return list.map((p) => ({
+      id: `project-${p.id}`,
+      label: `${p.name} — ${p.client.name}`,
+      href: `/projects/${p.id}`,
+      group: "Projects",
+    }));
+  }, [open]);
 
   const all = useMemo(() => [...NAV_ITEMS, ...projectItems], [projectItems]);
 

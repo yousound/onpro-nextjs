@@ -1,15 +1,18 @@
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import { collectAllPoNumbers, generatePoNumber } from "@/lib/po-number";
-import { getProjects } from "@/lib/mock/projects";
 import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
 import { loadProjectJobs } from "@/lib/project-wip-edits";
-import { clientCodeByName } from "@/lib/reference/client-codes";
+import { resolveClientCode } from "@/lib/reference/client-codes";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob } from "@/lib/types/wip";
 
 function allProjects(extra: Project[] = []): Project[] {
-  const base = getProjects();
-  if (typeof window === "undefined") return mergeProjectLists(base, extra);
-  return mergeProjectLists(base, [...readSessionProjects(), ...extra]);
+  if (isClientLiveBackend()) {
+    return [...getLiveCachedProjects(), ...extra];
+  }
+  if (typeof window === "undefined") return extra;
+  return mergeProjectLists([], [...readSessionProjects(), ...extra]);
 }
 
 /** Collect all PO strings from projects and persisted jobs (for sequence deduping). */
@@ -26,7 +29,7 @@ export function collectAllAppPoNumbers(extraProjects: Project[] = []): string[] 
 }
 
 export function generatePoForProject(project: Project, extraProjects: Project[] = []): string {
-  const clientCode = clientCodeByName(project.client.name) ?? "XX";
+  const clientCode = resolveClientCode(project.client.name);
   return generatePoNumber(clientCode, collectAllAppPoNumbers(extraProjects));
 }
 

@@ -10,7 +10,12 @@ export const mockConversations: Conversation[] = [
     unread_count: 2,
     participants: [
       { id: 1, name: "Glo Gang", avatar_url: null, is_company: true },
-      { id: 2, name: "Jerry M", avatar_url: null, company_name: "OnPro" },
+      {
+        id: 2,
+        name: "Jerry M",
+        avatar_url: "/user-avatar-demo.png",
+        company_name: "OnPro",
+      },
     ],
     is_group: false,
     project_id: 1,
@@ -24,7 +29,12 @@ export const mockConversations: Conversation[] = [
     unread_count: 0,
     participants: [
       { id: 3, name: "LNQ", avatar_url: null, is_company: true },
-      { id: 2, name: "Jerry M", avatar_url: null, company_name: "OnPro" },
+      {
+        id: 2,
+        name: "Jerry M",
+        avatar_url: "/user-avatar-demo.png",
+        company_name: "OnPro",
+      },
     ],
     is_group: false,
     project_id: 2,
@@ -38,7 +48,12 @@ export const mockConversations: Conversation[] = [
     unread_count: 0,
     participants: [
       { id: 4, name: "VOID STAR", avatar_url: null, is_company: true },
-      { id: 2, name: "Jerry M", avatar_url: null, company_name: "OnPro" },
+      {
+        id: 2,
+        name: "Jerry M",
+        avatar_url: "/user-avatar-demo.png",
+        company_name: "OnPro",
+      },
       { id: 5, name: "Connect Dots", avatar_url: null, is_company: true },
     ],
     is_group: true,

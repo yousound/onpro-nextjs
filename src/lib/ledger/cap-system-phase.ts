@@ -4,12 +4,12 @@ import type { LedgerCapSystem, LedgerPhase1Row } from "@/lib/ledger/types";
 const CAP_TO_PHASE_ID: Record<string, string> = {
   "cap-ios": "p1-ios",
   "cap-next": "p1-next",
-  "cap-rails": "p2-rails",
+  "cap-supabase-api": "p2-supabase-api",
   "cap-admin": "p2-admin",
 };
 
 const PHASE1_CAP_IDS = ["cap-ios", "cap-next"] as const;
-const PHASE2_CAP_IDS = ["cap-rails", "cap-admin"] as const;
+const PHASE2_CAP_IDS = ["cap-supabase-api", "cap-admin"] as const;
 
 function capToPhaseRow(cap: LedgerCapSystem): LedgerPhase1Row {
   return {

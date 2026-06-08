@@ -1,7 +1,9 @@
 import type {
   AgentSuggestion,
   EmailThread,
+  MailroomWorkflow,
 } from "@/lib/types/agent";
+import { workflowToSuggestions } from "@/lib/mailroom/workflow-utils";
 
 const now = Date.now();
 const hoursAgo = (h: number) => new Date(now - h * 60 * 60 * 1000).toISOString();
@@ -51,6 +53,61 @@ export const MOCK_EMAIL_THREADS: EmailThread[] = [
     ],
     status: "unread",
     related: { vendor: "MIM Printing" },
+  },
+  {
+    id: "th-zoe-rfq",
+    subject: "PO#ZOE260104 - ZOE Conference Tees + Hoodie - REQUEST FOR QUOTE",
+    category: "client",
+    participants: [
+      { name: "Cecilia Contreras", email: "cecilia@connectdots.la" },
+      { name: "Eric Crandell", email: "eric@101productionhouse.com" },
+    ],
+    messages: [
+      {
+        id: "msg-zoe-1",
+        from: { name: "Cecilia Contreras", email: "cecilia@connectdots.la" },
+        at: hoursAgo(4),
+        body: `Hi Eric,
+
+Can you please provide an estimated quote for the following styles along with the digitizing fee?
+Due Date 1/23
+
+ZOE Event Tee *Oversized (2 separate screens for sizes S-M / L-2XL)
+Body: FBRC
+Print:
+- Front: 5 color plastisol print
+Quantities:
+White - 72pcs
+Finishing:
+- Neck Print - Connect Dots Supplied
+- Individual Polybag US Standard Warnings - 101 Supplied
+
+ZOE Tee 2
+Body: FBRC
+Print:
+- Front: 3 color plastisol print
+Quantities:
+Pigment Black - 100 pcs
+
+ZOE Crew
+Body: FBRC
+Print:
+- Front: 1 color plastisol print
+- Back: 1 color plastisol print
+Quantities:
+Brown - 50pcs
+Black - 50pcs
+100 TTL
+
+ZOE Hoodie
+Body: FBRC
+Print:
+- Back: 1 color plastisol print
+Quantities:
+Black - 100pcs`,
+      },
+    ],
+    status: "unread",
   },
   {
     id: "th-glo-rfq",
@@ -287,8 +344,151 @@ export const MOCK_EMAIL_THREADS: EmailThread[] = [
   },
 ];
 
+function wfStep(
+  threadId: string,
+  step: Omit<MailroomWorkflow["steps"][0], "suggestion_id" | "status">,
+): MailroomWorkflow["steps"][0] {
+  return {
+    ...step,
+    suggestion_id: `sug-${threadId}-${step.step_id}`,
+    status: "pending",
+  };
+}
+
+/** Multi-step workflow templates for summarize (mock + fallback). */
+export function workflowForThread(thread: EmailThread): MailroomWorkflow | null {
+  const created_at = hoursAgo(1);
+
+  switch (thread.id) {
+    case "th-zoe-rfq":
+      return {
+        thread_id: thread.id,
+        thread_intent: "new_client_rfq",
+        project_match: { confidence: "none", reason: "No existing ZOE Conference project in workspace." },
+        link_existing_project_id: null,
+        created_at,
+        steps: [
+          wfStep(thread.id, {
+            step_id: "project",
+            kind: "create_project",
+            title: "Create project: ZOE Conference Tees + Hoodie",
+            payload: {
+              client: "ZOE Conference",
+              name: "ZOE Conference Tees + Hoodie",
+              client_po_number: "ZOE260104",
+              due_date: "2026-01-23",
+              notes: "RFQ from Cecilia @ Connect Dots — digitizing fee + 4 styles",
+            },
+            auto_contact: {
+              company: "ZOE Conference",
+              name: "Brand contact",
+            },
+          }),
+          wfStep(thread.id, {
+            step_id: "job-event-tee",
+            kind: "create_job",
+            title: "Add job: ZOE Event Tee Oversized (72 white)",
+            depends_on: ["project"],
+            payload: {
+              name: "ZOE Event Tee Oversized",
+              qty: 72,
+              colors: "White",
+              print_notes: "Front 5C plastisol; 2 screens S-M / L-2XL",
+            },
+          }),
+          wfStep(thread.id, {
+            step_id: "job-tee-2",
+            kind: "create_job",
+            title: "Add job: ZOE Tee 2 (100 pigment black)",
+            depends_on: ["project"],
+            payload: {
+              name: "ZOE Tee 2",
+              qty: 100,
+              colors: "Pigment Black",
+              print_notes: "Front 3C plastisol",
+            },
+          }),
+          wfStep(thread.id, {
+            step_id: "job-crew",
+            kind: "create_job",
+            title: "Add job: ZOE Crew (50 brown + 50 black)",
+            depends_on: ["project"],
+            payload: {
+              name: "ZOE Crew",
+              qty: 100,
+              colors: "Brown 50, Black 50",
+              print_notes: "Front + back 1C plastisol",
+            },
+          }),
+          wfStep(thread.id, {
+            step_id: "job-hoodie",
+            kind: "create_job",
+            title: "Add job: ZOE Hoodie (100 black)",
+            depends_on: ["project"],
+            payload: {
+              name: "ZOE Hoodie",
+              qty: 100,
+              colors: "Black",
+              print_notes: "Back 1C plastisol",
+            },
+          }),
+          wfStep(thread.id, {
+            step_id: "task-digitizing",
+            kind: "team_note",
+            title: "Task: collect digitizing fees from vendors",
+            depends_on: ["project"],
+            payload: {
+              note: "Request digitizing fee quotes for all ZOE Conference screens.",
+              due_date: "2026-01-20",
+            },
+          }),
+          wfStep(thread.id, {
+            step_id: "estimate",
+            kind: "generate_estimate",
+            title: "Draft client estimate for ZOE Conference",
+            depends_on: ["job-event-tee", "job-tee-2", "job-crew", "job-hoodie"],
+            payload: { notes: "Include digitizing line items per style." },
+          }),
+        ],
+      };
+    case "th-glo-rfq":
+      return {
+        thread_id: thread.id,
+        thread_intent: "new_client_rfq",
+        project_match: { confidence: "none", reason: "New drop — no matching project." },
+        link_existing_project_id: null,
+        created_at,
+        steps: [
+          wfStep(thread.id, {
+            step_id: "project",
+            kind: "create_project",
+            title: "Create project: Glo Gang Drop 03",
+            payload: {
+              client: "Glo Gang",
+              name: "Glo Gang Drop 03",
+              notes: "4 tees × 250 + 2 hoodies × 150",
+            },
+            auto_contact: { company: "Glo Gang", email: "ops@glogang.com" },
+          }),
+          wfStep(thread.id, {
+            step_id: "jobs",
+            kind: "create_job",
+            title: "Add 4 tee jobs + 2 hoodie jobs (Drop 03)",
+            depends_on: ["project"],
+            payload: { count: 6 },
+          }),
+        ],
+      };
+    default:
+      return null;
+  }
+}
+
 /** Suggestion templates the agent would surface for the threads above. */
 export function suggestionsForThread(thread: EmailThread): AgentSuggestion[] {
+  const workflow = workflowForThread(thread);
+  if (workflow) return workflowToSuggestions(workflow);
+
   switch (thread.id) {
     case "th-ss-quote-tee":
       return [
@@ -327,30 +527,7 @@ export function suggestionsForThread(thread: EmailThread): AgentSuggestion[] {
         },
       ];
     case "th-glo-rfq":
-      return [
-        {
-          id: "sug-glo-1",
-          thread_id: thread.id,
-          kind: "create_project",
-          title: "Create project: Glo Gang Drop 03",
-          payload: {
-            client: "Glo Gang",
-            name: "Glo Gang Drop 03",
-            notes: "4 tees × 250 + 2 hoodies × 150",
-          },
-          status: "pending",
-          created_at: hoursAgo(70),
-        },
-        {
-          id: "sug-glo-2",
-          thread_id: thread.id,
-          kind: "create_job",
-          title: "Add 4 tee jobs + 2 hoodie jobs (Drop 03)",
-          payload: { count: 6 },
-          status: "pending",
-          created_at: hoursAgo(70),
-        },
-      ];
+      return [];
     case "th-glo-po":
       return [
         {

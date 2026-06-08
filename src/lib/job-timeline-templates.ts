@@ -76,8 +76,6 @@ export function buildUpcomingJobTimelineForType(type?: JobType): WipStep[] {
     .map((def) => ({
       id: def.id,
       label: def.label,
-      durationShort: def.durationShort,
-      durationLabel: def.durationLabel,
       state: "upcoming" as const,
     }));
 }

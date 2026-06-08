@@ -190,13 +190,12 @@ export function buildProjectTimelineFromJobs(project: Project, jobs: ProjectJob[
 }
 
 function toWipStep(def: StepDef, state: WipStepState): WipStep {
-  return {
-    id: def.id,
-    label: def.label,
-    durationShort: def.durationShort,
-    durationLabel: def.durationLabel,
-    state,
-  };
+  const step: WipStep = { id: def.id, label: def.label, state };
+  if (state !== "upcoming") {
+    if (def.durationShort) step.durationShort = def.durationShort;
+    if (def.durationLabel) step.durationLabel = def.durationLabel;
+  }
+  return step;
 }
 
 export function buildProjectTimeline(project: Project): WipStep[] {
@@ -229,14 +228,22 @@ export function repairJobTimeline(timeline: WipStep[] | undefined, fallback: Wip
   return saved.map((s) => {
     const def = defById.get(s.id);
     const base = fallbackById.get(s.id);
-    return {
+    const state = s.state ?? base?.state ?? "upcoming";
+    const step: WipStep = {
       id: s.id,
       label: s.label.trim() || def?.label || base?.label || s.id,
-      durationShort: s.durationShort ?? base?.durationShort ?? def?.durationShort,
-      durationLabel: s.durationLabel ?? base?.durationLabel ?? def?.durationLabel,
-      state: s.state ?? base?.state ?? "upcoming",
+      state,
       ...(s.opensIn ? { opensIn: s.opensIn } : {}),
     };
+    if (s.durationShort) step.durationShort = s.durationShort;
+    else if (state !== "upcoming") {
+      step.durationShort = base?.durationShort ?? def?.durationShort;
+    }
+    if (s.durationLabel) step.durationLabel = s.durationLabel;
+    else if (state !== "upcoming") {
+      step.durationLabel = base?.durationLabel ?? def?.durationLabel;
+    }
+    return step;
   });
 }
 

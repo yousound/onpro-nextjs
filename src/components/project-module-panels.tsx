@@ -19,12 +19,15 @@ import type { PeopleSegment } from "@/lib/mock/people";
 import { segmentBadgeSoftClass, segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
 import { PackingSlipSection } from "@/components/packing-slip-section";
 import { loadContacts } from "@/lib/contacts-store";
+import { DirectoryAvatar } from "@/components/directory-avatar";
+import { useCurrentUser } from "@/components/profile-provider";
 import { peopleForProject, type ProjectPersonRow } from "@/lib/project-people";
 import {
   mergeRoleDrafts,
   personListPermissionSummary,
 } from "@/lib/project-person-permissions";
 import { ProjectPersonPermissionsModal } from "@/components/project-person-permissions-modal";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
 import {
@@ -78,10 +81,19 @@ function PanelShell({
   );
 }
 
-function MockPersistHint() {
+function EditPersistHint() {
   return (
     <p className="text-[11px] leading-snug text-text-secondary">
-      Tap or focus a value to edit. Saves in this browser only for this project (mock).
+      Tap or focus a value to edit. Changes save when project sync to your workspace is wired.
+    </p>
+  );
+}
+
+function PoInvoiceBanner({ poNumber }: { poNumber: string }) {
+  return (
+    <p className="mb-4 rounded-xl border border-violet-200 bg-violet-50/80 px-4 py-3 text-sm text-violet-950">
+      PO <span className="font-bold">{poNumber}</span> is this project&apos;s purchase order reference for
+      invoices you create here.
     </p>
   );
 }
@@ -956,7 +968,7 @@ function InternalTeamRosterEditor({ onAdd }: { onAdd: (name: string) => void }) 
     <SectionCard title="Team roster">
       <p className="text-xs text-text-secondary">
         Add teammates for this project — they appear in every Internal assignment menu below. You can also add people from{" "}
-        <strong className="font-semibold text-text-primary">People → Team</strong>. Saved in this browser only (mock).
+        <strong className="font-semibold text-text-primary">People → Team</strong>.
       </p>
       <form
         className="mt-3 flex flex-wrap items-end gap-2"
@@ -1008,7 +1020,7 @@ export function InternalDevelopmentPanel({
   const p = onPatchProject;
   const { roster, addMember } = useInternalTeamRoster(project.id);
   return (
-    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+    <PanelShell hint={p ? <EditPersistHint /> : undefined}>
       {p ? <InternalTeamRosterEditor onAdd={addMember} /> : null}
       <SectionCard title="Team assignments">
         {!p ? (
@@ -1148,11 +1160,14 @@ function PaymentsPanel({ project }: { project: Project }) {
   return (
     <PanelShell>
       <SectionCard title="Payment processors">
+        <p className="text-sm text-text-secondary">
+          Connect a processor to send payment links and record deposits against this project.
+        </p>
         <GrayRow>
           <div className="flex items-center justify-between gap-3">
             <span className="font-semibold text-text-primary">Stripe</span>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-              Connected
+            <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-bold text-slate-600">
+              Not connected
             </span>
           </div>
         </GrayRow>
@@ -1166,17 +1181,20 @@ function PaymentsPanel({ project }: { project: Project }) {
         </GrayRow>
         <button
           type="button"
-          className="w-full rounded-xl border-2 border-dashed border-accent/40 py-3 text-sm font-semibold text-accent hover:bg-violet-50"
+          disabled
+          className="w-full cursor-not-allowed rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm font-semibold text-slate-400"
         >
-          + Add payment method
+          Connect payment processor — coming soon
         </button>
       </SectionCard>
       <SectionCard title="Payment history">
         <p className="text-xs text-text-secondary">Project: {project.name}</p>
         <div className="flex flex-col items-center py-8 text-center">
           <p className="text-lg font-semibold text-text-primary">No payments yet</p>
-          <p className="mt-2 max-w-sm text-sm text-text-secondary">Collect payments from clients (mock).</p>
-          <p className="mt-4 text-sm font-semibold text-emerald-700">$0.00 collected</p>
+          <p className="mt-2 max-w-sm text-sm text-text-secondary">
+            When a processor is connected, client payments for this project will show here.
+          </p>
+          <p className="mt-4 text-sm font-semibold text-text-secondary">$0.00 collected</p>
         </div>
       </SectionCard>
     </PanelShell>
@@ -1202,11 +1220,7 @@ function InvoicesPanel({ project }: { project: Project }) {
 
   return (
     <PanelShell>
-      {project.po_number ? (
-        <p className="mb-4 rounded-xl border border-violet-200 bg-violet-50/80 px-4 py-3 text-sm text-violet-950">
-          PO <span className="font-bold">{project.po_number}</span> flows to invoice creation (mock).
-        </p>
-      ) : null}
+      {project.po_number ? <PoInvoiceBanner poNumber={project.po_number} /> : null}
       <SectionCard title="Filters">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-medium text-text-secondary">
@@ -1276,7 +1290,7 @@ function ApprovalsPanel({ project, onPatchProject }: { project: Project; onPatch
   const p = onPatchProject;
   const vendors = useProjectVendors();
   return (
-    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+    <PanelShell hint={p ? <EditPersistHint /> : undefined}>
       <CostingOverviewSection title="Costing approvals" project={project} patch={p} />
       <RepeatableDyeCostingSections headingBase="Dye approvals" project={project} patch={p} vendors={vendors} />
       <RepeatablePrintEmbroiderySections
@@ -1294,7 +1308,7 @@ function CostingPanel({ project, onPatchProject }: { project: Project; onPatchPr
   const p = onPatchProject;
   const vendors = useProjectVendors();
   return (
-    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+    <PanelShell hint={p ? <EditPersistHint /> : undefined}>
       <CostingOverviewSection title="Costing overview" project={project} patch={p} />
       <RepeatableDyeCostingSections headingBase="Dyes" project={project} patch={p} vendors={vendors} />
       <RepeatablePrintEmbroiderySections
@@ -1320,7 +1334,7 @@ function CsPanel({ project, onPatchProject }: { project: Project; onPatchProject
 
   if (project.colorways.length === 0) {
     return (
-      <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+      <PanelShell hint={p ? <EditPersistHint /> : undefined}>
         <p className="text-sm text-text-secondary">No colorways on this project yet.</p>
         {p ? (
           <AddRepeatSectionButton
@@ -1340,7 +1354,7 @@ function CsPanel({ project, onPatchProject }: { project: Project; onPatchProject
     selectedId === "all" ? project.colorways : project.colorways.filter((c) => c.id === selectedId);
 
   return (
-    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+    <PanelShell hint={p ? <EditPersistHint /> : undefined}>
       {p ? (
         <AddRepeatSectionButton
           onClick={() => {
@@ -1547,7 +1561,7 @@ function BulkProductionPanel({ project, onPatchProject }: { project: Project; on
               </SectionCard>
               {hint ? (
                 <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-5">
-                  <p className="text-sm font-semibold text-blue-900">Auto-calculation (mock)</p>
+                  <p className="text-sm font-semibold text-blue-900">Auto-calculation</p>
                   <p className="mt-2 text-sm text-blue-800/90">
                     Packing list target ~1 week before ex-factory: <span className="font-bold">{hint}</span>
                   </p>
@@ -1562,7 +1576,7 @@ function BulkProductionPanel({ project, onPatchProject }: { project: Project; on
 
   const save = p;
   return (
-    <PanelShell hint={<MockPersistHint />}>
+    <PanelShell hint={<EditPersistHint />}>
       {tracks.map((t, i) => {
         const hint = packingHintFromExFactory(t.ex_factory_date);
         return (
@@ -1685,7 +1699,7 @@ function BulkProductionPanel({ project, onPatchProject }: { project: Project; on
             </SectionCard>
             {hint ? (
               <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-5">
-                <p className="text-sm font-semibold text-blue-900">Auto-calculation (mock)</p>
+                <p className="text-sm font-semibold text-blue-900">Auto-calculation</p>
                 <p className="mt-2 text-sm text-blue-800/90">
                   Packing list target ~1 week before ex-factory: <span className="font-bold">{hint}</span>
                 </p>
@@ -1715,7 +1729,7 @@ function ShippingModulePanel({ project, onPatchProject }: { project: Project; on
   const methodDisplay = project.shipping_method?.trim() || "Not set";
 
   return (
-    <PanelShell hint={p ? <MockPersistHint /> : undefined}>
+    <PanelShell hint={p ? <EditPersistHint /> : undefined}>
       <div className="flex max-w-md rounded-xl border border-border-light bg-surface-card p-1">
         {(["shipping", "receiving"] as const).map((k) => (
           <button
@@ -1816,17 +1830,51 @@ function ShippingModulePanel({ project, onPatchProject }: { project: Project; on
   );
 }
 
-const PEOPLE_SEGMENTS: PeopleSegment[] = ["team", "vendor", "client"];
+type PeopleAccessFilter = PeopleSegment | "all";
+
+const PEOPLE_FILTER_PILLS: { id: PeopleAccessFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "team", label: "Team" },
+  { id: "client", label: "Clients" },
+  { id: "vendor", label: "Vendors" },
+];
+
+function peopleFilterPillClass(active: boolean, filter: PeopleAccessFilter): string {
+  const base =
+    "rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition";
+  if (!active) {
+    return `${base} bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary`;
+  }
+  if (filter === "all") {
+    return `${base} bg-accent text-white shadow-sm ring-1 ring-accent/40`;
+  }
+  return `${base} ${segmentPillSelectedClass(filter)}`;
+}
 
 export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
-  const [segment, setSegment] = useState<PeopleSegment>("team");
+  const { user, loading, refresh } = useCurrentUser();
+  const [filter, setFilter] = useState<PeopleAccessFilter>("all");
   const [drafts, setDrafts] = useState<Record<PeopleSegment, ProjectPermissionFlags>>(() => mergeRoleDrafts(null));
   const [hydrated, setHydrated] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<ProjectPersonRow | null>(null);
   const [permRevision, setPermRevision] = useState(0);
 
-  const projectPeople = useMemo(() => peopleForProject(project, loadContacts()), [project, permRevision]);
+  useEffect(() => {
+    if (!isClientLiveBackend() || loading) return;
+    void refresh().then(() => setPermRevision((n) => n + 1));
+  }, [loading, refresh]);
+
+  const projectPeople = useMemo(
+    () =>
+      peopleForProject(project, loadContacts(), {
+        ownerContactId: user?.selfContactId,
+        ownerEmail: user?.email,
+        ownerFullName: user?.fullName,
+        ownerAvatarUrl: user?.avatarUrl,
+      }),
+    [project, permRevision, user?.selfContactId, user?.email, user?.fullName, user?.avatarUrl],
+  );
   const contacts = useMemo(() => loadContacts(), [permRevision]);
   const personSummaries = useMemo(() => {
     if (!hydrated) return new Map<string, { text: string; hasOverride: boolean }>();
@@ -1838,15 +1886,33 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
     );
   }, [projectPeople, project.id, contacts, drafts, hydrated, permRevision]);
 
+  const filteredPeople = useMemo(() => {
+    if (filter === "all") return projectPeople;
+    return projectPeople.filter((p) => p.segment === filter);
+  }, [projectPeople, filter]);
+
+  const segment: PeopleSegment = filter === "all" ? "team" : filter;
+
   useEffect(() => {
-    const raw = readMockLs<Partial<Record<PeopleSegment, Partial<ProjectPermissionFlags>>>>(
-      MOCK_LS.projectRolePermissions(project.id),
-    );
-    setDrafts(mergeRoleDrafts(raw));
+    if (isClientLiveBackend()) {
+      setDrafts(mergeRoleDrafts(null));
+    } else {
+      const raw = readMockLs<Partial<Record<PeopleSegment, Partial<ProjectPermissionFlags>>>>(
+        MOCK_LS.projectRolePermissions(project.id),
+      );
+      setDrafts(mergeRoleDrafts(raw));
+    }
     setHydrated(true);
   }, [project.id]);
 
+  useEffect(() => {
+    if (!selectedPerson) return;
+    if (filter === "all" || selectedPerson.segment === filter) return;
+    setSelectedPerson(null);
+  }, [filter, selectedPerson]);
+
   function save() {
+    if (isClientLiveBackend()) return;
     writeMockLs(MOCK_LS.projectRolePermissions(project.id), drafts);
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2000);
@@ -1863,19 +1929,17 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
           <span className="font-semibold text-text-primary">{project.name}</span>. These apply to everyone in that
           segment on this project. Invites only send email — access is managed here.
         </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {PEOPLE_SEGMENTS.map((s) => (
+        <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Filter people on project">
+          {PEOPLE_FILTER_PILLS.map((pill) => (
             <button
-              key={s}
+              key={pill.id}
               type="button"
-              onClick={() => setSegment(s)}
-              className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
-                segment === s
-                  ? segmentPillSelectedClass(s)
-                  : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
-              }`}
+              role="tab"
+              aria-selected={filter === pill.id}
+              onClick={() => setFilter(pill.id)}
+              className={peopleFilterPillClass(filter === pill.id, pill.id)}
             >
-              {segmentLabel(s)}
+              {pill.label}
             </button>
           ))}
         </div>
@@ -1900,24 +1964,28 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
             </Link>
             .
           </p>
+        ) : filteredPeople.length === 0 ? (
+          <p className="text-sm text-text-secondary">
+            No {filter === "all" ? "people" : segmentLabel(filter).toLowerCase()} on this project with the current
+            filter.
+          </p>
         ) : (
-          <ul className="-mx-2 divide-y divide-border-light">
-            {projectPeople.map((person) => {
+          <ul className="-mx-2 flex flex-col gap-3 py-2">
+            {filteredPeople.map((person) => {
               const summary = personSummaries.get(person.key);
               return (
                 <li key={person.key}>
                   <button
                     type="button"
                     onClick={() => setSelectedPerson(person)}
-                    className="flex w-full gap-3 rounded-lg px-2 py-3 text-left transition first:pt-0 last:pb-0 hover:bg-surface-body/80"
+                    className="flex w-full gap-3 rounded-lg px-3 py-4 text-left transition hover:bg-surface-body/80"
                     aria-label={`Edit permissions for ${person.displayName}`}
                   >
-                    <span
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-xs font-bold text-slate-800"
-                      aria-hidden
-                    >
-                      {clientInitials(person.displayName)}
-                    </span>
+                    <DirectoryAvatar
+                      name={person.displayName}
+                      avatarUrl={person.avatarUrl}
+                      size="sm"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-semibold text-text-primary group-hover:text-accent">
@@ -1963,54 +2031,67 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
         />
       ) : null}
 
-      <SectionCard title={`Defaults · ${segmentLabel(segment)}`}>
-        {!hydrated ? (
-          <p className="text-sm text-text-secondary">Loading…</p>
-        ) : (
-          <>
-            <p className="text-sm text-text-secondary">
-              Baseline for everyone in the {segmentLabel(segment).toLowerCase()} segment on this project. Override per
-              person from{" "}
-              <Link href="/people" className="font-semibold text-accent hover:underline">
-                People
-              </Link>
-              .
-            </p>
-            <PermissionsEditor
-              segment={segment}
-              flags={flags}
-              onChange={(next) =>
-                setDrafts((prev) => ({
-                  ...prev,
-                  [segment]: next,
-                }))
-              }
-            />
-            <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border-light pt-4">
-              <button
-                type="button"
-                onClick={save}
-                className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-              >
-                Save role defaults
-              </button>
-              <button
-                type="button"
-                onClick={() =>
+      {filter === "all" ? (
+        <SectionCard title="Defaults by segment">
+          <p className="text-sm text-text-secondary">
+            Select <span className="font-semibold text-text-primary">Team</span>,{" "}
+            <span className="font-semibold text-text-primary">Clients</span>, or{" "}
+            <span className="font-semibold text-text-primary">Vendors</span> above to edit role defaults for that
+            group on this project.
+          </p>
+        </SectionCard>
+      ) : (
+        <SectionCard title={`Defaults · ${segmentLabel(filter)}`}>
+          {!hydrated ? (
+            <p className="text-sm text-text-secondary">Loading…</p>
+          ) : (
+            <>
+              <p className="text-sm text-text-secondary">
+                Baseline for everyone in the {segmentLabel(filter).toLowerCase()} segment on this project. Override per
+                person from{" "}
+                <Link href="/people" className="font-semibold text-accent hover:underline">
+                  People
+                </Link>
+                .
+              </p>
+              <PermissionsEditor
+                segment={filter}
+                flags={flags}
+                onChange={(next) =>
                   setDrafts((prev) => ({
                     ...prev,
-                    [segment]: defaultPermissionsForSegment(segment),
+                    [filter]: next,
                   }))
                 }
-                className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
-              >
-                Reset to OnPro defaults
-              </button>
-              {savedFlash ? <span className="text-sm font-medium text-emerald-700">Saved for this project.</span> : null}
-            </div>
-          </>
-        )}
-      </SectionCard>
+              />
+              <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border-light pt-4">
+                <button
+                  type="button"
+                  onClick={save}
+                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                >
+                  Save role defaults
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [filter]: defaultPermissionsForSegment(filter),
+                    }))
+                  }
+                  className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+                >
+                  Reset to OnPro defaults
+                </button>
+                {savedFlash ? (
+                  <span className="text-sm font-medium text-emerald-700">Saved for this project.</span>
+                ) : null}
+              </div>
+            </>
+          )}
+        </SectionCard>
+      )}
     </PanelShell>
   );
 }
@@ -2027,6 +2108,7 @@ export function ProjectModuleRouter({
   switch (moduleId) {
     case "details":
     case "internal":
+    case "documents":
       return null;
     case "payments":
       return <PaymentsPanel project={project} />;

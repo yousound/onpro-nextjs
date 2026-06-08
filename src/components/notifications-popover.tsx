@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildOverviewDigest } from "@/lib/mock/overview-digest";
-
-type NotifRow = { id: string; title: string; subtitle: string; href: string };
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { dispatchOpenOnProAi } from "@/lib/onpro-events";
+import { getNotificationRows } from "@/lib/notifications";
 
 function BellGlyph({ className }: { className?: string }) {
   return (
@@ -15,48 +16,10 @@ function BellGlyph({ className }: { className?: string }) {
   );
 }
 
-function useNotificationsRows(): NotifRow[] {
-  return useMemo(() => {
-    const ymd = new Date().toISOString().slice(0, 10);
-    const d = buildOverviewDigest(ymd);
-    const out: NotifRow[] = d.focusItems.map((f) => ({
-      id: f.id,
-      title: f.title,
-      subtitle: f.subtitle,
-      href: f.href,
-    }));
-    const fillers: NotifRow[] = [
-      {
-        id: "n-quick-find",
-        title: "Quick find",
-        subtitle: "Press ⌘K to jump to pages and projects.",
-        href: "/",
-      },
-      {
-        id: "n-demo",
-        title: "Demo workspace",
-        subtitle: "Notifications use mock digest data for this preview.",
-        href: "/",
-      },
-      {
-        id: "n-overview",
-        title: "Overview",
-        subtitle: "Your morning digest lists what needs attention.",
-        href: "/",
-      },
-    ];
-    for (const f of fillers) {
-      if (out.length >= 3) break;
-      if (!out.some((x) => x.id === f.id)) out.push(f);
-    }
-    return out.slice(0, 8);
-  }, []);
-}
-
 export type NotificationsPopoverProps = {
   /** Outer button classes (layout, size, colors). */
   buttonClassName: string;
-  /** Badge position/size; omit wrapper span when count is 0 if desired — we always show digest-based count. */
+  /** Show count badge when there are notifications. */
   showBadge?: boolean;
   panelAlign?: "right" | "left";
 };
@@ -66,10 +29,46 @@ export function NotificationsPopover({
   showBadge = true,
   panelAlign = "right",
 }: NotificationsPopoverProps) {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [memberEvents, setMemberEvents] = useState<
+    { id: string; eventId: number; title: string; subtitle: string; href: string }[]
+  >([]);
   const rootRef = useRef<HTMLDivElement>(null);
-  const rows = useNotificationsRows();
-  const count = Math.min(Math.max(rows.length, 1), 9);
+  const todayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const baseRows = useMemo(() => getNotificationRows(todayYmd), [todayYmd, pathname]);
+  const rows = useMemo(() => [...memberEvents, ...baseRows], [memberEvents, baseRows]);
+  const count = rows.length;
+  const live = isClientLiveBackend();
+
+  useEffect(() => {
+    if (!live) return;
+    void fetch("/api/workspace/member-events")
+      .then((r) => r.json())
+      .then(
+        (data: {
+          events?: {
+            id: number;
+            eventType: string;
+            memberEmail: string | null;
+            memberName: string | null;
+          }[];
+        }) => {
+          const mapped = (data.events ?? []).map((ev) => ({
+            id: `wme-${ev.id}`,
+            eventId: ev.id,
+            title:
+              ev.eventType === "joined"
+                ? `${ev.memberName ?? ev.memberEmail ?? "Someone"} joined your workspace`
+                : "Workspace access revoked",
+            subtitle: ev.memberEmail ?? "Client account",
+            href: "/people?segment=client",
+          }));
+          setMemberEvents(mapped);
+        },
+      )
+      .catch(() => setMemberEvents([]));
+  }, [live, pathname]);
 
   useEffect(() => {
     if (!open) return;
@@ -93,13 +92,21 @@ export function NotificationsPopover({
       <button
         type="button"
         className={buttonClassName}
-        aria-label={open ? "Notifications (open)" : "Notifications"}
+        aria-label={
+          count > 0
+            ? open
+              ? `Notifications (${count} items, open)`
+              : `Notifications (${count} items)`
+            : open
+              ? "Notifications (open)"
+              : "Notifications"
+        }
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((o) => !o)}
       >
         <BellGlyph />
-        {showBadge ? (
+        {showBadge && count > 0 ? (
           <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white">
             {count > 9 ? "9+" : count}
           </span>
@@ -116,30 +123,50 @@ export function NotificationsPopover({
         >
           <div className="border-b border-border-light px-3 py-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Notifications</p>
-            <p className="mt-0.5 text-[11px] text-text-secondary">Mock inbox — links open the relevant screen.</p>
+            <p className="mt-0.5 text-[11px] text-text-secondary">
+              {live ? "From your live workspace." : "Items that need attention today."}
+            </p>
           </div>
-          <ul className="max-h-[min(60vh,22rem)] overflow-y-auto py-1">
-            {rows.map((r) => (
-              <li key={r.id}>
-                <Link
-                  href={r.href}
-                  className="block px-3 py-2.5 transition hover:bg-surface-body"
-                  onClick={() => setOpen(false)}
-                >
-                  <p className="text-sm font-medium text-text-primary">{r.title}</p>
-                  <p className="mt-0.5 line-clamp-2 text-xs text-text-secondary">{r.subtitle}</p>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {rows.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm text-text-secondary">You&apos;re all caught up.</p>
+          ) : (
+            <ul className="max-h-[min(60vh,22rem)] overflow-y-auto py-1">
+              {rows.map((r) => (
+                <li key={r.id}>
+                  <Link
+                    href={r.href}
+                    className="block px-3 py-2.5 transition hover:bg-surface-body"
+                    onClick={() => {
+                      const memberRow = memberEvents.find((e) => e.id === r.id);
+                      if (memberRow && live) {
+                        void fetch("/api/workspace/member-events", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ event_ids: [memberRow.eventId] }),
+                        });
+                        setMemberEvents((prev) => prev.filter((e) => e.id !== r.id));
+                      }
+                      setOpen(false);
+                    }}
+                  >
+                    <p className="text-sm font-medium text-text-primary">{r.title}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-text-secondary">{r.subtitle}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="border-t border-border-light px-2 py-2">
-            <Link
-              href="/messages"
-              className="block rounded-lg px-2 py-2 text-center text-xs font-semibold text-accent hover:bg-violet-50"
-              onClick={() => setOpen(false)}
+            <button
+              type="button"
+              className="block w-full rounded-lg px-2 py-2 text-center text-xs font-semibold text-accent hover:bg-violet-50"
+              onClick={() => {
+                setOpen(false);
+                dispatchOpenOnProAi();
+              }}
             >
-              Open Messages
-            </Link>
+              Open OnPro Ai
+            </button>
           </div>
         </div>
       ) : null}

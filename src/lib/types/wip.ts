@@ -203,13 +203,46 @@ export type JobStatusLabel = "In progress" | "Upcoming" | "Completed";
 
 export type JobScopeKind = "original" | "addon";
 
+/** Production order — operator-prefixed number (e.g. MAT260602), holds PO and due date. */
+export type ProjectOrder = {
+  id: string;
+  project_id: number;
+  /** Operator company code + YY + MM + seq, e.g. MAT260602 */
+  order_number: string;
+  due_date: string | null;
+  po_number?: string | null;
+  client_po_number?: string | null;
+  /** Other order ids linked from this order (cross-order / invoice refs). */
+  linked_order_ids?: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type JobCustomField = {
+  key: string;
+  value: string;
+};
+
 export type ProjectJob = {
   id: string;
   project_id: number;
+  /** Parent production order. */
+  order_id?: string;
   /** Human-readable job identifier per project, e.g. "GG-26-001". Auto-assigned. */
   job_number?: string;
+  /** Style name (UI label; stored in `name`). */
   name: string;
   subtitle: string;
+  /** Short description for overview line items. */
+  description?: string;
+  /** Size breakdown summary for order cards / overview. */
+  size_breakdown?: string;
+  /** Unit or line price summary. */
+  price?: string | null;
+  /** Company + category + style identifier — unique per workspace. */
+  sku?: string | null;
+  /** Optional industry-specific fields. */
+  custom_fields?: JobCustomField[];
   type: string;
   job_type?: JobType;
   lead_vendor: string;

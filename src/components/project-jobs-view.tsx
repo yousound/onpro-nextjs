@@ -7,18 +7,33 @@ import type { Project, ProjectStatus } from "@/lib/types/project";
 import type {
   JobDetailsFocus,
   ProjectJob,
-  JobScopeKind,
+  ProjectOrder,
 } from "@/lib/types/wip";
 import { dateInputToIso, formatShortDate, isoToDateInput } from "@/lib/format";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { upsertLiveProject } from "@/lib/data/live-cache";
+import { updateProjectInDb } from "@/lib/data/persist-project";
+import { splitProjectPatch, readLocalProjectOverlay } from "@/lib/supabase/mappers/project";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
-import { createNewJobSeed } from "@/lib/project-job-create";
+import { resolveClientProjectList } from "@/lib/mock/project-session";
 import {
   loadProjectJobs,
   saveProjectJobs,
 } from "@/lib/project-wip-edits";
+import {
+  ensureDefaultOrders,
+  loadProjectOrders,
+  saveProjectOrders,
+} from "@/lib/project-order-edits";
+import { ProjectOrdersSection } from "@/components/project-orders-section";
+import { useCurrentUser } from "@/components/profile-provider";
+import { resolveOperatorCompanyCode } from "@/lib/operator-company-code";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
+import type { UserProfile } from "@/lib/types/profile";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { clientCodeByName } from "@/lib/reference/client-codes";
 import { normalizeJob } from "@/lib/job-defaults";
+import { createNewJobSeed } from "@/lib/project-job-create";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { parseProjectModuleTab, PROJECT_MODULE_TABS } from "@/lib/project-modules";
 import { ContentHeader } from "@/components/content-header";
@@ -27,8 +42,13 @@ import {
   ProjectDetailsClientCard,
   ProjectModuleRouter,
 } from "@/components/project-module-panels";
-import { WipProgressSummary } from "@/components/wip-timeline";
+import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
 import { JobDetailsModal } from "@/components/job-details-modal";
+import { EditProjectModal } from "@/components/edit-project-modal";
+import { parseInspectJob } from "@/lib/job-inspect";
+import { commitDeleteProject } from "@/lib/data/delete-project";
+import { countExtraDocumentsForProject } from "@/lib/documents/delete-documents";
+import { dispatchProjectDeleted } from "@/lib/onpro-events";
 
 const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "IN DEVELOPMENT",
@@ -38,16 +58,7 @@ const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "DELIVERED",
 ];
 
-const fieldClass =
-  "mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
-
-const labelClass = "block text-xs font-medium text-text-secondary";
-
-type EditModal =
-  | { kind: "project" }
-  | { kind: "job"; jobId: string }
-  | { kind: "job-new" }
-  | null;
+type EditModal = { kind: "project" } | { kind: "job"; jobId: string } | null;
 
 function statusBadgeClass(status: ProjectStatus): string {
   switch (status) {
@@ -63,136 +74,22 @@ function statusBadgeClass(status: ProjectStatus): string {
   }
 }
 
-function jobStatusClass(status: ProjectJob["status"]): string {
-  if (status === "In progress") return "bg-violet-100 text-violet-800";
-  if (status === "Completed") return "bg-emerald-100 text-emerald-800";
-  return "bg-slate-100 text-slate-600";
-}
-
-function ModalShell({
-  title,
-  description,
-  titleId,
-  onClose,
-  children,
+export function ProjectJobsView({
+  project,
+  initialJobs,
 }: {
-  title: string;
-  description?: string;
-  titleId: string;
-  onClose: () => void;
-  children: ReactNode;
+  project: Project;
+  initialJobs?: ProjectJob[];
 }) {
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 sm:items-center"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-card shadow-xl sm:max-w-xl"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-border-light px-5 py-4">
-          <h2 id={titleId} className="text-lg font-semibold text-text-primary">
-            {title}
-          </h2>
-          {description ? <p className="mt-1 text-xs text-text-secondary">{description}</p> : null}
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-const JOB_COL_COUNT = 11;
-
-type JobScopeFilter = "all" | JobScopeKind;
-
-function effectiveJobScope(job: ProjectJob): JobScopeKind {
-  return job.scope_kind ?? "original";
-}
-
-function JobScopeBadge({ kind }: { kind: JobScopeKind }) {
-  if (kind === "original") return null;
-  return (
-    <span className="inline-flex shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950 ring-1 ring-amber-400/55">
-      Add-on
-    </span>
-  );
-}
-
-function JobTableRow({
-  job,
-  onOpenDetails,
-}: {
-  job: ProjectJob;
-  onOpenDetails: (jobId: string) => void;
-}) {
-  return (
-    <tr
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpenDetails(job.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpenDetails(job.id);
-        }
-      }}
-      className="cursor-pointer border-b border-l-4 border-l-transparent border-border-light bg-white transition hover:bg-slate-50/80"
-    >
-      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs font-bold text-accent">
-        {job.job_number ?? "—"}
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-text-primary">{job.name}</span>
-          <JobScopeBadge kind={effectiveJobScope(job)} />
-        </div>
-        <p className="mt-0.5 text-xs text-text-secondary">{job.subtitle}</p>
-        {effectiveJobScope(job) === "addon" && job.scope_note ? (
-          <p className="mt-1 line-clamp-2 text-[11px] text-amber-900/85">{job.scope_note}</p>
-        ) : null}
-      </td>
-      <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{job.type}</td>
-      <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{job.lead_vendor}</td>
-      <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{job.category}</td>
-      <td className="hidden px-4 py-3 text-text-secondary xl:table-cell">{job.style_number}</td>
-      <td className="hidden whitespace-nowrap px-4 py-3 text-xs font-medium text-text-secondary lg:table-cell">
-        {(job.client_po_number?.trim() || job.po_number) ?? "—"}
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        <span
-          className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${jobStatusClass(job.status)}`}
-        >
-          {job.status}
-        </span>
-      </td>
-      <td className="w-28 max-w-[7rem] px-4 py-3">
-        <WipProgressSummary steps={job.timeline} />
-      </td>
-      <td className="hidden whitespace-nowrap px-4 py-3 text-text-secondary sm:table-cell">
-        {formatShortDate(job.due_date)}
-      </td>
-      <td className="hidden whitespace-nowrap px-4 py-3 text-text-secondary md:table-cell">
-        {formatShortDate(job.updated_at)}
-      </td>
-    </tr>
-  );
-}
-
-export function ProjectJobsView({ project }: { project: Project }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
 
   const [projectPatch, setProjectPatch] = useState<Partial<Project>>({});
   const [jobs, setJobs] = useState<ProjectJob[]>([]);
+  const [orders, setOrders] = useState<ProjectOrder[]>([]);
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const { user: currentUser } = useCurrentUser();
   const [hydrated, setHydrated] = useState(false);
   const [editModal, setEditModal] = useState<EditModal>(null);
   const [activeModule, setActiveModule] = useState<ProjectModuleId>("details");
@@ -207,13 +104,23 @@ export function ProjectJobsView({ project }: { project: Project }) {
     status_update: "",
   });
   const [jobDetailsFocus, setJobDetailsFocus] = useState<JobDetailsFocus | null>(null);
-  const [newJobSeed, setNewJobSeed] = useState<ProjectJob | null>(null);
-  const [jobScopeFilter, setJobScopeFilter] = useState<JobScopeFilter>("all");
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [deletingJob, setDeletingJob] = useState(false);
 
   useEffect(() => {
     const mod = searchParams.get("module");
     setActiveModule(parseProjectModuleTab(mod));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const parsed = parseInspectJob(searchParams.get("inspectJob"));
+    if (!parsed || parsed.projectId !== project.id) return;
+    const job = jobs.find((j) => j.id === parsed.jobId);
+    if (!job) return;
+    setEditModal({ kind: "job", jobId: job.id });
+    setJobDetailsFocus(null);
+  }, [hydrated, searchParams, project.id, jobs]);
 
   const navigateToModule = useCallback(
     (id: ProjectModuleId) => {
@@ -233,12 +140,56 @@ export function ProjectJobsView({ project }: { project: Project }) {
   useEffect(() => {
     const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
     const patch = saved && typeof saved === "object" ? saved : {};
-    setProjectPatch(patch);
+    setProjectPatch(readLocalProjectOverlay(saved));
     const mergedProject = { ...project, ...patch };
-    const loadedJobs = loadProjectJobs(project.id, mergedProject);
-    setJobs(loadedJobs);
+
+    if (isClientLiveBackend()) {
+      let loaded = loadProjectJobs(project.id, mergedProject);
+      if (loaded.length === 0 && (initialJobs?.length ?? 0) > 0) {
+        saveProjectJobs(project.id, initialJobs!);
+        loaded = initialJobs!;
+      }
+      setJobs(loaded);
+    } else {
+      setJobs(loadProjectJobs(project.id, mergedProject));
+    }
+    const opCode = resolveOperatorCompanyCode(
+      currentUser
+        ? ({
+            id: currentUser.id,
+            operator_company_code: currentUser.operatorCompanyCode,
+            company_name: currentUser.companyName,
+          } as UserProfile)
+        : null,
+    );
+    setOrders(ensureDefaultOrders(project.id, mergedProject, opCode));
     setHydrated(true);
-  }, [project, project.id]);
+  }, [project, project.id, initialJobs, currentUser]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    function reloadJobs() {
+      const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
+      const patch = saved && typeof saved === "object" ? saved : {};
+      const mergedProject = { ...project, ...patch };
+      setJobs(loadProjectJobs(project.id, mergedProject));
+    }
+    function reloadOrders() {
+      const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
+      const patch = saved && typeof saved === "object" ? saved : {};
+      const mergedProject = { ...project, ...patch };
+      const opCode = resolveOperatorCompanyCode(null);
+      setOrders(loadProjectOrders(project.id, mergedProject).length > 0
+        ? loadProjectOrders(project.id, mergedProject)
+        : ensureDefaultOrders(project.id, mergedProject, opCode));
+    }
+    window.addEventListener("onpro-jobs-changed", reloadJobs);
+    window.addEventListener("onpro-orders-changed", reloadOrders);
+    return () => {
+      window.removeEventListener("onpro-jobs-changed", reloadJobs);
+      window.removeEventListener("onpro-orders-changed", reloadOrders);
+    };
+  }, [project, project.id, hydrated]);
 
   const merged = useMemo(() => ({ ...project, ...projectPatch }), [project, projectPatch]);
 
@@ -250,10 +201,34 @@ export function ProjectJobsView({ project }: { project: Project }) {
   const vendors = useMemo(() => vendorContacts(loadContacts()), []);
 
   const persistProject = useCallback(
-    (next: Partial<Project>) => {
+    (next: Partial<Project>): void | Promise<void> => {
       const patch = { ...projectPatch, ...next };
       setProjectPatch(patch);
-      writeMockLs(MOCK_LS.project(project.id), patch);
+
+      if (!isClientLiveBackend()) {
+        writeMockLs(MOCK_LS.project(project.id), patch);
+        return;
+      }
+
+      const { db, local } = splitProjectPatch(next);
+      if (Object.keys(local).length > 0) {
+        const prevLocal = readMockLs<Partial<Project>>(MOCK_LS.project(project.id)) ?? {};
+        writeMockLs(MOCK_LS.project(project.id), { ...prevLocal, ...local });
+      }
+
+      if (Object.keys(db).length === 0) return;
+
+      return updateProjectInDb(project.id, db)
+        .then((saved) => {
+          upsertLiveProject({
+            ...saved,
+            ...readLocalProjectOverlay(readMockLs(MOCK_LS.project(project.id))),
+          });
+        })
+        .catch((err) => {
+          console.error("[project] update failed", err);
+          throw err;
+        });
     },
     [project.id, projectPatch],
   );
@@ -268,6 +243,32 @@ export function ProjectJobsView({ project }: { project: Project }) {
     },
     [project.id],
   );
+
+  const persistOrders = useCallback(
+    (next: ProjectOrder[]) => {
+      setOrders(next);
+      saveProjectOrders(project.id, next);
+    },
+    [project.id],
+  );
+
+  const operatorCode = useMemo(
+    () =>
+      resolveOperatorCompanyCode(
+        currentUser
+          ? ({
+              operator_company_code: currentUser.operatorCompanyCode,
+              company_name: currentUser.companyName,
+            } as import("@/lib/types/profile").UserProfile)
+          : null,
+      ),
+    [currentUser],
+  );
+
+  const allProjectsForOrders = useMemo(() => {
+    const live = getLiveCachedProjects();
+    return live.length > 0 ? live : resolveClientProjectList([merged]);
+  }, [merged]);
 
   useEffect(() => {
     if (editModal?.kind !== "project") return;
@@ -287,34 +288,43 @@ export function ProjectJobsView({ project }: { project: Project }) {
     setJobDetailsFocus(null);
   }
 
-  function openNewJob() {
-    setNewJobSeed(createNewJobSeed(project, jobs));
-    setEditModal({ kind: "job-new" });
-    setJobDetailsFocus(null);
-  }
-
   function closeModal() {
     setEditModal(null);
-    setNewJobSeed(null);
     setJobDetailsFocus(null);
+    setPendingOrderId(null);
   }
 
   function handleSaveJob(saved: ProjectJob) {
-    if (editModal?.kind === "job-new") {
-      persistJobs((prev) => [...prev, saved]);
-    } else {
-      persistJobs((prev) => prev.map((j) => (j.id === saved.id ? saved : j)));
-    }
+    persistJobs((prev) => {
+      const exists = prev.some((j) => j.id === saved.id);
+      if (exists) return prev.map((j) => (j.id === saved.id ? saved : j));
+      return [...prev, saved];
+    });
     closeModal();
+  }
+
+  function handleDeleteJob() {
+    if (editModal?.kind !== "job" || editModal.jobId === "__new__") return;
+    const job = jobs.find((j) => j.id === editModal.jobId);
+    if (!job) return;
+    const label = job.name.trim() || "this job";
+    if (!window.confirm(`Delete "${label}"? This cannot be undone.`)) return;
+    setDeletingJob(true);
+    try {
+      persistJobs((prev) => prev.filter((j) => j.id !== job.id));
+      closeModal();
+    } finally {
+      setDeletingJob(false);
+    }
   }
 
   function openProjectEdit() {
     setEditModal({ kind: "project" });
   }
 
-  function saveProjectModal(e: FormEvent) {
+  async function saveProjectModal(e: FormEvent) {
     e.preventDefault();
-    persistProject({
+    const modalPatch = {
       name: draftProject.name.trim() || merged.name,
       status: draftProject.status,
       project_number: draftProject.project_number.trim() || null,
@@ -322,22 +332,50 @@ export function ProjectJobsView({ project }: { project: Project }) {
       due_date: dateInputToIso(draftProject.due_date),
       status_overview: draftProject.status_overview.trim() || null,
       status_update_date: dateInputToIso(draftProject.status_update),
-    });
-    closeModal();
+    };
+    try {
+      await persistProject(modalPatch);
+      if (isClientLiveBackend()) router.refresh();
+      closeModal();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Could not save project");
+    }
   }
 
-  const filteredJobs = useMemo(() => {
-    if (jobScopeFilter === "all") return jobs;
-    return jobs.filter((j) => effectiveJobScope(j) === jobScopeFilter);
-  }, [jobs, jobScopeFilter]);
+  async function handleDeleteProject() {
+    const label = merged.name.trim() || "this project";
+    const docCount = countExtraDocumentsForProject(project.id);
+    const docLine =
+      docCount > 0
+        ? ` This also removes ${docCount} file${docCount === 1 ? "" : "s"} (including images) from Documents.`
+        : "";
+    if (
+      !window.confirm(
+        `Delete "${label}"? This removes the project and all its jobs.${docLine} Contacts in People are not removed — delete those manually if needed. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingProject(true);
+    try {
+      await commitDeleteProject(project.id);
+      dispatchProjectDeleted(project.id);
+      if (isClientLiveBackend()) await router.refresh();
+      router.push("/projects");
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Could not delete project");
+      setDeletingProject(false);
+    }
+  }
 
   const modalJob = useMemo(() => {
-    if (editModal?.kind === "job-new") return newJobSeed;
-    if (editModal?.kind === "job") {
-      return jobs.find((j) => j.id === editModal.jobId) ?? null;
+    if (editModal?.kind !== "job") return null;
+    if (editModal.jobId === "__new__") {
+      const orderId = pendingOrderId ?? orders[0]?.id;
+      return createNewJobSeed(merged, jobs, undefined, orderId);
     }
-    return null;
-  }, [editModal, jobs, newJobSeed]);
+    return jobs.find((j) => j.id === editModal.jobId) ?? null;
+  }, [editModal, jobs, merged, orders, pendingOrderId]);
 
   if (!hydrated) {
     return (
@@ -358,103 +396,21 @@ export function ProjectJobsView({ project }: { project: Project }) {
     );
   }
 
-  const jobsTableSection = (
+  const ordersSection = (
     <section className="pb-4 pt-2">
-      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-bold uppercase tracking-wide text-text-primary">
-            Jobs ({filteredJobs.length}
-            {jobScopeFilter !== "all" ? (
-              <span className="font-normal normal-case text-text-secondary">
-                {" "}
-                · {jobs.length} total
-              </span>
-            ) : null}
-            )
-          </h2>
-          <p className="text-xs text-text-secondary">
-            Tap a row to open Job Details. Scope filters separate original deliverables from add-ons.
-          </p>
-        </div>
-        <div
-          className="flex flex-wrap items-center gap-1.5"
-          role="group"
-          aria-label="Filter jobs by scope"
-        >
-          {(
-            [
-              { id: "all" as const, label: "All" },
-              { id: "original" as const, label: "Original" },
-              { id: "addon" as const, label: "Add-ons" },
-            ] satisfies { id: JobScopeFilter; label: string }[]
-          ).map((opt) => {
-            const on = jobScopeFilter === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setJobScopeFilter(opt.id)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
-                  on
-                    ? "bg-accent text-white shadow-sm"
-                    : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
-                }`}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="overflow-hidden rounded-2xl border border-border-light bg-white shadow-sm">
-        <div className="overflow-x-auto bg-white">
-          <table className="min-w-full bg-white text-left text-sm">
-            <thead className="sticky top-0 z-10 border-b border-border-light bg-white text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-              <tr>
-                <th className="whitespace-nowrap px-4 py-3">Job #</th>
-                <th className="px-4 py-3">Job</th>
-                <th className="hidden px-4 py-3 md:table-cell">Type</th>
-                <th className="hidden px-4 py-3 lg:table-cell">Lead vendor</th>
-                <th className="hidden px-4 py-3 lg:table-cell">Category</th>
-                <th className="hidden px-4 py-3 xl:table-cell">Style #</th>
-                <th className="hidden px-4 py-3 lg:table-cell">PO #</th>
-                <th className="whitespace-nowrap px-4 py-3">Status</th>
-                <th className="w-28 max-w-[7rem] px-4 py-3">Progress</th>
-                <th className="hidden px-4 py-3 sm:table-cell">Due date</th>
-                <th className="hidden px-4 py-3 md:table-cell">Updated</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white">
-              {jobs.length === 0 ? (
-                <tr>
-                  <td colSpan={JOB_COL_COUNT} className="px-4 py-12 text-center text-text-secondary">
-                    No jobs yet for this project (mock).
-                  </td>
-                </tr>
-              ) : filteredJobs.length === 0 ? (
-                <tr>
-                  <td colSpan={JOB_COL_COUNT} className="px-4 py-12 text-center text-text-secondary">
-                    No jobs match this scope filter.
-                  </td>
-                </tr>
-              ) : (
-                filteredJobs.map((job) => (
-                  <JobTableRow key={job.id} job={job} onOpenDetails={openJobEdit} />
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="shrink-0 border-t border-border-light bg-white py-3 text-center">
-          <button
-            type="button"
-            onClick={openNewJob}
-            className="text-sm font-semibold text-accent hover:underline"
-          >
-            + New job
-          </button>
-        </div>
-      </div>
+      <ProjectOrdersSection
+        project={merged}
+        orders={orders}
+        jobs={jobs}
+        operatorCode={operatorCode}
+        allProjects={allProjectsForOrders}
+        onOrdersChange={persistOrders}
+        onOpenJob={openJobEdit}
+        onAddJobToOrder={(orderId) => {
+          setPendingOrderId(orderId);
+          setEditModal({ kind: "job", jobId: "__new__" });
+        }}
+      />
     </section>
   );
 
@@ -531,7 +487,7 @@ export function ProjectJobsView({ project }: { project: Project }) {
           {activeModule === "details" ? (
             <div className="space-y-5">
               <ProjectDetailsClientCard project={merged} />
-              {jobsTableSection}
+              {ordersSection}
             </div>
           ) : null}
 
@@ -541,108 +497,30 @@ export function ProjectJobsView({ project }: { project: Project }) {
             </div>
           ) : null}
 
+          {activeModule === "documents" ? (
+            <div className="-mx-4 min-h-[24rem] sm:-mx-6">
+              <ProjectDocumentsPanel project={merged} />
+            </div>
+          ) : null}
+
           <ProjectModuleRouter moduleId={activeModule} project={merged} onPatchProject={persistProject} />
         </div>
         </div>
       </div>
 
       {editModal?.kind === "project" ? (
-        <ModalShell
-          titleId="edit-project-title"
-          title="Edit project"
-          description={`Saved in this browser — ${MOCK_LS.project(project.id)}`}
+        <EditProjectModal
+          open
+          clientName={merged.client.name}
+          poNumber={merged.po_number ?? null}
+          draft={draftProject}
+          onDraftChange={(patch) => setDraftProject((d) => ({ ...d, ...patch }))}
+          statusOptions={PROJECT_STATUS_OPTIONS}
           onClose={closeModal}
-        >
-          <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveProjectModal}>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              <label className={labelClass}>
-                Name
-                <input
-                  className={fieldClass}
-                  value={draftProject.name}
-                  onChange={(e) => setDraftProject((d) => ({ ...d, name: e.target.value }))}
-                />
-              </label>
-              <label className={labelClass}>
-                Status
-                <select
-                  className={fieldClass}
-                  value={draftProject.status}
-                  onChange={(e) =>
-                    setDraftProject((d) => ({ ...d, status: e.target.value as ProjectStatus }))
-                  }
-                >
-                  {PROJECT_STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className={labelClass}>
-                Project #
-                <input
-                  className={fieldClass}
-                  value={draftProject.project_number}
-                  onChange={(e) => setDraftProject((d) => ({ ...d, project_number: e.target.value }))}
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  Hand off
-                  <input
-                    type="date"
-                    className={fieldClass}
-                    value={draftProject.hand_off}
-                    onChange={(e) => setDraftProject((d) => ({ ...d, hand_off: e.target.value }))}
-                  />
-                </label>
-                <label className={labelClass}>
-                  Due date
-                  <input
-                    type="date"
-                    className={fieldClass}
-                    value={draftProject.due_date}
-                    onChange={(e) => setDraftProject((d) => ({ ...d, due_date: e.target.value }))}
-                  />
-                </label>
-                <label className={labelClass}>
-                  Status update
-                  <input
-                    type="date"
-                    className={fieldClass}
-                    value={draftProject.status_update}
-                    onChange={(e) => setDraftProject((d) => ({ ...d, status_update: e.target.value }))}
-                  />
-                </label>
-              </div>
-              <label className={labelClass}>
-                Status overview
-                <textarea
-                  className={fieldClass}
-                  rows={3}
-                  value={draftProject.status_overview}
-                  onChange={(e) => setDraftProject((d) => ({ ...d, status_overview: e.target.value }))}
-                />
-              </label>
-            </div>
-            <div className="flex shrink-0 justify-end gap-2 border-t border-border-light px-5 py-4">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-text-secondary hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-              >
-                Save
-              </button>
-            </div>
-          </form>
-        </ModalShell>
+          onSubmit={saveProjectModal}
+          onDelete={() => void handleDeleteProject()}
+          deleting={deletingProject}
+        />
       ) : null}
 
       {modalJob ? (
@@ -650,12 +528,16 @@ export function ProjectJobsView({ project }: { project: Project }) {
           project={merged}
           job={normalizeJob(modalJob, merged)}
           allJobs={jobs}
+          orders={orders}
           clientCode={clientCode}
+          operatorCode={operatorCode}
           vendors={vendors}
           focus={jobDetailsFocus ?? undefined}
-          isNew={editModal?.kind === "job-new"}
+          isNew={editModal?.kind === "job" && editModal.jobId === "__new__"}
           onClose={closeModal}
           onSave={handleSaveJob}
+          onDelete={handleDeleteJob}
+          deleting={deletingJob}
         />
       ) : null}
     </div>

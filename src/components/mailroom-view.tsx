@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { PageHeader } from "@/components/page-header";
 import type {
   AgentChatMessage,
   AgentSuggestion,
@@ -13,11 +15,55 @@ import type {
   GeneratedItem,
   GeneratedItemKind,
   MailroomState,
+  MailroomRfqIntake,
+  MailroomWorkflow,
+  MailroomWorkflowStep,
 } from "@/lib/types/agent";
 import {
   MOCK_EMAIL_THREADS,
   suggestionsForThread,
+  workflowForThread,
 } from "@/lib/mock/email-threads";
+import {
+  buildStepExecContext,
+  buildWorkflowSuccessSummary,
+  countPendingWorkflowSteps,
+  formatPayloadValue,
+  patchWorkflowStep,
+  normalizeWorkflowForWorkspace,
+  resolveWorkflowProjectId,
+  workflowMissingProjectMessage,
+  workflowProjectAlreadyCreated,
+  workflowStepNeedsProject,
+  workflowToSuggestions,
+  type WorkflowSuccessSummary,
+} from "@/lib/mailroom/workflow-utils";
+import {
+  enrichSuggestionPayloadForThread,
+  lastAppliedJobId,
+} from "@/lib/mailroom/enrich-suggestion-payload";
+import {
+  buildMailroomThreadWorkspaceContext,
+  mailroomWorkspaceContextForPrompt,
+} from "@/lib/mailroom/thread-workspace-context";
+import {
+  appendKeyToFieldOrder,
+  ensurePayloadFieldOrder,
+  isPayloadFieldKey,
+  movePayloadField,
+  orderedPayloadEntries,
+  payloadWithFieldOrder,
+  removeKeyFromFieldOrder,
+  stripPayloadFieldOrder,
+} from "@/lib/mailroom/payload-field-order";
+import {
+  MailroomWorkflowPlanModal,
+  MailroomWorkflowSuccessModal,
+} from "@/components/mailroom-workflow-plan";
+import { MAILROOM_Z_DOC_PREVIEW } from "@/lib/mailroom/modal-layers";
+import { MailroomRfqReviewModal } from "@/components/mailroom-rfq-intake-card";
+import { isRfqIntakeConfirmed, mailroomNeedsRfqConfirm } from "@/lib/mailroom/rfq-intake";
+import { isClientMockBackend } from "@/lib/config/backend-mode";
 import {
   addCustomSuggestion,
   addGeneratedItem,
@@ -28,11 +74,53 @@ import {
   loadMailroomState,
   markThreadSummarized,
   removeGeneratedItem,
+  removePromotedThreadFromMailroom,
+  canRemoveThreadFromMailroom,
+  isSuggestionRemoved,
+  removeSuggestion,
+  clearMailroomFreshSummarizeFlag,
+  clearThreadMailroomAiResults,
+  resetThreadSummarizeArtifacts,
   resolveSuggestionStatus,
+  confirmRfqIntake,
+  saveMailroomWorkflow,
+  saveRfqIntakeDraft,
+  setRfqPlanPanelOpen,
+  setWorkflowPlanPanelOpen,
+  saveThreadSummary,
   setSuggestionStatus,
   setThreadStatus,
+  linkWorkflowToExistingProject,
+  unlinkWorkflowFromExistingProject,
+  updateMailroomWorkflow,
 } from "@/lib/mailroom-state";
-import { applySuggestion, generatedItemFromSuggestion, generatedKindFromSuggestion } from "@/lib/agent-apply";
+import { generatedItemFromSuggestion, generatedKindFromSuggestion } from "@/lib/agent-apply";
+import {
+  dispatchWorkspaceDataChanged,
+  executeAgentSuggestionClient,
+} from "@/lib/execute-agent-suggestion-client";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
+import { resolveClientProjectList } from "@/lib/mock/project-session";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import {
+  applySuggestionViaApi,
+  disconnectGmailViaApi,
+  fetchGmailStatusViaApi,
+  fetchMailroomThreadsViaApi,
+  mailroomApiEnabled,
+  sendMailroomChatViaApi,
+  invalidateMailroomSummarizeCache,
+  summarizeThreadViaApi,
+  type MailroomChatResponse,
+} from "@/lib/data/mailroom-api";
+import { detectMailroomChatIntent } from "@/lib/mailroom/chat-intent";
+import { MailroomConnectHero } from "@/components/mailroom-connect-hero";
+import { shouldShowSectionCover } from "@/lib/section-cover";
+import { useStripSectionCoverWhenPopulated } from "@/lib/section-cover-hooks";
+import { ToastViewport } from "@/components/toast-viewport";
+import { emailBodyPreview, normalizeEmailBody } from "@/lib/email-body";
+import { importMailroomImagesToDocuments } from "@/lib/documents/import-mailroom-images";
+import { getDocuments } from "@/lib/mock/documents";
 
 const CATEGORY_DOT: Record<NonNullable<EmailThread["category"]>, string> = {
   vendor_quote: "bg-violet-500",
@@ -62,6 +150,29 @@ const GENERATED_SECTIONS: ReadonlyArray<{ kind: GeneratedItemKind; label: string
   { kind: "packing_list", label: "Packing lists" },
   { kind: "task", label: "Tasks" },
 ];
+
+function MailroomShell({
+  children,
+  onInfoClick,
+  infoLabel,
+}: {
+  children: ReactNode;
+  onInfoClick?: () => void;
+  infoLabel?: string;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+      <div className="shrink-0">
+        <PageHeader
+          title="Mailroom"
+          onInfoClick={onInfoClick}
+          infoLabel={infoLabel}
+        />
+      </div>
+      {children}
+    </div>
+  );
+}
 
 const SECTION_BADGE: Record<GeneratedItemKind, string> = {
   project: "bg-emerald-100 text-emerald-800",
@@ -104,24 +215,6 @@ function summarize(thread: EmailThread): string {
   return flat.length > 220 ? `${flat.slice(0, 220)}…` : flat;
 }
 
-function detectEntities(thread: EmailThread): string[] {
-  const text = thread.messages.map((m) => m.body).join("\n");
-  const found = new Set<string>();
-  for (const match of text.matchAll(/\$([0-9]+(?:\.[0-9]+)?)(?:\/ea)?/g)) {
-    found.add(`Price $${match[1]}`);
-  }
-  for (const match of text.matchAll(/\b([A-Z]{2,4}-?\d{2,5}(?:-?\d{2,5})?)\b/g)) {
-    found.add(`Ref ${match[1]}`);
-  }
-  for (const match of text.matchAll(/\b(\d{2,3})\s*ea\b/gi)) {
-    found.add(`Qty ${match[1]}`);
-  }
-  if (/tracking|DHL|FedEx|UPS/i.test(text)) found.add("Tracking");
-  if (/PO\s*[#:]?\s*[A-Z0-9-]+/i.test(text)) found.add("PO");
-  if (/sample/i.test(text)) found.add("Sample milestone");
-  return [...found].slice(0, 8);
-}
-
 function nowIso() {
   return new Date().toISOString();
 }
@@ -145,58 +238,68 @@ function makeUserChat(thread_id: string, text: string): AgentChatMessage {
   return { id: makeId("chat"), thread_id, role: "user", text, at: nowIso() };
 }
 
-function detectChatIntent(text: string): {
-  kind: AgentSuggestionKind | null;
-  reply: string;
-  applyAll?: boolean;
-} {
-  const t = text.toLowerCase();
-  if (/(^|\W)(go ahead|apply|do it|generate (?:them|all)|yes|sounds good)(\W|$)/.test(t)) {
-    return { kind: null, reply: "On it — applying the pending suggestions on the right.", applyAll: true };
-  }
-  if (/project/.test(t)) return { kind: "create_project", reply: "I'll draft a project for this thread. See the right panel." };
-  if (/estimate/.test(t)) return { kind: "generate_estimate", reply: "Drafting an estimate based on the latest costing." };
-  if (/invoice/.test(t)) return { kind: "create_invoice", reply: "Queueing an invoice draft." };
-  if (/\bjob\b/.test(t)) return { kind: "create_job", reply: "I'll add a job draft to the project." };
-  if (/quote|cost(?:ing)?/.test(t)) return { kind: "add_vendor_quote", reply: "Got it — I'll capture the vendor quote." };
-  if (/p(?:urchase)? ?o(?:rder)?|client po/.test(t)) return { kind: "update_client_po", reply: "I'll set the client PO on the relevant job." };
-  if (/sample|strike[- ]off/.test(t)) return { kind: "update_sample_milestone", reply: "I'll mark the sample milestone for you." };
-  if (/packing/.test(t)) return { kind: "log_packing_list", reply: "I'll adjust the packing list variant." };
-  if (/task|todo|remind/.test(t)) return { kind: "team_note", reply: "Adding a task for the team." };
-  return { kind: null, reply: "Got it. Want me to apply the pending suggestions on the right?" };
-}
-
-function suggestionForKind(thread: EmailThread, kind: AgentSuggestionKind): AgentSuggestion {
-  const baseTitle = {
+function suggestionForKind(
+  thread: EmailThread,
+  kind: AgentSuggestionKind,
+  overrides?: { title?: string; payload?: Record<string, unknown> },
+): AgentSuggestion {
+  const titles: Record<AgentSuggestionKind, string> = {
     create_project: `Create project from "${thread.subject}"`,
+    create_order: "Create production order for this project",
     create_job: "Add a job draft to this project",
     add_vendor_quote: `Capture vendor quote from ${thread.related?.vendor ?? "vendor"}`,
     add_costing_line: "Add a costing line",
     generate_estimate: "Generate an estimate",
     create_invoice: "Draft an invoice",
+    update_project: "Update project name or details",
     update_client_po: "Set client PO from this thread",
     update_sample_milestone: "Update a sample milestone",
     log_packing_list: "Update the packing list variant",
     team_note: "Add a task for the team",
-  }[kind];
+  };
   return {
     id: makeId("sug"),
     thread_id: thread.id,
     kind,
-    title: baseTitle,
-    payload: thread.related ?? {},
+    title: overrides?.title ?? titles[kind],
+    payload: { ...(thread.related ?? {}), ...(overrides?.payload ?? {}) },
     status: "pending",
     created_at: nowIso(),
   };
 }
 
+function suggestionFromChatProposal(
+  thread: EmailThread,
+  proposal: NonNullable<MailroomChatResponse["propose_suggestion"]>,
+  workflow?: MailroomWorkflow,
+): AgentSuggestion {
+  const payload = enrichSuggestionPayloadForThread(proposal.kind, proposal.payload ?? {}, {
+    workflow,
+    threadSubject: thread.subject,
+  });
+  return suggestionForKind(thread, proposal.kind, {
+    title: proposal.title,
+    payload,
+  });
+}
+
 export function MailroomView() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedThreadId = searchParams.get("thread");
+  const showCoverPage = searchParams.get("cover") === "1";
+  const isMock = isClientMockBackend();
+  const isLiveMailroom = mailroomApiEnabled();
   const [state, setState] = useState<MailroomState | null>(null);
-  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(
-    requestedThreadId ?? MOCK_EMAIL_THREADS[0]?.id ?? null,
-  );
+  const [gmailThreads, setGmailThreads] = useState<EmailThread[]>([]);
+  const [gmailStatus, setGmailStatus] = useState({
+    loading: isLiveMailroom,
+    connected: false,
+    email: null as string | null,
+    oauthConfigured: false,
+    message: undefined as string | undefined,
+  });
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(requestedThreadId);
   const [toast, setToast] = useState<string | null>(null);
   const [viewItem, setViewItem] = useState<GeneratedItem | null>(null);
   const [showAllThreads, setShowAllThreads] = useState(false);
@@ -204,6 +307,15 @@ export function MailroomView() {
   const [attachPickerOpen, setAttachPickerOpen] = useState(false);
   const [pane, setPane] = useState<"chat" | "emails">("chat");
   const [previewSuggestion, setPreviewSuggestion] = useState<AgentSuggestion | null>(null);
+  const [previewWorkflowStep, setPreviewWorkflowStep] = useState<MailroomWorkflowStep | null>(null);
+  /** When true, preview opened from Quick generate — emphasize Generate & attach. */
+  const [previewAttachMode, setPreviewAttachMode] = useState(false);
+  const [chatReplying, setChatReplying] = useState(false);
+  /** Workflow step id being applied, or "all" for run-all. Blocks duplicate clicks. */
+  const [workflowApplying, setWorkflowApplying] = useState<string | null>(null);
+  /** Polished follow-up after all workflow steps finish. */
+  const [workflowSuccess, setWorkflowSuccess] = useState<WorkflowSuccessSummary | null>(null);
+  const prevWorkflowPendingRef = useRef<Record<string, number>>({});
 
   function attachmentFromItem(i: GeneratedItem): EmailAttachment {
     return {
@@ -249,25 +361,92 @@ export function MailroomView() {
   useEffect(() => {
     const loaded = loadMailroomState();
     setState(loaded);
-    // If we landed here via ?thread=… and the thread is a promoted one, select it once state hydrates.
     if (requestedThreadId) {
       const knownIds = new Set([
-        ...MOCK_EMAIL_THREADS.map((t) => t.id),
+        ...(isMock ? MOCK_EMAIL_THREADS.map((t) => t.id) : []),
         ...loaded.promoted_threads.map((t) => t.id),
       ]);
       if (knownIds.has(requestedThreadId)) setSelectedThreadId(requestedThreadId);
+    } else if (isMock && MOCK_EMAIL_THREADS[0]) {
+      setSelectedThreadId(MOCK_EMAIL_THREADS[0].id);
     }
-  }, [requestedThreadId]);
+  }, [requestedThreadId, isMock]);
+
+  useEffect(() => {
+    const syncMailroom = () => setState(loadMailroomState());
+    window.addEventListener("onpro-mailroom-state-changed", syncMailroom);
+    window.addEventListener("onpro-projects-changed", syncMailroom);
+    return () => {
+      window.removeEventListener("onpro-mailroom-state-changed", syncMailroom);
+      window.removeEventListener("onpro-projects-changed", syncMailroom);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isLiveMailroom) {
+      setGmailStatus((s) => ({ ...s, loading: false }));
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await fetchGmailStatusViaApi();
+        if (cancelled) return;
+        setGmailStatus({
+          loading: false,
+          connected: status.connected,
+          email: status.email,
+          oauthConfigured: status.oauthConfigured ?? true,
+          message: status.message,
+        });
+        if (status.connected) {
+          const data = await fetchMailroomThreadsViaApi();
+          if (!cancelled) {
+            setGmailThreads(data.threads);
+            if (!selectedThreadId && data.threads[0]) {
+              setSelectedThreadId(data.threads[0].id);
+            }
+          }
+        } else {
+          setGmailThreads([]);
+        }
+      } catch (e) {
+        console.warn("[mailroom] Gmail status load failed", e);
+        if (!cancelled) {
+          setGmailStatus({
+            loading: false,
+            connected: false,
+            email: null,
+            oauthConfigured: false,
+            message: "Sign in and connect Gmail to load your inbox.",
+          });
+          setGmailThreads([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLiveMailroom]);
+
+  useEffect(() => {
+    const flag = searchParams.get("gmail");
+    if (flag === "connected") setToast("Gmail connected — loading your inbox.");
+    if (flag === "denied") setToast("Gmail connection was cancelled.");
+    if (flag === "not_configured") setToast("Gmail OAuth is not configured on the server.");
+    if (flag === "error") setToast("Gmail connection failed — try again.");
+  }, [searchParams]);
 
   const threads = useMemo(() => {
-    const seed = state ? state.promoted_threads : [];
-    const merged = [...seed, ...MOCK_EMAIL_THREADS];
+    const promoted = state ? state.promoted_threads : [];
+    const inbox = isMock ? MOCK_EMAIL_THREADS : gmailThreads;
+    const merged = [...promoted, ...inbox];
     if (!state) return merged;
     return merged.map((t) => ({
       ...t,
       status: state.thread_status[t.id] ?? t.status,
     }));
-  }, [state]);
+  }, [state, isMock, gmailThreads]);
 
   const selectedThread = useMemo(
     () => threads.find((t) => t.id === selectedThreadId) ?? threads[0] ?? null,
@@ -276,9 +455,11 @@ export function MailroomView() {
 
   const allSuggestionsForThread = useMemo<AgentSuggestion[]>(() => {
     if (!selectedThread) return [];
-    const seeded = suggestionsForThread(selectedThread);
+    const seeded = isMock ? suggestionsForThread(selectedThread) : [];
     const custom = state?.custom_suggestions?.filter((s) => s.thread_id === selectedThread.id) ?? [];
-    const merged = [...seeded, ...custom];
+    const merged = [...seeded, ...custom].filter(
+      (s) => !state || !isSuggestionRemoved(state, s.id),
+    );
     if (!state) return merged;
     return merged.map((s) => ({
       ...s,
@@ -297,10 +478,11 @@ export function MailroomView() {
     for (const t of threads) {
       if (!state.summarized_threads?.[t.id]) continue;
       const all = [
-        ...suggestionsForThread(t),
+        ...(isMock ? suggestionsForThread(t) : []),
         ...(state.custom_suggestions?.filter((s) => s.thread_id === t.id) ?? []),
       ];
       for (const s of all) {
+        if (isSuggestionRemoved(state, s.id)) continue;
         if (
           resolveSuggestionStatus(s, state.suggestion_status, state.generated_items) === "pending"
         ) {
@@ -311,57 +493,258 @@ export function MailroomView() {
     return n;
   }, [threads, state]);
 
+  const workflowProjects = useMemo(
+    () =>
+      resolveClientProjectList(getLiveCachedProjects()).map((p) => ({
+        id: p.id,
+        name: p.name,
+        client: p.client.name,
+      })),
+    [state, selectedThread?.id],
+  );
+  const existingProjectIds = useMemo(
+    () => new Set(workflowProjects.map((p) => p.id)),
+    [workflowProjects],
+  );
+
+  const mailroomImportToastRef = useRef(false);
+  useEffect(() => {
+    if (!state || workflowProjects.length === 0) return;
+    let cancelled = false;
+    void importMailroomImagesToDocuments({
+      threads,
+      workflows: state.workflows ?? {},
+      generatedItems: state.generated_items,
+      projectNames: workflowProjects.map((p) => ({ id: p.id, name: p.name })),
+      seedDocuments: isClientLiveBackend() ? [] : getDocuments(),
+    }).then((result) => {
+      if (cancelled || !result.quotaExceeded) return;
+      if (mailroomImportToastRef.current) return;
+      mailroomImportToastRef.current = true;
+      setToast(
+        "Document storage is full — mailroom images were not saved. Open Documents, remove old files, or clear site data, then reload Mailroom.",
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [threads, state, workflowProjects]);
+
+  const selectedWorkflow = useMemo(
+    () => (selectedThread && state ? state.workflows[selectedThread.id] : undefined),
+    [selectedThread, state],
+  );
+
   const summarized = selectedThread
     ? Boolean(state?.summarized_threads?.[selectedThread.id])
     : false;
 
-  function handleSummarize() {
-    if (!selectedThread) return;
-    const seeded = suggestionsForThread(selectedThread);
-    const intro = `Here's what I'm seeing in this thread: ${summarize(selectedThread)}${
-      seeded.length > 0
-        ? ` I have ${seeded.length} suggested action${seeded.length === 1 ? "" : "s"} ready — review them in chat, or tell me what to do.`
-        : " Tell me what you'd like to do."
-    }`;
-    markThreadSummarized(selectedThread.id);
+  const [summarizing, setSummarizing] = useState(false);
+
+  function persistWorkflowFromSummarize(workflow: MailroomWorkflow): MailroomWorkflow {
+    if (!selectedThread) return workflow;
+    const normalized = normalizeWorkflowForWorkspace(workflow, existingProjectIds, {
+      threadSubject: selectedThread.subject,
+      summary: state?.thread_summaries?.[selectedThread.id],
+    });
+    setState(saveMailroomWorkflow(normalized));
+    return normalized;
+  }
+
+  async function handleSummarize() {
+    if (!selectedThread || summarizing) return;
+    setSummarizing(true);
+
+    const needsFresh = Boolean(state?.mailroom_fresh_summarize?.[selectedThread.id]);
+    const isRegenerate =
+      Boolean(state?.summarized_threads?.[selectedThread.id]) || needsFresh;
+    if (isRegenerate) {
+      setState(resetThreadSummarizeArtifacts(selectedThread.id));
+    }
+
+    let intro: string;
+    let summaryText = "";
+    let suggestionIds: string[] = [];
+    let workflow: MailroomWorkflow | null = null;
+    const seeded = isMock ? suggestionsForThread(selectedThread) : [];
+    const seededWorkflow = isMock ? workflowForThread(selectedThread) : null;
+
+    try {
+      const data = await summarizeThreadViaApi(selectedThread, { forceRegenerate: isRegenerate });
+      workflow = data.workflow ?? seededWorkflow;
+      summaryText = normalizeEmailBody(data.summary);
+      const list =
+        data.suggestions.length > 0
+          ? data.suggestions
+          : workflow
+            ? workflowToSuggestions(workflow)
+            : seeded;
+      suggestionIds = workflow ? [] : list.map((s) => s.id);
+
+      if (data.source === "openai" || data.source === "live") {
+        intro = summaryText;
+        if (workflow) {
+          intro += ` I built a ${workflow.steps.length}-step workflow — review the plan above and approve each step.`;
+        } else if (list.length > 0) {
+          intro += ` I have ${list.length} suggested action${list.length === 1 ? "" : "s"} ready — review them in chat, or tell me what to do.`;
+        } else {
+          intro += " Tell me what you'd like to do.";
+        }
+        markThreadSummarized(selectedThread.id);
+        saveThreadSummary(selectedThread.id, summaryText);
+        if (workflow) {
+          workflow = persistWorkflowFromSummarize(workflow);
+        }
+        for (const s of data.suggestions.length > 0 ? data.suggestions : list) {
+          addCustomSuggestion(s);
+        }
+      } else {
+        intro = `Here's what I'm seeing in this thread: ${summaryText}${
+          workflow
+            ? ` I built a ${workflow.steps.length}-step workflow — review the plan above and approve each step.`
+            : list.length > 0
+              ? ` I have ${list.length} suggested action${list.length === 1 ? "" : "s"} ready — review them in chat, or tell me what to do.`
+              : " Tell me what you'd like to do."
+        }`;
+        markThreadSummarized(selectedThread.id);
+        saveThreadSummary(selectedThread.id, summaryText);
+        if (workflow) {
+          workflow = persistWorkflowFromSummarize(workflow);
+        }
+        for (const s of list) {
+          addCustomSuggestion(s);
+        }
+      }
+      setState(clearMailroomFreshSummarizeFlag(selectedThread.id));
+    } catch (e) {
+      console.warn("[mailroom] summarize API failed", e);
+      if (isLiveMailroom) {
+        intro =
+          "I couldn't summarize this thread right now. Check OpenAI billing or try again in a moment.";
+        suggestionIds = [];
+      } else {
+        workflow = seededWorkflow;
+        const list = workflow ? workflowToSuggestions(workflow) : seeded;
+        suggestionIds = workflow ? [] : list.map((s) => s.id);
+        summaryText = summarize(selectedThread);
+        intro = `Here's what I'm seeing in this thread: ${summaryText}${
+          workflow
+            ? ` I built a ${workflow.steps.length}-step workflow — review the plan above and approve each step.`
+            : list.length > 0
+              ? ` I have ${list.length} suggested action${list.length === 1 ? "" : "s"} ready — review them in chat, or tell me what to do.`
+              : " Tell me what you'd like to do."
+        }`;
+        markThreadSummarized(selectedThread.id);
+        saveThreadSummary(selectedThread.id, summaryText);
+        if (workflow) {
+          workflow = persistWorkflowFromSummarize(workflow);
+          for (const s of list) addCustomSuggestion(s);
+        }
+        setState(clearMailroomFreshSummarizeFlag(selectedThread.id));
+      }
+    }
+
     const msg = makeAgentChat(
       selectedThread.id,
-      intro,
-      seeded.map((s) => s.id),
+      isRegenerate ? `**Regenerated summary.** ${intro}` : intro,
+      suggestionIds,
     );
     setState(appendChat(msg));
+    setSummarizing(false);
   }
 
-  if (!state) {
+  useEffect(() => {
+    if (!state || !selectedThread || !selectedWorkflow || workflowApplying) return;
+    const threadId = selectedThread.id;
+    const pending = countPendingWorkflowSteps(selectedWorkflow);
+    const prev = prevWorkflowPendingRef.current[threadId];
+    prevWorkflowPendingRef.current[threadId] = pending;
+    if (prev !== undefined && prev > 0 && pending === 0) {
+      const summary = buildWorkflowSuccessSummary(selectedWorkflow, workflowProjects);
+      if (summary) {
+        setWorkflowSuccess(summary);
+        setState(setWorkflowPlanPanelOpen(selectedThread.id, false));
+      }
+    }
+  }, [state, selectedThread, selectedWorkflow, workflowApplying, workflowProjects]);
+
+  useEffect(() => {
+    setWorkflowSuccess(null);
+  }, [selectedThread?.id]);
+
+  const inboxConnectedForCover = state
+    ? isMock
+      ? state.oauth_connected
+      : gmailStatus.connected
+    : false;
+  const mailroomContentCount = inboxConnectedForCover ? threads.length : 0;
+  useStripSectionCoverWhenPopulated("/mailroom", searchParams, mailroomContentCount);
+
+  if (!state || (isLiveMailroom && gmailStatus.loading)) {
     return (
-      <div className="flex flex-1 items-center justify-center text-text-secondary">
-        Loading mailroom…
-      </div>
+      <MailroomShell>
+        <div className="flex flex-1 items-center justify-center text-text-secondary">
+          Loading mailroom…
+        </div>
+      </MailroomShell>
     );
   }
 
-  if (!state.oauth_connected) {
+  const inboxConnected = isMock ? state.oauth_connected : gmailStatus.connected;
+  const connectedEmail = isMock ? state.connected_email : gmailStatus.email;
+  function mailroomHref(opts: { cover?: boolean }) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (opts.cover) params.set("cover", "1");
+    else params.delete("cover");
+    const q = params.toString();
+    return q ? `/mailroom?${q}` : "/mailroom";
+  }
+  const openCoverPage = () => router.push(mailroomHref({ cover: true }));
+  const openInbox = () => router.push(mailroomHref({ cover: false }));
+  const showHero = inboxConnected
+    ? false
+    : shouldShowSectionCover(showCoverPage, threads.length);
+
+  async function handleDisconnectInbox() {
+    if (isMock) {
+      setState(disconnectMockGmail());
+      setGmailThreads([]);
+      return;
+    }
+    try {
+      await disconnectGmailViaApi();
+      setGmailThreads([]);
+      setGmailStatus({
+        loading: false,
+        connected: false,
+        email: null,
+        oauthConfigured: gmailStatus.oauthConfigured,
+        message: undefined,
+      });
+      setSelectedThreadId(state?.promoted_threads[0]?.id ?? null);
+      setToast("Gmail disconnected.");
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Disconnect failed");
+    }
+  }
+
+  if (showHero) {
     return (
-      <div className="mx-auto flex max-w-xl flex-1 flex-col items-center justify-center gap-4 p-10 text-center">
-        <p className="rounded-full bg-violet-100 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-accent">
-          Beta · Front-end mock
-        </p>
-        <h2 className="text-2xl font-bold text-text-primary">Connect your inbox</h2>
-        <p className="text-sm text-text-secondary">
-          The mailroom agent reads vendor quotes, client POs, sample updates, and shipping
-          notifications, then drafts OnPro entries for you to review.
-        </p>
-        <button
-          type="button"
-          onClick={() => setState(connectMockGmail("ric@connectdots.la"))}
-          className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90"
-        >
-          Connect Gmail (mock)
-        </button>
-        <p className="text-[11px] text-text-secondary">
-          No real OAuth in this mock — we&apos;ll persist a fake session locally.
-        </p>
-      </div>
+      <MailroomShell onInfoClick={openCoverPage} infoLabel="About Mailroom">
+        <MailroomConnectHero
+          mode={isMock ? "mock" : "live"}
+          oauthConfigured={gmailStatus.oauthConfigured}
+          statusMessage={
+            isMock
+              ? "Demo threads are stored locally. Switch to Live for real Gmail."
+              : (gmailStatus.message ?? "Sign in with Supabase, then authorize Gmail read access.")
+          }
+          onConnectMock={() => setState(connectMockGmail("ric@connectdots.la"))}
+          connected={inboxConnected}
+          connectedEmail={connectedEmail}
+          onOpenInbox={inboxConnected ? openInbox : undefined}
+        />
+      </MailroomShell>
     );
   }
 
@@ -372,31 +755,369 @@ export function MailroomView() {
     }
   }
 
-  function applyOneWith(
+  function handleRemovePromotedThread(t: EmailThread) {
+    if (!state || !canRemoveThreadFromMailroom(t, state)) return;
+    const label = t.subject.trim() || "this conversation";
+    if (
+      !window.confirm(
+        `Remove "${label}" from Mailroom? Gmail threads stay in your inbox; you can promote this chat again from Messages.`,
+      )
+    ) {
+      return;
+    }
+    const next = removePromotedThreadFromMailroom(t.id);
+    setState(next);
+    const remaining = [
+      ...next.promoted_threads,
+      ...(isMock ? MOCK_EMAIL_THREADS : gmailThreads),
+    ];
+    setSelectedThreadId((cur) => {
+      if (cur !== t.id) return cur;
+      return remaining[0]?.id ?? null;
+    });
+    setPreviewSuggestion(null);
+    setViewItem(null);
+    setPendingAttachments([]);
+    setToast("Removed from Mailroom.");
+  }
+
+  async function applyOneWith(
     s: AgentSuggestion,
     override?: { title?: string; payload?: Record<string, unknown> },
-  ): GeneratedItem | null {
+    workflowStep?: MailroomWorkflowStep,
+  ): Promise<GeneratedItem | null> {
+    const workflow = selectedThread ? state?.workflows[selectedThread.id] : undefined;
+    const linkedProjectIdEarly =
+      workflow?.link_existing_project_id ??
+      (workflow ? resolveWorkflowProjectId(workflow) : undefined);
+    const mergedPayload = enrichSuggestionPayloadForThread(
+      s.kind,
+      stripPayloadFieldOrder(override?.payload ?? s.payload),
+      {
+        workflow,
+        threadSubject: selectedThread?.subject,
+        fallbackProjectId: linkedProjectIdEarly,
+        fallbackJobId: workflow ? lastAppliedJobId(workflow) : undefined,
+      },
+    );
     const effective: AgentSuggestion = {
       ...s,
       title: override?.title ?? s.title,
-      payload: override?.payload ?? s.payload,
+      payload: mergedPayload,
     };
-    const result = applySuggestion(effective);
+
+    let stepContext = workflow && workflowStep
+      ? buildStepExecContext(workflow, workflowStep.step_id)
+      : undefined;
+    const linkedProjectId = linkedProjectIdEarly;
+    if (linkedProjectId != null) {
+      stepContext = {
+        ...stepContext,
+        project_id: linkedProjectId,
+        job_id: stepContext?.job_id,
+      };
+    }
+
+    const execContext = {
+      threadRelated: {
+        ...selectedThread?.related,
+        project_id: linkedProjectId ?? selectedThread?.related?.project_id,
+        job_id: stepContext?.job_id ?? selectedThread?.related?.job_id,
+      },
+      threadSubject: selectedThread?.subject,
+      projects: resolveClientProjectList(getLiveCachedProjects()),
+      workflowStepContext: stepContext,
+    };
+
+    const result = await executeAgentSuggestionClient(effective, execContext);
     if (!result.ok) {
       setToast(result.message);
       return null;
     }
+
+    if (mailroomApiEnabled()) {
+      try {
+        await applySuggestionViaApi(effective, {
+          context: {
+            project_id: stepContext?.project_id ?? selectedThread?.related?.project_id,
+            job_id: stepContext?.job_id ?? selectedThread?.related?.job_id,
+          },
+          title: effective.title,
+          payload: effective.payload,
+        });
+      } catch (e) {
+        console.warn("[mailroom] API apply log failed (workspace updated locally)", e);
+      }
+    }
+
     let next = setSuggestionStatus(s.id, "applied");
     const item = generatedItemFromSuggestion(effective, result);
     next = addGeneratedItem(item);
-    const ack = makeAgentChat(
-      s.thread_id,
-      `Created **${labelForKind(item.kind)}** — “${item.title}”. Open it on the right.`,
+    const appliedVerb =
+      s.kind.startsWith("update_") || s.kind === "log_packing_list" ? "Updated" : "Created";
+    next = appendChat(
+      makeAgentChat(
+        s.thread_id,
+        `${appliedVerb} **${labelForKind(item.kind)}** — “${item.title}”. ${result.message}`,
+      ),
     );
-    next = appendChat(ack);
+
+    if (workflow && workflowStep) {
+      next = updateMailroomWorkflow(selectedThread!.id, (wf) =>
+        patchWorkflowStep(wf, workflowStep.step_id, {
+          status: "applied",
+          applied_project_id: result.projectId ?? stepContext?.project_id,
+          applied_job_id: result.jobId ?? stepContext?.job_id,
+        }),
+      );
+    }
+
     setState(next);
+    dispatchWorkspaceDataChanged();
+    if (isClientLiveBackend()) router.refresh();
     setToast(result.message);
     return item;
+  }
+
+  function suggestionFromWorkflowStep(step: MailroomWorkflowStep): AgentSuggestion {
+    return {
+      id: step.suggestion_id,
+      thread_id: selectedThread!.id,
+      kind: step.kind,
+      title: step.title,
+      payload: {
+        ...step.payload,
+        ...(step.auto_contact ? { auto_contact: step.auto_contact } : {}),
+      },
+      status: "pending",
+      created_at: state?.workflows[selectedThread!.id]?.created_at ?? nowIso(),
+    };
+  }
+
+  async function executeWorkflowStep(
+    step: MailroomWorkflowStep,
+    override?: { title?: string; payload?: Record<string, unknown> },
+  ) {
+    if (!selectedThread) return;
+    const workflow =
+      loadMailroomState().workflows[selectedThread.id] ??
+      state?.workflows[selectedThread.id];
+    if (!workflow) return;
+    const liveStep = workflow.steps.find((s) => s.step_id === step.step_id) ?? step;
+    if (liveStep.status !== "pending") return;
+
+    const intake = state?.rfq_intake?.[selectedThread.id];
+    if (mailroomNeedsRfqConfirm(summarized, workflow, intake)) {
+      setState(setRfqPlanPanelOpen(selectedThread.id, true));
+      setToast("Open Review and Run Plan to confirm RFQ details.");
+      return;
+    }
+
+    if (
+      liveStep.kind === "create_project" &&
+      workflowProjectAlreadyCreated(workflow, existingProjectIds)
+    ) {
+      setToast("A project was already created for this workflow.");
+      return;
+    }
+
+    const missingProject = workflowMissingProjectMessage(workflow, existingProjectIds);
+    if (workflowStepNeedsProject(liveStep.kind) && missingProject) {
+      setToast(missingProject);
+      return;
+    }
+
+    if (
+      liveStep.kind === "create_project" &&
+      workflow.link_existing_project_id != null
+    ) {
+      let next = updateMailroomWorkflow(selectedThread.id, (wf) =>
+        patchWorkflowStep(wf, liveStep.step_id, {
+          status: "applied",
+          applied_project_id: workflow.link_existing_project_id ?? undefined,
+        }),
+      );
+      next = setSuggestionStatus(liveStep.suggestion_id, "applied");
+      next = appendChat(
+        makeAgentChat(
+          selectedThread.id,
+          `Linked existing project (step skipped). Continue with the next step.`,
+        ),
+      );
+      setState(next);
+      setToast("Using existing project for this workflow.");
+      return;
+    }
+
+    await applyOneWith(suggestionFromWorkflowStep(liveStep), override, liveStep);
+  }
+
+  async function applyWorkflowStep(
+    step: MailroomWorkflowStep,
+    override?: { title?: string; payload?: Record<string, unknown> },
+  ) {
+    if (workflowApplying) {
+      setToast("Still working on the previous step — please wait.");
+      return;
+    }
+    setWorkflowApplying(step.step_id);
+    try {
+      await executeWorkflowStep(step, override);
+    } finally {
+      setWorkflowApplying(null);
+    }
+  }
+
+  async function skipWorkflowStep(step: MailroomWorkflowStep) {
+    if (!selectedThread) return;
+    let next = updateMailroomWorkflow(selectedThread.id, (wf) =>
+      patchWorkflowStep(wf, step.step_id, { status: "skipped" }),
+    );
+    next = appendChat(
+      makeAgentChat(selectedThread.id, `Skipped step: “${step.title}”.`),
+    );
+    setState(next);
+  }
+
+  function handleSaveRfqIntakeDraft(draft: MailroomRfqIntake) {
+    if (!selectedThread) return;
+    setState(saveRfqIntakeDraft(selectedThread.id, draft));
+  }
+
+  function handleConfirmRfqIntake(draft: MailroomRfqIntake) {
+    if (!selectedThread) return;
+    const wasConfirmed = isRfqIntakeConfirmed(state?.rfq_intake?.[selectedThread.id]);
+    let next = confirmRfqIntake(selectedThread.id, draft, nowIso());
+    if (!draft.create_order) {
+      next = updateMailroomWorkflow(selectedThread.id, (wf) => ({
+        ...wf,
+        steps: wf.steps.map((s) =>
+          s.kind === "create_order" && s.status === "pending"
+            ? { ...s, status: "skipped" as const }
+            : s,
+        ),
+      }));
+    }
+    setState(next);
+    setState(
+      appendChat(
+        makeAgentChat(
+          selectedThread.id,
+          `Confirmed RFQ for **${draft.client_name.trim()}**${draft.client_po_tbd ? "" : ` (PO ${draft.client_po.trim()})`}. Workflow steps are ready to run.`,
+        ),
+      ),
+    );
+    setState(setRfqPlanPanelOpen(selectedThread.id, false));
+    setState(setWorkflowPlanPanelOpen(selectedThread.id, true));
+    setToast(
+      wasConfirmed
+        ? "RFQ details updated."
+        : "RFQ details confirmed — workflow plan is ready.",
+    );
+  }
+
+  /** Open RFQ fields on top of the workflow plan (keeps confirmation + plan visible underneath). */
+  function handleEditRfqIntake() {
+    if (!selectedThread) return;
+    setState(setRfqPlanPanelOpen(selectedThread.id, true));
+  }
+
+  function handleOpenRfqPlanPanel() {
+    if (!selectedThread) return;
+    setState(setRfqPlanPanelOpen(selectedThread.id, true));
+  }
+
+  function handleDismissRfqPlanPanel() {
+    if (!selectedThread) return;
+    setState(setRfqPlanPanelOpen(selectedThread.id, false));
+  }
+
+  function handleOpenWorkflowPlanPanel() {
+    if (!selectedThread) return;
+    setState(setWorkflowPlanPanelOpen(selectedThread.id, true));
+  }
+
+  function openWorkflowSuccessModal(summary: WorkflowSuccessSummary) {
+    if (!selectedThread) return;
+    setWorkflowSuccess(summary);
+    setState(setWorkflowPlanPanelOpen(selectedThread.id, false));
+  }
+
+  function handleDismissWorkflowPlanPanel() {
+    if (!selectedThread) return;
+    setState(setWorkflowPlanPanelOpen(selectedThread.id, false));
+  }
+
+  function handleFinishWorkflow() {
+    if (!selectedThread || workflowApplying) return;
+    const wf = state?.workflows[selectedThread.id];
+    if (!wf) {
+      handleDismissWorkflowPlanPanel();
+      return;
+    }
+    const summary = buildWorkflowSuccessSummary(wf, workflowProjects);
+    if (summary) openWorkflowSuccessModal(summary);
+    else handleDismissWorkflowPlanPanel();
+  }
+
+  function handleViewWorkflowProject(projectId: number) {
+    setWorkflowSuccess(null);
+    handleDismissWorkflowPlanPanel();
+    router.push(`/projects/${projectId}`);
+  }
+
+  function handleStayInMailroomAfterSuccess() {
+    setWorkflowSuccess(null);
+  }
+
+  function handleClearThreadAiResults() {
+    if (!selectedThread || workflowApplying) return;
+    const ok = window.confirm(
+      "Clear all AI results for this thread? This removes the workflow plan, right-column drafts, summary, and agent chat. Then use Summarize with AI to rebuild — the new plan will include a Create project step.",
+    );
+    if (!ok) return;
+    void invalidateMailroomSummarizeCache(selectedThread);
+    setState(clearThreadMailroomAiResults(selectedThread.id));
+    setState(setWorkflowPlanPanelOpen(selectedThread.id, false));
+    setState(setRfqPlanPanelOpen(selectedThread.id, false));
+    setPreviewSuggestion(null);
+    setPreviewWorkflowStep(null);
+    setSummarizing(false);
+    setWorkflowSuccess(null);
+    setToast("Cleared. Click Summarize with AI to rebuild the workflow plan.");
+  }
+
+  async function runAllRemainingWorkflowSteps() {
+    if (!selectedThread) return;
+    if (workflowApplying) {
+      setToast("Still working — please wait.");
+      return;
+    }
+    const workflow = state?.workflows[selectedThread.id];
+    if (!workflow) return;
+    const intake = state?.rfq_intake?.[selectedThread.id];
+    if (mailroomNeedsRfqConfirm(summarized, workflow, intake)) {
+      setState(setRfqPlanPanelOpen(selectedThread.id, true));
+      setToast("Open Review and Run Plan to confirm RFQ details.");
+      return;
+    }
+    setWorkflowApplying("all");
+    try {
+      for (const step of workflow.steps) {
+        if (step.status !== "pending") continue;
+        await executeWorkflowStep(step);
+        const updated = loadMailroomState().workflows[selectedThread.id];
+        const last = updated?.steps.find((s) => s.step_id === step.step_id);
+        if (last?.status !== "applied") break;
+      }
+      const finalWorkflow = loadMailroomState().workflows[selectedThread.id];
+      if (finalWorkflow) {
+        const summary = buildWorkflowSuccessSummary(finalWorkflow, workflowProjects);
+        if (summary) openWorkflowSuccessModal(summary);
+      }
+    } finally {
+      setWorkflowApplying(null);
+    }
   }
 
   function applyOne(s: AgentSuggestion) {
@@ -404,47 +1125,120 @@ export function MailroomView() {
   }
 
   function dismissOne(s: AgentSuggestion) {
-    setState(setSuggestionStatus(s.id, "dismissed"));
+    setState(removeSuggestion(s.id));
+    setPreviewSuggestion((cur) => (cur?.id === s.id ? null : cur));
   }
 
-  function handleSendMessage(text: string) {
-    if (!selectedThread) return;
+  async function applyAllPendingSuggestions(threadId: string) {
+    const toApply = pendingSuggestions;
+    if (toApply.length === 0) {
+      setState(appendChat(makeAgentChat(threadId, "Nothing pending right now.")));
+      return;
+    }
+    let applied = 0;
+    for (const s of toApply) {
+      const item = await applyOneWith(s);
+      if (item) applied++;
+    }
+    setState(
+      appendChat(
+        makeAgentChat(
+          threadId,
+          applied > 0
+            ? `Applied ${applied} suggestion${applied === 1 ? "" : "s"}. They're on the right.`
+            : "Nothing could be applied — check that a project and jobs exist where needed.",
+        ),
+      ),
+    );
+  }
+
+  function postAgentChatTurn(
+    thread: EmailThread,
+    reply: string,
+    proposal: MailroomChatResponse["propose_suggestion"],
+  ) {
+    if (proposal) {
+      const wf = state?.workflows[thread.id];
+      const newSug = suggestionFromChatProposal(thread, proposal, wf);
+      addCustomSuggestion(newSug);
+      const confirmHint =
+        " Review the **suggestion card** on the right and tap **Generate**, or say **go ahead** to apply.";
+      setState(appendChat(makeAgentChat(thread.id, `${reply}${confirmHint}`, [newSug.id])));
+      return;
+    }
+    setState(appendChat(makeAgentChat(thread.id, reply)));
+  }
+
+  async function handleSendMessage(text: string) {
+    if (!selectedThread || chatReplying) return;
     const trimmed = text.trim();
     if (!trimmed) return;
-    setState(appendChat(makeUserChat(selectedThread.id, trimmed)));
-    const intent = detectChatIntent(trimmed);
 
-    if (intent.applyAll) {
-      // Apply all currently pending suggestions in this thread.
-      const toApply = pendingSuggestions;
-      if (toApply.length === 0) {
-        setState(appendChat(makeAgentChat(selectedThread.id, "Nothing pending right now.")));
+    const threadId = selectedThread.id;
+    setState(appendChat(makeUserChat(threadId, trimmed)));
+
+    const quick = detectMailroomChatIntent(trimmed);
+    if (quick.applyAll) {
+      void applyAllPendingSuggestions(threadId);
+      return;
+    }
+
+    const priorChat = state?.chat[threadId] ?? [];
+    const history = priorChat.map((m) => ({
+      role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+      text: m.text,
+    }));
+
+    setChatReplying(true);
+    try {
+      const wsCtx = buildMailroomThreadWorkspaceContext({
+        workflow: state?.workflows[selectedThread.id],
+        projects: resolveClientProjectList(getLiveCachedProjects()),
+        generatedItems:
+          state?.generated_items.filter((i) => i.thread_id === selectedThread.id) ?? [],
+        pendingSuggestions,
+      });
+      const data = await sendMailroomChatViaApi({
+        thread: selectedThread,
+        message: trimmed,
+        history,
+        pendingSuggestionTitles: pendingSuggestions.map((s) => s.title),
+        scanSummary: state?.thread_summaries?.[selectedThread.id],
+        workspaceContext: mailroomWorkspaceContextForPrompt(wsCtx),
+      });
+
+      if (data.apply_all) {
+        void applyAllPendingSuggestions(threadId);
         return;
       }
-      // Apply sequentially, batching updates by re-reading state.
-      for (const s of toApply) {
-        const result = applySuggestion(s);
-        if (!result.ok) continue;
-        setSuggestionStatus(s.id, "applied");
-        addGeneratedItem(generatedItemFromSuggestion(s, result));
+
+      postAgentChatTurn(selectedThread, data.reply, data.propose_suggestion);
+    } catch (e) {
+      console.warn("[mailroom] chat API failed, using local intent", e);
+      const intent = detectMailroomChatIntent(trimmed);
+      if (intent.applyAll) {
+        void applyAllPendingSuggestions(threadId);
+        return;
       }
-      const next = appendChat(makeAgentChat(
-        selectedThread.id,
-        `Applied ${toApply.length} suggestion${toApply.length === 1 ? "" : "s"}. They're on the right.`,
-      ));
-      setState(next);
-      return;
+      if (intent.kind) {
+        postAgentChatTurn(selectedThread, intent.reply, {
+          kind: intent.kind,
+          title: suggestionForKind(selectedThread, intent.kind).title,
+          payload: enrichSuggestionPayloadForThread(
+            intent.kind,
+            selectedThread.related ?? {},
+            {
+              workflow: state?.workflows[selectedThread.id],
+              threadSubject: selectedThread.subject,
+            },
+          ),
+        });
+        return;
+      }
+      setState(appendChat(makeAgentChat(threadId, intent.reply)));
+    } finally {
+      setChatReplying(false);
     }
-
-    if (intent.kind) {
-      const newSug = suggestionForKind(selectedThread, intent.kind);
-      addCustomSuggestion(newSug);
-      const next = appendChat(makeAgentChat(selectedThread.id, intent.reply, [newSug.id]));
-      setState(next);
-      return;
-    }
-
-    setState(appendChat(makeAgentChat(selectedThread.id, intent.reply)));
   }
 
   const chatMessages = state.chat[selectedThread?.id ?? ""] ?? [];
@@ -453,14 +1247,27 @@ export function MailroomView() {
     : [];
   const generatedToShow = showAllThreads ? state.generated_items : generatedForThread;
   const suggestionById = new Map(allSuggestionsForThread.map((s) => [s.id, s]));
+  const rfqIntakeForThread = selectedThread ? state.rfq_intake?.[selectedThread.id] : undefined;
+  const needsRfqConfirm = mailroomNeedsRfqConfirm(
+    summarized,
+    selectedWorkflow,
+    rfqIntakeForThread,
+  );
+  const rfqPlanPanelOpen = selectedThread
+    ? Boolean(state?.rfq_plan_panel_open?.[selectedThread.id])
+    : false;
+  const workflowPlanPanelOpen = selectedThread
+    ? Boolean(state?.workflow_plan_panel_open?.[selectedThread.id])
+    : false;
 
   return (
+    <MailroomShell onInfoClick={openCoverPage} infoLabel="About Mailroom">
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-light bg-surface-body/40 px-4 py-2">
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary">
             <span className="size-2 animate-pulse rounded-full bg-emerald-500" />
-            Mailroom is listening — {state.connected_email}
+            Mailroom is listening — {connectedEmail}
           </span>
           {pendingTotal > 0 ? (
             <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
@@ -470,7 +1277,7 @@ export function MailroomView() {
         </div>
         <button
           type="button"
-          onClick={() => setState(disconnectMockGmail())}
+          onClick={() => void handleDisconnectInbox()}
           className="text-[11px] font-semibold text-text-secondary hover:text-accent hover:underline"
         >
           Disconnect
@@ -483,24 +1290,93 @@ export function MailroomView() {
           selectedId={selectedThread?.id ?? null}
           onSelect={handleSelectThread}
           suggestionCounts={suggestionCountsByThread(threads, state)}
+          canRemove={(t) => canRemoveThreadFromMailroom(t, state)}
+          onRemove={handleRemovePromotedThread}
         />
         <ConversationPane
+          className="min-h-0"
           thread={selectedThread}
+          canRemoveFromMailroom={
+            selectedThread ? canRemoveThreadFromMailroom(selectedThread, state) : false
+          }
+          onRemoveFromMailroom={() => {
+            if (selectedThread) handleRemovePromotedThread(selectedThread);
+          }}
           chat={chatMessages}
           outbox={selectedThread ? state.outbox[selectedThread.id] ?? [] : []}
           suggestionById={suggestionById}
+          workflow={selectedWorkflow}
+          workflowProjects={workflowProjects}
+          onWorkflowPreview={(step, suggestion, attachMode) => {
+            setPreviewWorkflowStep(step);
+            setPreviewAttachMode(attachMode ?? false);
+            setPreviewSuggestion(suggestion);
+          }}
+          onWorkflowApprove={(step) => void applyWorkflowStep(step)}
+          onWorkflowSkip={(step) => void skipWorkflowStep(step)}
+          onWorkflowRunAll={() => void runAllRemainingWorkflowSteps()}
+          onWorkflowLinkProject={(projectId) => {
+            if (!selectedThread) return;
+            setState((prev) => {
+              if (!prev) return prev;
+              return linkWorkflowToExistingProject(prev, selectedThread.id, projectId);
+            });
+            const name = workflowProjects.find((p) => p.id === projectId)?.name;
+            setToast(
+              name
+                ? `Using existing project “${name}” — create-project step skipped. Run the next steps when ready.`
+                : "Linked to existing project.",
+            );
+          }}
+          onWorkflowCreateNew={() => {
+            if (!selectedThread) return;
+            setState((prev) => {
+              if (!prev) return prev;
+              return unlinkWorkflowFromExistingProject(prev, selectedThread.id);
+            });
+            setToast("Creating a new project from this thread — run the create-project step when ready.");
+          }}
+          rfqIntake={selectedThread ? state.rfq_intake?.[selectedThread.id] : undefined}
+          onSaveRfqIntakeDraft={handleSaveRfqIntakeDraft}
+          onConfirmRfqIntake={handleConfirmRfqIntake}
+          onEditRfqIntake={handleEditRfqIntake}
+          needsRfqConfirm={needsRfqConfirm}
+          rfqPlanPanelOpen={rfqPlanPanelOpen}
+          onOpenRfqPlanPanel={handleOpenRfqPlanPanel}
+          onDismissRfqPlanPanel={handleDismissRfqPlanPanel}
+          workflowPlanPanelOpen={workflowPlanPanelOpen}
+          onOpenWorkflowPlanPanel={handleOpenWorkflowPlanPanel}
+          onDismissWorkflowPlanPanel={handleDismissWorkflowPlanPanel}
+          onFinishWorkflow={handleFinishWorkflow}
+          onClearThreadAiResults={handleClearThreadAiResults}
+          workflowApplying={workflowApplying}
+          childOverlayOpen={Boolean(previewSuggestion)}
           connectedEmail={state.connected_email ?? "you@onpro.app"}
           pendingAttachments={pendingAttachments}
           onRemoveAttachment={removeAttachment}
           onOpenAttachmentPicker={() => setAttachPickerOpen(true)}
           summarized={summarized}
-          onSummarize={handleSummarize}
+          summaryText={
+            selectedThread ? state.thread_summaries?.[selectedThread.id] : undefined
+          }
+          summarizing={summarizing}
+          onSummarize={() => void handleSummarize()}
           pane={pane}
           onPaneChange={setPane}
-          onPreview={(s) => setPreviewSuggestion(s)}
+          onPreview={(s) => {
+            setPreviewWorkflowStep(null);
+            setPreviewAttachMode(false);
+            setPreviewSuggestion(s);
+          }}
+          onQuickGenerate={(s) => {
+            setPreviewWorkflowStep(null);
+            setPreviewAttachMode(true);
+            setPreviewSuggestion(s);
+          }}
           onApply={applyOne}
           onDismiss={dismissOne}
           onSend={handleSendMessage}
+          chatReplying={chatReplying}
           onReply={(body) => {
             if (!selectedThread) return;
             const fromEmail = state.connected_email ?? "you@onpro.app";
@@ -520,23 +1396,22 @@ export function MailroomView() {
                 : "Reply sent (mock).",
             );
           }}
+          generatedItems={state.generated_items}
+          onOpenGeneratedItem={(i) => setViewItem(i)}
         />
         <GeneratedItemsPanel
-          items={generatedToShow}
-          showAllThreads={showAllThreads}
-          onToggleScope={() => setShowAllThreads((v) => !v)}
-          onOpenItem={(i) => {
-            if (i.deepLink) window.location.assign(i.deepLink);
-            else setViewItem(i);
-          }}
-          onRemove={handleRemoveGeneratedItem}
-          onAttach={selectedThread ? (i) => attachToReply(i, { switchToEmails: true }) : undefined}
-          attachedSourceIds={new Set(pendingAttachments.map((a) => a.source_id))}
-        />
+            items={generatedToShow}
+            showAllThreads={showAllThreads}
+            onToggleScope={() => setShowAllThreads((v) => !v)}
+            onOpenItem={(i) => setViewItem(i)}
+            onRemove={handleRemoveGeneratedItem}
+            onAttach={selectedThread ? (i) => attachToReply(i, { switchToEmails: true }) : undefined}
+            attachedSourceIds={new Set(pendingAttachments.map((a) => a.source_id))}
+          />
       </div>
 
       {toast ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center">
+        <ToastViewport>
           <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-text-primary px-4 py-2 text-xs font-semibold text-white shadow-xl">
             {toast}
             <button
@@ -547,25 +1422,52 @@ export function MailroomView() {
               Dismiss
             </button>
           </div>
-        </div>
+        </ToastViewport>
       ) : null}
 
       {viewItem ? (
         <GeneratedItemDetailModal item={viewItem} onClose={() => setViewItem(null)} />
       ) : null}
 
+      {workflowSuccess ? (
+        <MailroomWorkflowSuccessModal
+          open
+          summary={workflowSuccess}
+          onStayInMailroom={handleStayInMailroomAfterSuccess}
+          onViewProject={() => handleViewWorkflowProject(workflowSuccess.projectId)}
+        />
+      ) : null}
+
       {previewSuggestion ? (
         <DocPreviewModal
           suggestion={previewSuggestion}
-          onClose={() => setPreviewSuggestion(null)}
-          onSave={(title, payload) => {
-            applyOneWith(previewSuggestion, { title, payload });
+          primaryMode={previewAttachMode ? "attach" : "default"}
+          working={Boolean(workflowApplying && previewWorkflowStep)}
+          onClose={() => {
             setPreviewSuggestion(null);
+            setPreviewWorkflowStep(null);
+            setPreviewAttachMode(false);
+          }}
+          onSave={(title, payload) => {
+            const run = previewWorkflowStep
+              ? applyWorkflowStep(previewWorkflowStep, { title, payload })
+              : applyOneWith(previewSuggestion, { title, payload });
+            void run.then(() => {
+              setPreviewSuggestion(null);
+              setPreviewWorkflowStep(null);
+              setPreviewAttachMode(false);
+            });
           }}
           onSaveAndAttach={(title, payload) => {
-            const item = applyOneWith(previewSuggestion, { title, payload });
-            if (item) attachToReply(item, { switchToEmails: true });
-            setPreviewSuggestion(null);
+            const run = previewWorkflowStep
+              ? applyWorkflowStep(previewWorkflowStep, { title, payload })
+              : applyOneWith(previewSuggestion, { title, payload });
+            void run.then((item) => {
+              if (item) attachToReply(item, { switchToEmails: true });
+              setPreviewSuggestion(null);
+              setPreviewWorkflowStep(null);
+              setPreviewAttachMode(false);
+            });
           }}
         />
       ) : null}
@@ -591,6 +1493,7 @@ export function MailroomView() {
         />
       ) : null}
     </div>
+    </MailroomShell>
   );
 }
 
@@ -608,10 +1511,12 @@ function suggestionCountsByThread(
       ...suggestionsForThread(t),
       ...(state.custom_suggestions?.filter((s) => s.thread_id === t.id) ?? []),
     ];
-    const pending = all.filter(
-      (s) =>
-        resolveSuggestionStatus(s, state.suggestion_status, state.generated_items) === "pending",
-    ).length;
+    const pending = all.filter((s) => {
+      if (isSuggestionRemoved(state, s.id)) return false;
+      return (
+        resolveSuggestionStatus(s, state.suggestion_status, state.generated_items) === "pending"
+      );
+    }).length;
     out[t.id] = pending;
   }
   return out;
@@ -622,11 +1527,15 @@ function ThreadList({
   selectedId,
   onSelect,
   suggestionCounts,
+  canRemove,
+  onRemove,
 }: {
   threads: EmailThread[];
   selectedId: string | null;
   onSelect: (t: EmailThread) => void;
   suggestionCounts: Record<string, number>;
+  canRemove?: (t: EmailThread) => boolean;
+  onRemove?: (t: EmailThread) => void;
 }) {
   return (
     <ul className="min-h-0 overflow-y-auto">
@@ -636,12 +1545,15 @@ function ThreadList({
         const active = t.id === selectedId;
         const unread = t.status === "unread";
         const sugCount = suggestionCounts[t.id] ?? 0;
+        const removable = canRemove?.(t) ?? false;
         return (
-          <li key={t.id}>
+          <li key={t.id} className="group relative">
             <button
               type="button"
               onClick={() => onSelect(t)}
               className={`block w-full border-b border-border-light/70 px-3 py-2.5 text-left transition ${
+                removable ? "pr-9" : ""
+              } ${
                 active
                   ? "bg-violet-50 ring-1 ring-inset ring-accent/30"
                   : "hover:bg-slate-50"
@@ -683,7 +1595,7 @@ function ThreadList({
                 <span className="truncate">{t.subject}</span>
               </p>
               <p className="mt-0.5 line-clamp-1 text-[11px] text-text-secondary">
-                {lastMsg ? lastMsg.body.replace(/\*/g, "").replace(/\n/g, " ") : ""}
+                {lastMsg ? emailBodyPreview(lastMsg.body) : ""}
               </p>
               {sugCount > 0 ? (
                 <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
@@ -691,10 +1603,94 @@ function ThreadList({
                 </span>
               ) : null}
             </button>
+            {removable && onRemove ? (
+              <button
+                type="button"
+                title="Remove from Mailroom"
+                aria-label={`Remove ${t.subject} from Mailroom`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(t);
+                }}
+                className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-lg p-1.5 text-text-secondary opacity-0 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+                </svg>
+              </button>
+            ) : null}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+function MailroomThreadSummaryBlock({
+  summaryText,
+  summarized,
+  summarizing,
+  onSummarize,
+}: {
+  summaryText?: string;
+  summarized: boolean;
+  summarizing?: boolean;
+  onSummarize: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-b border-violet-200 bg-violet-50 px-5 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-accent">AI summary</p>
+        <button
+          type="button"
+          onClick={onSummarize}
+          disabled={summarizing}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-accent/30 bg-white px-3 py-1.5 text-[11px] font-semibold text-accent shadow-sm hover:bg-violet-100 disabled:opacity-50"
+        >
+          <span aria-hidden>{summarizing ? "…" : summarized ? "↻" : "✨"}</span>
+          {summarizing
+            ? "Working…"
+            : summarized
+              ? "Regenerate summary"
+              : "Summarize with AI"}
+        </button>
+      </div>
+      <p className="mt-1 text-sm text-text-primary">
+        {summarized
+          ? summaryText?.trim() || "Summary saved — regenerate if new emails arrived."
+          : "Summarize with AI when you want to scan your original email. New mail is never summarized automatically."}
+      </p>
+    </div>
+  );
+}
+
+function MailroomWorkflowReadyBar({
+  border,
+  onOpenRfqPlan,
+  onOpenWorkflowPlan,
+}: {
+  border: "top" | "bottom";
+  onOpenRfqPlan?: () => void;
+  onOpenWorkflowPlan?: () => void;
+}) {
+  const borderClass = border === "top" ? "border-t" : "border-b";
+  const isRfq = Boolean(onOpenRfqPlan);
+
+  return (
+    <div
+      className={`shrink-0 flex flex-wrap items-center justify-between gap-2 ${borderClass} border-violet-200 bg-violet-50/90 px-5 py-2.5`}
+    >
+      <p className="text-[11px] font-medium text-violet-950">
+        {isRfq ? "Workflow is ready when you are." : "Workflow plan is ready — review steps and run tasks."}
+      </p>
+      <button
+        type="button"
+        onClick={isRfq ? onOpenRfqPlan : onOpenWorkflowPlan}
+        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-white hover:opacity-95"
+      >
+        {isRfq ? "Review and Run Plan" : "View workflow plan"}
+      </button>
+    </div>
   );
 }
 
@@ -703,37 +1699,106 @@ function ConversationPane({
   chat,
   outbox,
   suggestionById,
+  workflow,
+  workflowProjects,
+  onWorkflowPreview,
+  onWorkflowApprove,
+  onWorkflowSkip,
+  onWorkflowRunAll,
+  onWorkflowLinkProject,
+  onWorkflowCreateNew,
+  rfqIntake,
+  onSaveRfqIntakeDraft,
+  onConfirmRfqIntake,
+  onEditRfqIntake,
+  needsRfqConfirm,
+  rfqPlanPanelOpen,
+  onOpenRfqPlanPanel,
+  onDismissRfqPlanPanel,
+  workflowPlanPanelOpen,
+  onOpenWorkflowPlanPanel,
+  onDismissWorkflowPlanPanel,
+  onFinishWorkflow,
+  onClearThreadAiResults,
+  workflowApplying = null,
+  childOverlayOpen = false,
   connectedEmail,
   pendingAttachments,
   onRemoveAttachment,
   onOpenAttachmentPicker,
   summarized,
+  summaryText,
+  summarizing,
   onSummarize,
   pane,
   onPaneChange,
   onPreview,
+  onQuickGenerate,
   onApply,
   onDismiss,
   onSend,
+  chatReplying = false,
   onReply,
+  canRemoveFromMailroom,
+  onRemoveFromMailroom,
+  generatedItems,
+  onOpenGeneratedItem,
+  className,
 }: {
   thread: EmailThread | null;
+  className?: string;
   chat: AgentChatMessage[];
   outbox: EmailMessage[];
   suggestionById: Map<string, AgentSuggestion>;
+  workflow?: MailroomWorkflow;
+  workflowProjects: Array<{ id: number; name: string; client: string }>;
+  onWorkflowPreview: (
+    step: MailroomWorkflowStep,
+    suggestion: AgentSuggestion,
+    attachMode?: boolean,
+  ) => void;
+  onWorkflowApprove: (step: MailroomWorkflowStep) => void;
+  onWorkflowSkip: (step: MailroomWorkflowStep) => void;
+  onWorkflowRunAll: () => void;
+  onWorkflowLinkProject: (projectId: number) => void;
+  onWorkflowCreateNew: () => void;
+  rfqIntake?: MailroomRfqIntake;
+  onSaveRfqIntakeDraft: (draft: MailroomRfqIntake) => void;
+  onConfirmRfqIntake: (draft: MailroomRfqIntake) => void;
+  onEditRfqIntake: () => void;
+  needsRfqConfirm: boolean;
+  rfqPlanPanelOpen: boolean;
+  onOpenRfqPlanPanel: () => void;
+  onDismissRfqPlanPanel: () => void;
+  workflowPlanPanelOpen: boolean;
+  onOpenWorkflowPlanPanel: () => void;
+  onDismissWorkflowPlanPanel: () => void;
+  onFinishWorkflow: () => void;
+  onClearThreadAiResults: () => void;
+  workflowApplying?: string | null;
+  /** Doc preview / other stack above workflow plan — suppress workflow Escape & backdrop. */
+  childOverlayOpen?: boolean;
   connectedEmail: string;
   pendingAttachments: EmailAttachment[];
   onRemoveAttachment: (id: string) => void;
   onOpenAttachmentPicker: () => void;
   summarized: boolean;
+  summaryText?: string;
+  summarizing?: boolean;
   onSummarize: () => void;
   pane: "chat" | "emails";
   onPaneChange: (p: "chat" | "emails") => void;
   onPreview: (s: AgentSuggestion) => void;
+  onQuickGenerate: (s: AgentSuggestion) => void;
   onApply: (s: AgentSuggestion) => void;
   onDismiss: (s: AgentSuggestion) => void;
-  onSend: (text: string) => void;
+  onSend: (text: string) => void | Promise<void>;
+  chatReplying?: boolean;
   onReply: (body: string) => void;
+  canRemoveFromMailroom?: boolean;
+  onRemoveFromMailroom?: () => void;
+  generatedItems: GeneratedItem[];
+  onOpenGeneratedItem: (item: GeneratedItem) => void;
 }) {
   const [input, setInput] = useState("");
   const [replyBody, setReplyBody] = useState("");
@@ -758,18 +1823,29 @@ function ConversationPane({
     );
   }
 
-  const entities = detectEntities(thread);
   const fullThreadMessages: Array<EmailMessage & { __outbound?: boolean }> = [
     ...thread.messages.map((m) => ({ ...m })),
     ...outbox.map((m) => ({ ...m, __outbound: true })),
   ].sort((a, b) => new Date(a.at ?? 0).getTime() - new Date(b.at ?? 0).getTime());
   const lastInboundReply = [...thread.messages].reverse().find((m) => m.from.email !== connectedEmail);
   const replyTo = lastInboundReply?.from.email ?? thread.participants[0]?.email ?? "";
+  const showWorkflowPlan = Boolean(
+    summarized && workflow && (!needsRfqConfirm || isRfqIntakeConfirmed(rfqIntake)),
+  );
+  const showWorkflowModal = showWorkflowPlan && workflowPlanPanelOpen && Boolean(workflow);
+  const rfqEditOverWorkflow =
+    rfqPlanPanelOpen && workflowPlanPanelOpen && isRfqIntakeConfirmed(rfqIntake);
+  const showRfqModal =
+    rfqPlanPanelOpen &&
+    Boolean(workflow) &&
+    (needsRfqConfirm || isRfqIntakeConfirmed(rfqIntake));
+  const workflowChildOverlay =
+    childOverlayOpen || rfqEditOverWorkflow || Boolean(workflowApplying);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim()) return;
-    onSend(input);
+    if (!input.trim() || chatReplying) return;
+    void onSend(input);
     setInput("");
   }
 
@@ -782,15 +1858,28 @@ function ConversationPane({
   }
 
   return (
-    <div className="flex min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border-light px-5 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {thread.channel === "in_app" ? (
-            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
-              💬 Promoted from In-app
-            </span>
+    <div
+      className={`grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden ${className ?? ""}`}
+    >
+      <div className="border-b border-border-light px-5 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 flex flex-wrap items-center gap-2">
+            {thread.channel === "in_app" ? (
+              <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">
+                💬 Promoted from In-app
+              </span>
+            ) : null}
+            <h2 className="text-lg font-bold text-text-primary">{thread.subject}</h2>
+          </div>
+          {canRemoveFromMailroom && onRemoveFromMailroom ? (
+            <button
+              type="button"
+              onClick={onRemoveFromMailroom}
+              className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100"
+            >
+              Remove from Mailroom
+            </button>
           ) : null}
-          <h2 className="text-lg font-bold text-text-primary">{thread.subject}</h2>
         </div>
         <p className="mt-1 text-xs text-text-secondary">
           {thread.participants.map((p) => p.name).join(", ")}
@@ -805,47 +1894,10 @@ function ConversationPane({
         ) : null}
       </div>
 
-      {summarized ? (
-        <div className="shrink-0 border-b border-violet-200 bg-violet-50 px-5 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-accent">AI summary</p>
-          <p className="mt-1 text-sm text-text-primary">{summarize(thread)}</p>
-          {entities.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {entities.map((e) => (
-                <span
-                  key={e}
-                  className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-accent ring-1 ring-accent/30"
-                >
-                  {e}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div className="shrink-0 border-b border-border-light bg-surface-body/40 px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Agent · idle</p>
-              <p className="mt-0.5 text-sm text-text-primary">
-                The agent hasn&apos;t read this thread yet. Click <strong>Summarize</strong> to analyze it and surface suggested actions.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onSummarize}
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-90"
-            >
-              <span aria-hidden>✨</span> Summarize this thread
-            </button>
-          </div>
-        </div>
-      )}
-
       <div
         role="tablist"
         aria-label="Conversation view"
-        className="shrink-0 border-b border-border-light bg-white px-5 py-2.5"
+        className="border-b border-border-light bg-white px-5 py-2.5"
       >
         <div className="inline-flex rounded-full bg-slate-100 p-0.5 ring-1 ring-border-light">
           <button
@@ -902,27 +1954,41 @@ function ConversationPane({
         </div>
       </div>
 
+      <div className="min-h-0 overflow-hidden flex flex-col">
       {pane === "chat" ? (
-        <>
-          <div ref={scrollerRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-            {chat.length === 0 ? (
-              <p className="text-xs text-text-secondary">
-                {summarized
-                  ? "Say hi to the agent or ask it to draft something."
-                  : "Tap Summarize above to have the agent read this thread and propose actions — or send the agent a question."}
-              </p>
-            ) : null}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
+            ref={scrollerRef}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 py-4"
+          >
+            <MailroomThreadSummaryBlock
+              summaryText={summaryText}
+              summarized={summarized}
+              summarizing={summarizing}
+              onSummarize={onSummarize}
+            />
             {chat.map((m) => (
               <ChatBubble
                 key={m.id}
                 message={m}
                 suggestionById={suggestionById}
+                hideInlineSuggestions={Boolean(workflow)}
                 onApply={onApply}
+                onQuickGenerate={onQuickGenerate}
                 onDismiss={onDismiss}
                 onPreview={onPreview}
               />
             ))}
+            {chatReplying ? (
+              <p className="text-xs text-text-secondary">Agent is thinking…</p>
+            ) : null}
           </div>
+
+          {needsRfqConfirm && !rfqPlanPanelOpen ? (
+            <MailroomWorkflowReadyBar onOpenRfqPlan={onOpenRfqPlanPanel} border="top" />
+          ) : showWorkflowPlan && !workflowPlanPanelOpen ? (
+            <MailroomWorkflowReadyBar onOpenWorkflowPlan={onOpenWorkflowPlanPanel} border="top" />
+          ) : null}
 
           <form
             onSubmit={handleSubmit}
@@ -932,33 +1998,43 @@ function ConversationPane({
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                disabled={chatReplying}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     handleSubmit(e);
                   }
                 }}
-                placeholder="Tell the agent what to do — e.g. “draft an invoice” or “go ahead”"
+                placeholder="Ask about this thread or ask to draft something — e.g. “any client tasks here?” or “add a task to confirm ship date”"
                 rows={2}
-                className="min-h-0 flex-1 resize-none rounded-lg border border-border-light bg-white px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                className="min-h-0 flex-1 resize-none rounded-lg border border-border-light bg-white px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-60"
               />
               <button
                 type="submit"
-                className="shrink-0 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-white hover:opacity-90"
+                disabled={chatReplying}
+                className="shrink-0 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
               >
-                Send
+                {chatReplying ? "…" : "Send"}
               </button>
             </div>
-            <p className="mt-1 text-[10px] text-text-secondary">
-              Tip: type “go ahead” to apply all pending suggestions, or mention <em>project</em>, <em>estimate</em>, <em>invoice</em>, etc. to surface a new one.
-            </p>
           </form>
-        </>
+        </div>
       ) : (
-        <>
-          <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-surface-body/30 px-5 py-3">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {needsRfqConfirm && !rfqPlanPanelOpen ? (
+            <MailroomWorkflowReadyBar onOpenRfqPlan={onOpenRfqPlanPanel} border="bottom" />
+          ) : showWorkflowPlan && !workflowPlanPanelOpen ? (
+            <MailroomWorkflowReadyBar onOpenWorkflowPlan={onOpenWorkflowPlanPanel} border="bottom" />
+          ) : null}
+          <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain bg-surface-body/30 px-5 py-3">
             {fullThreadMessages.map((m) => (
-              <EmailRow key={m.id} message={m} outbound={Boolean(m.__outbound)} />
+              <EmailRow
+                key={m.id}
+                message={m}
+                outbound={Boolean(m.__outbound)}
+                generatedItems={generatedItems}
+                onOpenGeneratedItem={onOpenGeneratedItem}
+              />
             ))}
           </ul>
 
@@ -1021,15 +2097,71 @@ function ConversationPane({
               </button>
             </div>
           </form>
-        </>
+        </div>
       )}
+      </div>
+
+      {showWorkflowModal ? (
+        <MailroomWorkflowPlanModal
+          open
+          workflow={workflow!}
+          projects={workflowProjects}
+          rfqIntake={rfqIntake}
+          workflowApplying={workflowApplying}
+          workflowLocked={needsRfqConfirm}
+          lockReason="Use Review and Run Plan to unlock workflow steps."
+          childOverlayOpen={workflowChildOverlay}
+          onDismiss={onDismissWorkflowPlanPanel}
+          onFinishWorkflow={onFinishWorkflow}
+          onEditRfqIntake={onEditRfqIntake}
+          onClearAiResults={onClearThreadAiResults}
+          onPreview={onWorkflowPreview}
+          onApproveStep={onWorkflowApprove}
+          onSkipStep={onWorkflowSkip}
+          onRunAllRemaining={onWorkflowRunAll}
+          onLinkExistingProject={onWorkflowLinkProject}
+          onCreateNewProject={onWorkflowCreateNew}
+        />
+      ) : null}
+
+      {showRfqModal ? (
+        <MailroomRfqReviewModal
+          open
+          stackedOverWorkflow={rfqEditOverWorkflow}
+          thread={thread}
+          workflow={workflow!}
+          intake={rfqIntake ?? null}
+          onSaveDraft={onSaveRfqIntakeDraft}
+          onConfirm={onConfirmRfqIntake}
+          onEdit={onEditRfqIntake}
+          onDismissPanel={onDismissRfqPlanPanel}
+        />
+      ) : null}
     </div>
   );
 }
 
-function EmailRow({ message, outbound }: { message: EmailMessage; outbound?: boolean }) {
+function generatedItemForAttachment(
+  items: GeneratedItem[],
+  attachment: EmailAttachment,
+): GeneratedItem | undefined {
+  return items.find((i) => i.id === attachment.source_id);
+}
+
+function EmailRow({
+  message,
+  outbound,
+  generatedItems,
+  onOpenGeneratedItem,
+}: {
+  message: EmailMessage;
+  outbound?: boolean;
+  generatedItems: GeneratedItem[];
+  onOpenGeneratedItem: (item: GeneratedItem) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const preview = message.body.replace(/\*/g, "").replace(/\n/g, " ");
+  const plainBody = normalizeEmailBody(message.body);
+  const preview = emailBodyPreview(plainBody, 100);
   return (
     <li
       className={`rounded-lg border ${
@@ -1061,7 +2193,21 @@ function EmailRow({ message, outbound }: { message: EmailMessage; outbound?: boo
       </button>
       {open ? (
         <div className="border-t border-border-light px-3 py-2 text-[13px] text-text-primary">
-          <div dangerouslySetInnerHTML={{ __html: markdownLite(message.body) }} />
+          <div className="whitespace-pre-wrap break-words">{plainBody}</div>
+          {message.inlineImages && message.inlineImages.length > 0 ? (
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {message.inlineImages.map((img) => (
+                <li key={img.id}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.src}
+                    alt={img.filename ?? "Email image"}
+                    className="max-h-48 max-w-full rounded-md border border-border-light object-contain"
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {message.attachments && message.attachments.length > 0 ? (
             <div className="mt-2 border-t border-border-light pt-2">
               <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
@@ -1070,6 +2216,7 @@ function EmailRow({ message, outbound }: { message: EmailMessage; outbound?: boo
               </p>
               <ul className="mt-1 flex flex-wrap gap-1">
                 {message.attachments.map((a) => {
+                  const linkedItem = generatedItemForAttachment(generatedItems, a);
                   const chip = (
                     <span
                       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-current/15 ${SECTION_BADGE[a.kind]}`}
@@ -1080,10 +2227,14 @@ function EmailRow({ message, outbound }: { message: EmailMessage; outbound?: boo
                   );
                   return (
                     <li key={a.id}>
-                      {a.deepLink ? (
-                        <Link href={a.deepLink} className="hover:opacity-80">
+                      {linkedItem ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenGeneratedItem(linkedItem)}
+                          className="hover:opacity-80"
+                        >
                           {chip}
-                        </Link>
+                        </button>
                       ) : (
                         chip
                       )}
@@ -1102,13 +2253,17 @@ function EmailRow({ message, outbound }: { message: EmailMessage; outbound?: boo
 function ChatBubble({
   message,
   suggestionById,
+  hideInlineSuggestions,
   onApply,
+  onQuickGenerate,
   onDismiss,
   onPreview,
 }: {
   message: AgentChatMessage;
   suggestionById: Map<string, AgentSuggestion>;
+  hideInlineSuggestions?: boolean;
   onApply: (s: AgentSuggestion) => void;
+  onQuickGenerate: (s: AgentSuggestion) => void;
   onDismiss: (s: AgentSuggestion) => void;
   onPreview: (s: AgentSuggestion) => void;
 }) {
@@ -1128,13 +2283,14 @@ function ChatBubble({
           }`}
           dangerouslySetInnerHTML={{ __html: markdownLite(message.text) }}
         />
-        {proposed.length > 0 ? (
+        {proposed.length > 0 && !hideInlineSuggestions ? (
           <div className="space-y-2">
             {proposed.map((s) => (
               <SuggestionCard
                 key={s.id}
                 s={s}
                 onApply={onApply}
+                onQuickGenerate={onQuickGenerate}
                 onDismiss={onDismiss}
                 onPreview={onPreview}
               />
@@ -1152,11 +2308,13 @@ function ChatBubble({
 function SuggestionCard({
   s,
   onApply,
+  onQuickGenerate,
   onDismiss,
   onPreview,
 }: {
   s: AgentSuggestion;
   onApply: (s: AgentSuggestion) => void;
+  onQuickGenerate: (s: AgentSuggestion) => void;
   onDismiss: (s: AgentSuggestion) => void;
   onPreview: (s: AgentSuggestion) => void;
 }) {
@@ -1216,15 +2374,15 @@ function SuggestionCard({
               tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
-                onApply(s);
+                onQuickGenerate(s);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  onApply(s);
+                  onQuickGenerate(s);
                 }
               }}
-              className="cursor-pointer rounded-lg border border-border-light px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-slate-50"
+              className="cursor-pointer rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-800 hover:bg-violet-100"
             >
               Quick generate
             </span>
@@ -1261,14 +2419,18 @@ function SuggestionCard({
 }
 
 function PayloadList({ payload }: { payload: Record<string, unknown> }) {
-  const entries = Object.entries(payload).filter(([, v]) => v !== undefined && v !== "");
+  const entries = orderedPayloadEntries(payload).filter(
+    ([, v]) => v !== undefined && v !== "",
+  );
   if (entries.length === 0) return null;
   return (
     <ul className="mt-1.5 space-y-0.5 text-[11px]">
       {entries.map(([k, v]) => (
         <li key={k} className="flex justify-between gap-3">
           <span className="font-semibold uppercase text-text-secondary">{k.replaceAll("_", " ")}</span>
-          <span className="text-right font-mono text-text-primary">{String(v)}</span>
+          <span className="max-w-[58%] text-right font-mono text-text-primary">
+            {formatPayloadValue(v)}
+          </span>
         </li>
       ))}
     </ul>
@@ -1323,7 +2485,7 @@ function GeneratedItemsPanel({
           </button>
         </div>
         <p className="mt-0.5 text-[10px] text-text-secondary">
-          {items.length} item{items.length === 1 ? "" : "s"} · click to open
+          {items.length} item{items.length === 1 ? "" : "s"} · tap for details
         </p>
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
@@ -1378,19 +2540,13 @@ function GeneratedItemsPanel({
                             </button>
                           ) : null}
                           <div className="mt-1.5 flex items-center justify-between text-[10px]">
-                            {i.deepLink ? (
-                              <Link href={i.deepLink} className="font-semibold text-accent hover:underline">
-                                Open in OnPro →
-                              </Link>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => onOpenItem(i)}
-                                className="font-semibold text-accent hover:underline"
-                              >
-                                View details
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => onOpenItem(i)}
+                              className="font-semibold text-accent hover:underline"
+                            >
+                              Show details
+                            </button>
                             <button
                               type="button"
                               onClick={() => onRemove(i)}
@@ -1408,13 +2564,6 @@ function GeneratedItemsPanel({
             );
           })
         )}
-        <p className="rounded-xl border border-dashed border-border-light bg-white px-3 py-2 text-[10px] text-text-secondary">
-          Full Gmail OAuth + LLM integration ships in a later release. See{" "}
-          <Link href="/settings" className="text-accent hover:underline">
-            Settings
-          </Link>
-          .
-        </p>
       </div>
     </div>
   );
@@ -1458,9 +2607,9 @@ function GeneratedItemDetailModal({
           {item.deepLink ? (
             <Link
               href={item.deepLink}
-              className="block rounded-lg bg-accent px-3 py-2 text-center text-sm font-semibold text-white hover:opacity-90"
+              className="block text-center text-sm font-semibold text-accent hover:underline"
             >
-              Open in OnPro
+              Open in workspace →
             </Link>
           ) : null}
         </div>
@@ -1640,7 +2789,7 @@ function DocPreview({
   payload: Record<string, unknown>;
   docNumber: string;
 }) {
-  const entries = Object.entries(payload);
+  const entries = orderedPayloadEntries(payload);
   const today = new Date().toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
@@ -1743,28 +2892,57 @@ function DocPreviewSkeleton({ kind }: { kind: GeneratedItemKind }) {
 
 function DocPreviewModal({
   suggestion,
+  primaryMode = "default",
+  working = false,
   onClose,
   onSave,
   onSaveAndAttach,
 }: {
   suggestion: AgentSuggestion;
+  /** `attach` — opened from Quick generate; primary CTA is Generate & attach. */
+  primaryMode?: "default" | "attach";
+  working?: boolean;
   onClose: () => void;
   onSave: (title: string, payload: Record<string, unknown>) => void;
   onSaveAndAttach: (title: string, payload: Record<string, unknown>) => void;
 }) {
+  const [mounted, setMounted] = useState(false);
   const kind = generatedKindFromSuggestion(suggestion.kind);
   const [title, setTitle] = useState(suggestion.title);
   const [draft, setDraft] = useState<Record<string, unknown>>(() => ({ ...suggestion.payload }));
+  const [fieldOrder, setFieldOrder] = useState(() => ensurePayloadFieldOrder(suggestion.payload));
   const [generating, setGenerating] = useState(true);
   const docNumber = useMemo(() => generateDocNumber(kind), [kind]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setGenerating(false), 750);
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
+  function finalizePayload(): Record<string, unknown> {
+    return payloadWithFieldOrder(draft, fieldOrder);
+  }
+
   function setField(key: string, value: unknown) {
     setDraft((prev) => ({ ...prev, [key]: value }));
+    if (isPayloadFieldKey(key)) {
+      setFieldOrder((prev) => appendKeyToFieldOrder(prev, key));
+    }
   }
 
   function removeField(key: string) {
@@ -1773,14 +2951,27 @@ function DocPreviewModal({
       delete next[key];
       return next;
     });
+    setFieldOrder((prev) => removeKeyFromFieldOrder(prev, key));
   }
 
-  const entries = Object.entries(draft);
-  const safeTitle = title.trim() || suggestion.title;
+  function moveField(key: string, direction: "up" | "down") {
+    setFieldOrder((prev) => movePayloadField(prev, key, direction));
+  }
 
-  return (
+  const previewPayload = useMemo(
+    () => payloadWithFieldOrder(draft, fieldOrder),
+    [draft, fieldOrder],
+  );
+  const entries = orderedPayloadEntries(previewPayload);
+  const safeTitle = title.trim() || suggestion.title;
+  const emphasizeAttach = primaryMode === "attach";
+
+  if (!mounted) return null;
+
+  const overlay = (
     <div
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-[2px]"
+      style={{ zIndex: MAILROOM_Z_DOC_PREVIEW }}
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -1863,14 +3054,18 @@ function DocPreviewModal({
                 Fields
               </p>
               <p className="mt-0.5 text-[11px] text-slate-500">
-                Updates the preview live.
+                Updates the preview live. Use ↑↓ to reorder fields.
               </p>
               <ul className="mt-3 space-y-2">
-                {entries.map(([k, v]) => (
+                {entries.map(([k, v], index) => (
                   <PayloadField
                     key={k}
                     fieldKey={k}
                     value={v}
+                    canMoveUp={index > 0}
+                    canMoveDown={index < entries.length - 1}
+                    onMoveUp={() => moveField(k, "up")}
+                    onMoveDown={() => moveField(k, "down")}
                     onChange={(next) => setField(k, next)}
                     onRemove={() => removeField(k)}
                   />
@@ -1894,34 +3089,62 @@ function DocPreviewModal({
               <DocPreviewSkeleton kind={kind} />
             ) : (
               <div className="transition-opacity duration-300">
-                <DocPreview kind={kind} title={safeTitle} payload={draft} docNumber={docNumber} />
+                <DocPreview kind={kind} title={safeTitle} payload={previewPayload} docNumber={docNumber} />
               </div>
             )}
           </section>
         </div>
+
+        {working ? (
+          <p
+            className="flex shrink-0 items-center gap-2 border-t border-violet-200 bg-violet-50/90 px-6 py-2.5 text-sm font-medium text-violet-950"
+            role="status"
+            aria-live="polite"
+          >
+            <span
+              className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-violet-300 border-t-accent"
+              aria-hidden
+            />
+            Working… creating project and documents. Please wait.
+          </p>
+        ) : null}
 
         {/* Footer */}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-white px-6 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+            disabled={working}
+            className="rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Cancel
           </button>
+          {emphasizeAttach ? (
+            <p className="mr-auto text-[11px] text-slate-500">
+              Edit fields, then generate and attach to your reply.
+            </p>
+          ) : null}
           <button
             type="button"
-            disabled={generating}
-            onClick={() => onSave(safeTitle, draft)}
-            className="rounded-lg border border-violet-300 px-3 py-1.5 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40"
+            disabled={generating || working}
+            onClick={() => onSave(safeTitle, finalizePayload())}
+            className={`rounded-lg px-3 py-1.5 text-sm font-semibold disabled:opacity-40 ${
+              emphasizeAttach
+                ? "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                : "border border-violet-300 text-violet-700 hover:bg-violet-50"
+            }`}
           >
-            Generate
+            Generate only
           </button>
           <button
             type="button"
-            disabled={generating}
-            onClick={() => onSaveAndAttach(safeTitle, draft)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-40"
+            disabled={generating || working}
+            onClick={() => onSaveAndAttach(safeTitle, finalizePayload())}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold shadow-sm hover:opacity-95 disabled:opacity-40 ${
+              emphasizeAttach
+                ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white"
+                : "border border-violet-300 bg-white text-violet-700 hover:bg-violet-50"
+            }`}
           >
             <span aria-hidden>✨</span> Generate &amp; attach
           </button>
@@ -1929,23 +3152,77 @@ function DocPreviewModal({
       </div>
     </div>
   );
+
+  return createPortal(overlay, document.body);
+}
+
+function PayloadFieldMoveButtons({
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+}: {
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col gap-0.5">
+      <button
+        type="button"
+        disabled={!canMoveUp}
+        onClick={onMoveUp}
+        aria-label="Move field up"
+        className="rounded px-1 text-[10px] font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+      >
+        ↑
+      </button>
+      <button
+        type="button"
+        disabled={!canMoveDown}
+        onClick={onMoveDown}
+        aria-label="Move field down"
+        className="rounded px-1 text-[10px] font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+      >
+        ↓
+      </button>
+    </div>
+  );
 }
 
 function PayloadField({
   fieldKey,
   value,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
   onChange,
   onRemove,
 }: {
   fieldKey: string;
   value: unknown;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onChange: (next: unknown) => void;
   onRemove: () => void;
 }) {
   const label = fieldKey.replaceAll("_", " ");
+  const moveButtons = (
+    <PayloadFieldMoveButtons
+      canMoveUp={canMoveUp}
+      canMoveDown={canMoveDown}
+      onMoveUp={onMoveUp}
+      onMoveDown={onMoveDown}
+    />
+  );
   if (typeof value === "boolean") {
     return (
-      <li className="flex items-center justify-between gap-3 rounded-lg border border-border-light bg-white px-3 py-2">
+      <li className="flex items-center justify-between gap-2 rounded-lg border border-border-light bg-white px-3 py-2">
+        {moveButtons}
         <label className="flex flex-1 items-center gap-2 text-[12px] font-semibold capitalize text-text-primary">
           <input
             type="checkbox"
@@ -1967,7 +3244,38 @@ function PayloadField({
   }
   if (typeof value === "number") {
     return (
-      <li className="rounded-lg border border-border-light bg-white px-3 py-2">
+      <li className="flex gap-2 rounded-lg border border-border-light bg-white px-3 py-2">
+        {moveButtons}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
+              {label}
+            </label>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-[10px] font-semibold text-text-secondary hover:text-red-600"
+            >
+              Remove
+            </button>
+          </div>
+          <input
+            type="number"
+            step="any"
+            value={value}
+            onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+            className="mt-1 w-full rounded-md border border-border-light px-2 py-1 text-sm font-mono focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+        </div>
+      </li>
+    );
+  }
+  const text = value == null ? "" : String(value);
+  const isLong = text.length > 60 || text.includes("\n");
+  return (
+    <li className="flex gap-2 rounded-lg border border-border-light bg-white px-3 py-2">
+      {moveButtons}
+      <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
             {label}
@@ -1980,32 +3288,6 @@ function PayloadField({
             Remove
           </button>
         </div>
-        <input
-          type="number"
-          step="any"
-          value={value}
-          onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
-          className="mt-1 w-full rounded-md border border-border-light px-2 py-1 text-sm font-mono focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-        />
-      </li>
-    );
-  }
-  const text = value == null ? "" : String(value);
-  const isLong = text.length > 60 || text.includes("\n");
-  return (
-    <li className="rounded-lg border border-border-light bg-white px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <label className="text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
-          {label}
-        </label>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="text-[10px] font-semibold text-text-secondary hover:text-red-600"
-        >
-          Remove
-        </button>
-      </div>
       {isLong ? (
         <textarea
           rows={3}
@@ -2021,6 +3303,7 @@ function PayloadField({
           className="mt-1 w-full rounded-md border border-border-light px-2 py-1 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
         />
       )}
+      </div>
     </li>
   );
 }

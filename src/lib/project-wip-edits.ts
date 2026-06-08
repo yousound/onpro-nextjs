@@ -2,8 +2,11 @@ import type { Project } from "@/lib/types/project";
 import type { ProjectJob, WipStep, WipStepState } from "@/lib/types/wip";
 import { normalizeJob } from "@/lib/job-defaults";
 import { generateJobNumberForProject } from "@/lib/job-number";
-import { MOCK_DEMO_SEED_VERSION, MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
-import { getJobsForProject, getProjectTimeline } from "@/lib/mock/project-jobs";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { getLiveCachedJobs, seedLiveJobsForProject } from "@/lib/data/live-cache";
+import { withoutDemoSeedJobs } from "@/lib/mock/demo-seed-jobs";
+import { readSessionProjects } from "@/lib/mock/project-session";
+import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { repairJobTimeline } from "@/lib/wip-project-timeline";
 
 function normalizeLoadedJob(seed: ProjectJob, patch: ProjectJob | undefined, project?: Project): ProjectJob {
@@ -38,42 +41,73 @@ function backfillJobNumbers(jobs: ProjectJob[], project?: Project): ProjectJob[]
   return needsWrite ? assigned : jobs;
 }
 
-export function loadProjectJobs(projectId: number, project?: Project): ProjectJob[] {
-  const seed = getJobsForProject(projectId);
-  const seedVersion = readMockLs<number>(MOCK_LS.demoSeedVersion);
-  const saved =
-    seedVersion === MOCK_DEMO_SEED_VERSION
-      ? readMockLs<ProjectJob[]>(MOCK_LS.projectJobs(projectId))
-      : null;
-  const normalized = !saved?.length
-    ? seed.map((j) => normalizeLoadedJob(j, undefined, project))
-    : (() => {
-        const byId = new Map(saved.map((j) => [j.id, j]));
-        return seed.map((j) => normalizeLoadedJob(j, byId.get(j.id), project));
-      })();
+function readStoredProjectJobs(projectId: number, project?: Project): ProjectJob[] {
+  const saved = readMockLs<ProjectJob[]>(MOCK_LS.projectJobs(projectId));
+  if (!Array.isArray(saved) || saved.length === 0) return [];
+  const filtered = withoutDemoSeedJobs(saved);
+  if (filtered.length !== saved.length) {
+    writeMockLs(MOCK_LS.projectJobs(projectId), filtered);
+  }
+  if (filtered.length === 0) return [];
+  const normalized = filtered.map((j) => normalizeLoadedJob(j, undefined, project));
   return backfillJobNumbers(normalized, project);
 }
 
-export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
-  writeMockLs(MOCK_LS.demoSeedVersion, MOCK_DEMO_SEED_VERSION);
-  writeMockLs(MOCK_LS.projectJobs(projectId), jobs);
+export function loadProjectJobs(projectId: number, project?: Project): ProjectJob[] {
+  if (isClientLiveBackend()) {
+    const cached = withoutDemoSeedJobs(getLiveCachedJobs(projectId));
+    if (cached.length > 0) return cached;
+    const stored = readStoredProjectJobs(projectId, project);
+    if (stored.length > 0) {
+      seedLiveJobsForProject(projectId, stored);
+    }
+    return stored;
+  }
+  return readStoredProjectJobs(projectId, project);
 }
 
-export function loadProjectTimelineSteps(projectId: number, project?: Project, jobs?: ProjectJob[]): WipStep[] {
-  const seed = getProjectTimeline(projectId, project, jobs);
+export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
+  const cleaned = withoutDemoSeedJobs(jobs);
+  writeMockLs(MOCK_LS.projectJobs(projectId), cleaned);
+  if (isClientLiveBackend()) {
+    seedLiveJobsForProject(projectId, cleaned);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("onpro-jobs-changed"));
+  }
+}
+
+/** Total jobs across known projects (server list, session, and local storage). */
+export function countJobsAcrossProjects(
+  projects: Project[],
+  initialJobsByProject?: Record<number, ProjectJob[]>,
+): number {
+  const ids = new Set<number>();
+  for (const p of projects) ids.add(p.id);
+  if (typeof window !== "undefined") {
+    for (const p of readSessionProjects()) ids.add(p.id);
+  }
+
+  let total = 0;
+  for (const id of ids) {
+    const project = projects.find((p) => p.id === id);
+    const loaded = loadProjectJobs(id, project);
+    if (loaded.length > 0) {
+      total += loaded.length;
+      continue;
+    }
+    total += initialJobsByProject?.[id]?.length ?? 0;
+  }
+  return total;
+}
+
+export function loadProjectTimelineSteps(projectId: number, _project?: Project, jobs?: ProjectJob[]): WipStep[] {
   const saved = readMockLs<WipStep[]>(MOCK_LS.projectTimeline(projectId));
-  if (!saved?.length) return seed.map((s) => ({ ...s }));
-  const byId = new Map(saved.map((s) => [s.id, s]));
-  return seed.map((s) => {
-    const patch = byId.get(s.id);
-    if (!patch) return { ...s };
-    return {
-      ...s,
-      state: s.state,
-      durationShort: patch.durationShort ?? s.durationShort,
-      durationLabel: patch.durationLabel ?? s.durationLabel,
-    };
-  });
+  if (saved?.length) return saved.map((s) => ({ ...s }));
+  if (jobs?.length) {
+    return jobs.flatMap((j) => j.timeline.map((s) => ({ ...s })));
+  }
+  return [];
 }
 
 export function saveProjectTimelineSteps(projectId: number, steps: WipStep[]) {

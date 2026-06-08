@@ -3,6 +3,8 @@
 import {
   capSystemAccruedCents,
   capSystemCompletionFraction,
+  completionPercent,
+  milestonesByPhase,
   systemStatusLabel,
   systemValueDisplay,
 } from "@/lib/ledger/calculations";
@@ -14,7 +16,9 @@ import { LedgerSection } from "@/components/ledger/ledger-section";
 import { LedgerTable } from "@/components/ledger/ledger-table";
 
 export function MilestonesPage() {
-  const { state, toggleCapSystem } = useLedger();
+  const { state, toggleCapSystem, toggleMilestone } = useLedger();
+  const phase3 = milestonesByPhase(state.milestones, 3);
+  const phase3Pct = completionPercent(phase3);
 
   return (
     <>
@@ -54,6 +58,32 @@ export function MilestonesPage() {
           ))}
         </LedgerTable>
       </LedgerSection>
+
+      {phase3.length > 0 ? (
+        <LedgerSection
+          title="Phase 3 — AI systems & automation"
+          subtitle={`Deliverable checklist (not dollar-weighted). ${formatPercent(phase3Pct)} complete — shipped items are baseline scope; pending rows are remaining Phase 3 work.`}
+        >
+          <LedgerTable headers={["Deliverable", "Weight", "Status", ""]}>
+            {phase3.map((m) => (
+              <tr key={m.id}>
+                <td className="py-2.5 font-medium">{m.label}</td>
+                <td className="py-2.5 tabular-nums text-text-secondary">{m.weight}</td>
+                <td className="py-2.5 capitalize">{m.status === "complete" ? "Complete" : "Pending"}</td>
+                <td className="py-2.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => toggleMilestone(m.id)}
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    Toggle
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </LedgerTable>
+        </LedgerSection>
+      ) : null}
     </>
   );
 }

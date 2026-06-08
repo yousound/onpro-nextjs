@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { AddCalendarEventModal, type CalendarEventDraft } from "@/components/add-calendar-event-modal";
+import { CalendarEventAssistantModal } from "@/components/calendar-event-assistant-modal";
 import type { CalendarEvent } from "@/lib/types/calendar";
 import {
   CALENDAR_COLUMN_ORDER,
@@ -13,8 +15,12 @@ import {
   formatTimeRange,
   localDayAndTimeToIso,
   minutesFromMidnight,
+  upcomingCalendarEvents,
 } from "@/lib/calendar-utils";
+import { calendarEventReactKey } from "@/lib/calendar-google";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { clientInitials, formatShortDate } from "@/lib/format";
+import { readExtraCalendarEvents } from "@/lib/calendar-events-store";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 
 const VIEW_START_HOUR = 7;
@@ -40,24 +46,30 @@ function eventTypeLabel(t: CalendarEvent["event_type"]): string {
   return t.replace(/_/g, " ");
 }
 
-export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEvent[] }) {
-  const defaultYmd = useMemo(() => {
-    const demo = initialEvents.find((e) => e.date === "2026-05-14");
-    if (demo) return "2026-05-14";
-    const merged = initialEvents;
-    const sorted = [...new Set(merged.map((e) => e.date))].sort();
-    return sorted[0] ?? localYmd(new Date());
-  }, [initialEvents]);
-
-  const [ymd, setYmd] = useState(defaultYmd);
+export function CalendarDayView({
+  initialEvents,
+  initialYmd,
+  openAddSignal = 0,
+  onRefreshGoogle,
+  refreshingGoogle = false,
+}: {
+  initialEvents: CalendarEvent[];
+  /** SSR snapshot of “today” so server and client agree on the first paint. */
+  initialYmd: string;
+  openAddSignal?: number;
+  onRefreshGoogle?: () => void;
+  refreshingGoogle?: boolean;
+}) {
+  const [ymd, setYmd] = useState(initialYmd);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [assistantEvent, setAssistantEvent] = useState<CalendarEvent | null>(null);
   const [nowTick, setNowTick] = useState(0);
   const [extraEvents, setExtraEvents] = useState<CalendarEvent[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [addTitle, setAddTitle] = useState("");
   const [addType, setAddType] = useState<NonNullable<CalendarEvent["event_type"]>>("meeting");
   const [addDept, setAddDept] = useState("Receiving");
-  const [addDate, setAddDate] = useState(defaultYmd);
+  const [addDate, setAddDate] = useState(initialYmd);
   const [addStart, setAddStart] = useState("10:00");
   const [addEnd, setAddEnd] = useState("11:00");
   const [addDesc, setAddDesc] = useState("");
@@ -66,11 +78,32 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
   const [slotHover, setSlotHover] = useState<{ x: number; y: number; label: string } | null>(null);
 
   useEffect(() => {
-    const saved = readMockLs<CalendarEvent[]>(MOCK_LS.calendarEvents);
-    if (saved?.length) setExtraEvents(saved);
+    const saved = readExtraCalendarEvents();
+    if (saved.length) setExtraEvents(saved);
   }, []);
 
+  useEffect(() => {
+    if (openAddSignal > 0) setAddOpen(true);
+  }, [openAddSignal]);
+
   const allEvents = useMemo(() => [...initialEvents, ...extraEvents], [initialEvents, extraEvents]);
+
+  const seedEventIds = useMemo(
+    () => new Set(initialEvents.map((e) => e.id)),
+    [initialEvents],
+  );
+
+  function openEventAssistant(ev: CalendarEvent) {
+    setSelectedId(ev.id);
+    setYmd(ev.date);
+    setAssistantEvent(ev);
+  }
+
+  function handleAssistantEventUpdated(updated: CalendarEvent) {
+    setAssistantEvent(updated);
+    setExtraEvents(readExtraCalendarEvents());
+    if (isClientLiveBackend()) onRefreshGoogle?.();
+  }
 
   function persistExtras(next: CalendarEvent[]) {
     setExtraEvents(next);
@@ -89,6 +122,18 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
   const dayEvents = useMemo(() => eventsForDate(allEvents, ymd), [allEvents, ymd]);
   const columns = useMemo(() => calendarColumnsForDay(dayEvents), [dayEvents]);
 
+  const todayYmd = useMemo(() => localYmd(new Date()), [nowTick]);
+  const upcoming = useMemo(
+    () => upcomingCalendarEvents(allEvents, 6),
+    [allEvents, nowTick],
+  );
+  const showOwnerOnUpcoming = useMemo(() => {
+    const owners = new Set(
+      allEvents.map((e) => e.calendar_owner_email).filter(Boolean) as string[],
+    );
+    return owners.size > 1;
+  }, [allEvents]);
+
   const selected = useMemo(
     () => dayEvents.find((e) => e.id === selectedId) ?? null,
     [dayEvents, selectedId],
@@ -99,6 +144,33 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
       setSelectedId(null);
     }
   }, [dayEvents, selectedId]);
+
+  const patchAddDraft = useCallback((patch: Partial<CalendarEventDraft>) => {
+    if (patch.title !== undefined) setAddTitle(patch.title);
+    if (patch.type !== undefined) setAddType(patch.type);
+    if (patch.dept !== undefined) setAddDept(patch.dept);
+    if (patch.date !== undefined) setAddDate(patch.date);
+    if (patch.start !== undefined) setAddStart(patch.start);
+    if (patch.end !== undefined) setAddEnd(patch.end);
+    if (patch.desc !== undefined) setAddDesc(patch.desc);
+    if (patch.po !== undefined) setAddPo(patch.po);
+    if (patch.block !== undefined) setAddBlock(patch.block);
+  }, []);
+
+  const addDraft = useMemo<CalendarEventDraft>(
+    () => ({
+      title: addTitle,
+      type: addType,
+      dept: addDept,
+      date: addDate,
+      start: addStart,
+      end: addEnd,
+      desc: addDesc,
+      po: addPo,
+      block: addBlock,
+    }),
+    [addTitle, addType, addDept, addDate, addStart, addEnd, addDesc, addPo, addBlock],
+  );
 
   const slots = ((VIEW_END_HOUR - VIEW_START_HOUR) * 60) / SLOT_MINUTES;
   const gridHeight = slots * ROW_PX;
@@ -197,7 +269,7 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
     const startIso = localDayAndTimeToIso(addDate, addStart);
     const endIso = localDayAndTimeToIso(addDate, addEnd);
     const ev: CalendarEvent = {
-      id: Date.now(),
+      id: Date.now() + Math.floor(Math.random() * 1000),
       name: addBlock ? `Blocked — ${title}` : title,
       description: addDesc.trim() || null,
       date: addDate,
@@ -240,8 +312,10 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
               ←
             </button>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-text-primary">{formatCalendarDayHeading(ymd)}</p>
-              <p className="text-xs text-text-secondary">{formatShortDate(ymd)} · Operations lanes</p>
+              <p className="truncate text-sm font-semibold text-text-primary" suppressHydrationWarning>
+                {formatCalendarDayHeading(ymd)}
+              </p>
+              <p className="text-xs text-text-secondary">{formatShortDate(ymd)} · Day schedule</p>
             </div>
             <button
               type="button"
@@ -260,6 +334,16 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
             >
               Today
             </button>
+            {onRefreshGoogle ? (
+              <button
+                type="button"
+                onClick={onRefreshGoogle}
+                disabled={refreshingGoogle}
+                className="rounded-lg border border-border-light bg-white px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-slate-50 disabled:opacity-50"
+              >
+                {refreshingGoogle ? "Syncing…" : "Sync Google"}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {
@@ -276,24 +360,50 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
           </div>
         </div>
 
-        <div className="sticky top-0 z-10 flex shrink-0 gap-2 overflow-x-auto border-b border-border-light bg-white px-3 py-2.5 sm:px-4 [scrollbar-width:thin]">
-          {columns.map((col) => {
-            const count = dayEvents.filter((e) => columnForEvent(e) === col).length;
-            return (
-              <div
-                key={col}
-                className="flex min-w-[7.5rem] max-w-[10rem] shrink-0 items-center gap-2 rounded-xl border border-border-light bg-white px-2.5 py-2 shadow-sm sm:min-w-[8.5rem]"
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-700">
-                  {clientInitials(col)}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-text-primary">{col}</p>
-                  <p className="text-[11px] text-text-secondary">{count} slot{count === 1 ? "" : "s"}</p>
-                </div>
-              </div>
-            );
-          })}
+        <div className="sticky top-0 z-10 shrink-0 border-b border-border-light bg-white px-3 py-2.5 sm:px-4">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+            Upcoming — jump to day
+          </p>
+          {upcoming.length === 0 ? (
+            <p className="pb-1 text-sm text-text-secondary">No upcoming events in this calendar.</p>
+          ) : (
+            <div className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
+              {upcoming.map((ev, index) => {
+                const onViewedDay = ev.date === ymd;
+                const dayLabel =
+                  ev.date === todayYmd
+                    ? "Today"
+                    : ev.date === addDaysYmd(todayYmd, 1)
+                      ? "Tomorrow"
+                      : formatShortDate(`${ev.date}T12:00:00`);
+                return (
+                  <button
+                    key={calendarEventReactKey(ev, index)}
+                    type="button"
+                    onClick={() => openEventAssistant(ev)}
+                    className={`flex min-w-[10.5rem] max-w-[14rem] shrink-0 flex-col rounded-xl border px-3 py-2 text-left shadow-sm transition ${
+                      onViewedDay
+                        ? "border-accent/40 bg-violet-50 ring-1 ring-accent/25"
+                        : "border-border-light bg-white hover:border-accent/30 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-accent">
+                      {dayLabel}
+                    </span>
+                    <span className="mt-0.5 truncate text-sm font-semibold text-text-primary">
+                      {ev.name}
+                    </span>
+                    <span className="mt-0.5 text-[11px] text-text-secondary">
+                      {formatTimeRange(ev.start_time, ev.end_time)}
+                      {showOwnerOnUpcoming && ev.calendar_owner_name
+                        ? ` · ${ev.calendar_owner_name}`
+                        : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="flex min-h-0 flex-1 gap-0 bg-white lg:gap-0">
@@ -396,16 +506,16 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
                           style={{ top: top + 24 }}
                         />
                       ))}
-                      {colEvents.map((ev) => {
+                      {colEvents.map((ev, evIndex) => {
                         const { top, height } = layoutEvent(ev);
                         const blocked = isBlocked(ev);
                         const isSel = selectedId === ev.id;
                         return (
                           <button
-                            key={ev.id}
+                            key={calendarEventReactKey(ev, evIndex)}
                             type="button"
                             title={`${formatShortDate(`${ev.date}T12:00:00`)} · ${formatTimeRange(ev.start_time, ev.end_time)} · ${ev.name}`}
-                            onClick={() => setSelectedId(ev.id)}
+                            onClick={() => openEventAssistant(ev)}
                             className={`absolute left-1 right-1 z-[1] flex min-h-[3.25rem] flex-col overflow-hidden rounded-lg border text-left shadow-sm transition-[box-shadow,border-color] ${
                               blocked
                                 ? "border-slate-200 bg-[repeating-linear-gradient(-45deg,#f8fafc,#f8fafc_6px,#eef2f7_6px,#eef2f7_12px)]"
@@ -450,14 +560,25 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
           <aside className="hidden w-[min(100%,380px)] shrink-0 flex-col border-border-light bg-white lg:flex lg:border lg:border-l-0 lg:border-t-0">
             <div className="flex items-center justify-between border-b border-border-light px-4 py-3">
               <h2 className="text-sm font-semibold text-text-primary">Event details</h2>
-              <button
-                type="button"
-                onClick={() => setSelectedId(null)}
-                className="rounded-md p-1 text-text-secondary hover:bg-slate-100 hover:text-text-primary"
-                aria-label="Close details"
-              >
-                ×
-              </button>
+              <div className="flex items-center gap-1">
+                {selected ? (
+                  <button
+                    type="button"
+                    onClick={() => openEventAssistant(selected)}
+                    className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-violet-700"
+                  >
+                    OnPro AI
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(null)}
+                  className="rounded-md p-1 text-text-secondary hover:bg-slate-100 hover:text-text-primary"
+                  aria-label="Close details"
+                >
+                  ×
+                </button>
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
               {selected ? (
@@ -538,134 +659,21 @@ export function CalendarDayView({ initialEvents }: { initialEvents: CalendarEven
       ) : null}
 
       {addOpen ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 sm:items-center"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setAddOpen(false);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="cal-add-title"
-            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border-light bg-white p-5 shadow-xl"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <h2 id="cal-add-title" className="text-lg font-semibold text-text-primary">
-              Add event (mock)
-            </h2>
-            <p className="mt-1 text-xs text-text-secondary">
-              Click the schedule grid to prefill lane and time. Saved in this browser — {MOCK_LS.calendarEvents}
-            </p>
-            <form className="mt-4 space-y-3" onSubmit={handleAddSubmit}>
-              <label className="block text-xs font-medium text-text-secondary">
-                Title
-                <input
-                  required
-                  className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary"
-                  value={addTitle}
-                  onChange={(e) => setAddTitle(e.target.value)}
-                  placeholder="e.g. TOP review — Void Star"
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-xs font-medium text-text-secondary">
-                  Type
-                  <select
-                    className="mt-1 w-full rounded-lg border border-border-light px-2 py-2 text-sm text-text-primary"
-                    value={addType}
-                    disabled={addBlock}
-                    onChange={(e) => setAddType(e.target.value as NonNullable<CalendarEvent["event_type"]>)}
-                  >
-                    <option value="shipping">Shipping</option>
-                    <option value="meeting">Meeting</option>
-                    <option value="deadline">Deadline</option>
-                    <option value="sample_review">Sample review</option>
-                    <option value="production">Production</option>
-                    <option value="other">Other</option>
-                  </select>
-                </label>
-                <label className="block text-xs font-medium text-text-secondary">
-                  Lane
-                  <select
-                    className="mt-1 w-full rounded-lg border border-border-light px-2 py-2 text-sm text-text-primary"
-                    value={addDept}
-                    onChange={(e) => setAddDept(e.target.value)}
-                  >
-                    {CALENDAR_COLUMN_ORDER.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label className="block text-xs font-medium text-text-secondary">
-                Day
-                <input
-                  type="date"
-                  required
-                  className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary"
-                  value={addDate}
-                  onChange={(e) => setAddDate(e.target.value)}
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-xs font-medium text-text-secondary">
-                  Start
-                  <input
-                    type="time"
-                    required
-                    className="mt-1 w-full rounded-lg border border-border-light px-2 py-2 text-sm text-text-primary"
-                    value={addStart}
-                    onChange={(e) => setAddStart(e.target.value)}
-                  />
-                </label>
-                <label className="block text-xs font-medium text-text-secondary">
-                  End
-                  <input
-                    type="time"
-                    required
-                    className="mt-1 w-full rounded-lg border border-border-light px-2 py-2 text-sm text-text-primary"
-                    value={addEnd}
-                    onChange={(e) => setAddEnd(e.target.value)}
-                  />
-                </label>
-              </div>
-              <label className="block text-xs font-medium text-text-secondary">
-                PO (optional)
-                <input
-                  className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary"
-                  value={addPo}
-                  onChange={(e) => setAddPo(e.target.value)}
-                  placeholder="PO-…"
-                />
-              </label>
-              <label className="block text-xs font-medium text-text-secondary">
-                Description
-                <textarea
-                  rows={2}
-                  className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary"
-                  value={addDesc}
-                  onChange={(e) => setAddDesc(e.target.value)}
-                />
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-text-primary">
-                <input type="checkbox" checked={addBlock} onChange={(e) => setAddBlock(e.target.checked)} className="rounded border-border-light" />
-                Blocked lane (striped)
-              </label>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" className="rounded-lg px-3 py-2 text-sm font-medium text-text-secondary hover:bg-slate-100" onClick={() => setAddOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
-                  Save to calendar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AddCalendarEventModal
+          draft={addDraft}
+          onChange={patchAddDraft}
+          onSubmit={handleAddSubmit}
+          onClose={() => setAddOpen(false)}
+        />
+      ) : null}
+
+      {assistantEvent ? (
+        <CalendarEventAssistantModal
+          event={assistantEvent}
+          seedIds={seedEventIds}
+          onClose={() => setAssistantEvent(null)}
+          onEventUpdated={handleAssistantEventUpdated}
+        />
       ) : null}
     </div>
   );

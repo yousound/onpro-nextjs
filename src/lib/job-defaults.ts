@@ -86,8 +86,21 @@ function backfillSample(s: Sample): Sample {
   };
 }
 
+function isDemoLabelArtifact(line: { id?: string }): boolean {
+  return String(line.id ?? "").startsWith("demo-");
+}
+
+function isDemoLabelFile(file: { id?: string; url?: string }): boolean {
+  const id = String(file.id ?? "");
+  const url = String(file.url ?? "").trim();
+  return id.startsWith("demo-") || url === "#";
+}
+
 /** Merge persisted job with defaults for new fields (backward compat). */
 export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
+  const labelLines = (job.label_lines ?? []).filter((l) => !isDemoLabelArtifact(l)).map((l) => ({ ...l }));
+  const labelFiles = (job.label_files ?? []).filter((f) => !isDemoLabelFile(f)).map((f) => ({ ...f }));
+
   return {
     ...job,
     scope_kind: job.scope_kind ?? "original",
@@ -96,8 +109,8 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
     color_code: job.color_code ?? "",
     barcode: job.barcode ?? "",
     po_number: job.po_number ?? null,
-    label_files: job.label_files ? [...job.label_files] : [],
-    label_lines: job.label_lines ? job.label_lines.map((l) => ({ ...l })) : [],
+    label_files: labelFiles,
+    label_lines: labelLines,
     estimate: { ...defaultJobEstimate(project), ...job.estimate },
     costing: {
       ...defaultJobCosting(project),

@@ -304,20 +304,23 @@ export function fallbackDraftFromSmartAttachment(
 export function draftFromDocumentRow(doc: DocumentRow, roomTitle: string): AttachmentComposerDraft {
   const base = defaultAttachmentComposerDraft(roomTitle);
   const label = doc.project_name?.trim() || roomTitle;
+  const linkNote = doc.external_url ? `\n\nExternal link: ${doc.external_url}` : "";
+  const fileNote = doc.file_name ? `\n\nUploaded file: ${doc.file_name}` : "";
+  const sourceNote = `${linkNote}${fileNote}`.trim();
   if (doc.kind === "invoice") {
     return {
       ...base,
       kind: "invoice",
       projectName: label,
       toName: roomTitle,
-      notes: doc.name,
+      notes: `${doc.name}${sourceNote ? `\n\n${sourceNote}` : ""}`,
     };
   }
   if (doc.kind === "quote") {
     return {
       ...base,
       kind: "quote",
-      quoteScope: doc.name,
+      quoteScope: `${doc.name}${sourceNote ? `\n\n${sourceNote}` : ""}`,
       toName: roomTitle,
     };
   }
@@ -325,7 +328,7 @@ export function draftFromDocumentRow(doc: DocumentRow, roomTitle: string): Attac
     return {
       ...base,
       kind: "estimate",
-      estScope: `${doc.name}\n\nTech pack — edit details below.`,
+      estScope: `${doc.name}\n\nTech pack — edit details below.${sourceNote ? `\n\n${sourceNote}` : ""}`,
       toName: roomTitle,
     };
   }
@@ -333,7 +336,9 @@ export function draftFromDocumentRow(doc: DocumentRow, roomTitle: string): Attac
     ...base,
     kind: "approval",
     approvalFile: doc.name,
-    approvalNote: doc.project_name ? `Linked project: ${doc.project_name}` : base.approvalNote,
+    approvalNote: [doc.project_name ? `Linked project: ${doc.project_name}` : null, sourceNote || null]
+      .filter(Boolean)
+      .join("\n\n") || base.approvalNote,
     toName: roomTitle,
   };
 }

@@ -1,7 +1,5 @@
 import type { Project } from "@/lib/types/project";
 import type { JobType, ProjectJob } from "@/lib/types/wip";
-import { buildUpcomingJobTimeline } from "@/lib/wip-project-timeline";
-import { buildUpcomingJobTimelineForType } from "@/lib/job-timeline-templates";
 import { generateJobNumberForProject } from "@/lib/job-number";
 
 /** Seed for Job Details when adding a job (Projects or message attachments). */
@@ -9,13 +7,12 @@ export function createNewJobSeed(
   project: Project,
   jobs: ProjectJob[],
   jobType?: JobType,
+  orderId?: string,
 ): ProjectJob {
-  const template = jobType
-    ? buildUpcomingJobTimelineForType(jobType)
-    : jobs[0]?.timeline ?? buildUpcomingJobTimeline();
   return {
     id: `job-${project.id}-${Date.now()}`,
     project_id: project.id,
+    order_id: orderId,
     job_number: generateJobNumberForProject(project, jobs),
     name: "",
     subtitle: "",
@@ -32,6 +29,6 @@ export function createNewJobSeed(
     updated_at: new Date().toISOString(),
     scope_kind: "original",
     scope_note: "",
-    timeline: template.map((s) => ({ ...s })),
+    timeline: [],
   };
 }

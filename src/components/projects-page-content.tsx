@@ -1,26 +1,53 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type FormEvent,
-  type ReactNode,
 } from "react";
 import type { Client, Project, ProjectStatus } from "@/lib/types/project";
 import { computeProjectKpis } from "@/lib/health";
 import { dateInputToIso } from "@/lib/format";
+import {
+  NewProjectModal,
+  type NewClientDraft,
+  type SavedNewClient,
+} from "@/components/new-project-modal";
+import { useCurrentUser } from "@/components/profile-provider";
 import { PageHeader } from "@/components/page-header";
 import { ProjectsBrowser } from "@/components/projects-browser";
+import { ProjectsConnectHero } from "@/components/projects-connect-hero";
+import { sectionCoverHref, shouldShowSectionCover } from "@/lib/section-cover";
+import { useStripSectionCoverWhenPopulated } from "@/lib/section-cover-hooks";
+import { OPEN_NEW_PROJECT_EVENT, PROJECT_DELETED_EVENT } from "@/lib/onpro-events";
+import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import {
   appendSessionProject,
   mergeProjectLists,
-  readSessionProjects,
+  resolveClientProjectList,
 } from "@/lib/mock/project-session";
-import { clientListContacts, loadContacts } from "@/lib/contacts-store";
+import { commitSingleContact } from "@/lib/data/commit-contacts";
+import { persistProjectToDb } from "@/lib/data/persist-project";
+import {
+  seedLiveProjects,
+  upsertLiveContact,
+  upsertLiveProject,
+} from "@/lib/data/live-cache";
+import {
+  clientListContacts,
+  contactDisplayName,
+  findContactByEmail,
+  loadContacts,
+  newContactId,
+} from "@/lib/contacts-store";
+import { validateClientContactFields } from "@/lib/contact-field-validation";
 import { clientCodeByName } from "@/lib/reference/client-codes";
+import { defaultPermissionsForSegment } from "@/lib/project-permissions";
+import type { Contact } from "@/lib/types/contact";
 import { generatePoNumber } from "@/lib/po-number";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
 
@@ -31,53 +58,6 @@ const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "COMPLETED",
   "DELIVERED",
 ];
-
-const fieldClass =
-  "mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
-
-const labelClass = "block text-xs font-medium text-text-secondary";
-
-const NEW_CLIENT = "__new__";
-
-function ModalShell({
-  title,
-  description,
-  titleId,
-  onClose,
-  children,
-}: {
-  title: string;
-  description?: string;
-  titleId: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 sm:items-center"
-      role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border-light bg-surface-card shadow-xl sm:max-w-xl"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="shrink-0 border-b border-border-light px-5 py-4">
-          <h2 id={titleId} className="text-lg font-semibold text-text-primary">
-            {title}
-          </h2>
-          {description ? <p className="mt-1 text-xs text-text-secondary">{description}</p> : null}
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function emptyProjectRecord(
   id: number,
@@ -156,51 +136,197 @@ function emptyProjectRecord(
 
 export function ProjectsPageContent({ initialProjects }: { initialProjects: Project[] }) {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const searchParams = useSearchParams();
+  const { user } = useCurrentUser();
+  /** Server list respects deleted-projects cookie; client merges session/live cache after mount. */
+  const [projects, setProjects] = useState(() => resolveClientProjectList(initialProjects));
+  const [cacheTick, setCacheTick] = useState(0);
+  const [forceBoard, setForceBoard] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const syncProjectsFromSources = useCallback(
+    (base: Project[] = initialProjects) => {
+      const next = resolveClientProjectList(base);
+      setProjects(next);
+      if (isClientLiveBackend() && next.length > 0) seedLiveProjects(next);
+      return next;
+    },
+    [initialProjects],
+  );
+
+  const mergedProjects = useMemo(() => {
+    void cacheTick;
+    return resolveClientProjectList(initialProjects);
+  }, [initialProjects, cacheTick]);
+
+  const projectCount = Math.max(mergedProjects.length, projects.length);
+
+  useLayoutEffect(() => {
+    syncProjectsFromSources();
+  }, [syncProjectsFromSources]);
 
   useEffect(() => {
-    const session = readSessionProjects();
-    if (session.length === 0) return;
-    setProjects((prev) => mergeProjectLists(prev, session));
+    const onProjectsUpdated = () => {
+      syncProjectsFromSources();
+      setCacheTick((t) => t + 1);
+    };
+    onProjectsUpdated();
+    window.addEventListener("onpro-live-cache-seeded", onProjectsUpdated);
+    window.addEventListener("onpro-projects-changed", onProjectsUpdated);
+    return () => {
+      window.removeEventListener("onpro-live-cache-seeded", onProjectsUpdated);
+      window.removeEventListener("onpro-projects-changed", onProjectsUpdated);
+    };
+  }, [syncProjectsFromSources]);
+
+  useEffect(() => {
+    if (projectCount > 0 && projects.length === 0) {
+      syncProjectsFromSources();
+    }
+  }, [projectCount, projects.length, syncProjectsFromSources]);
+
+  useEffect(() => {
+    if (!isClientLiveBackend() || projectCount > 0) return;
+    let cancelled = false;
+    void fetch("/api/projects", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { projects?: Project[] } | null) => {
+        if (cancelled || !json?.projects?.length) return;
+        syncProjectsFromSources(json.projects);
+        setCacheTick((t) => t + 1);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectCount, syncProjectsFromSources]);
+
+  useEffect(() => {
+    function onDeleted(e: Event) {
+      const id = (e as CustomEvent<{ projectId: number }>).detail?.projectId;
+      if (id == null) return;
+      setProjects((prev) => prev.filter((p) => p.id !== id));
+    }
+    window.addEventListener(PROJECT_DELETED_EVENT, onDeleted);
+    return () => window.removeEventListener(PROJECT_DELETED_EVENT, onDeleted);
   }, []);
 
+  const [contactsTick, setContactsTick] = useState(0);
   const [name, setName] = useState("");
   const [clientSelect, setClientSelect] = useState<string>(() => String(initialProjects[0]?.client.id ?? ""));
-  const [newClientName, setNewClientName] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("PENDING");
   const [dueDate, setDueDate] = useState("");
   const [description, setDescription] = useState("");
 
-  const directoryClients = useMemo(() => clientListContacts(loadContacts()), []);
+  const contactsDirectory = useMemo(() => loadContacts(), [contactsTick]);
+  const directoryClients = useMemo(() => clientListContacts(contactsDirectory), [contactsDirectory]);
 
-  const k = useMemo(() => computeProjectKpis(projects), [projects]);
+  const boardProjects = mergedProjects.length > 0 ? mergedProjects : projects;
+  const k = useMemo(() => computeProjectKpis(boardProjects), [boardProjects]);
+
+  const showCoverPage = searchParams.get("cover") === "1";
+  const projectsHref = (cover: boolean) => sectionCoverHref("/projects", searchParams, cover);
+  const openCoverPage = () => router.push(projectsHref(true));
+  const openProjects = () => router.push(projectsHref(false));
+  /** Cover only for an empty workspace; existing projects always open the board. */
+  const showHero = !forceBoard && shouldShowSectionCover(showCoverPage, projectCount);
+  useStripSectionCoverWhenPopulated("/projects", searchParams, projectCount);
+
+  const openProjectBoard = useCallback(() => {
+    setForceBoard(true);
+    router.push(projectsHref(false));
+  }, [router, searchParams]);
 
   const clientsSorted = useMemo(() => {
     const fromProjects = new Map<number, string>();
     for (const p of projects) fromProjects.set(p.client.id, p.client.name);
-    const fromDirectory = directoryClients.map((c) => ({
-      id: c.id,
-      name: c.name,
-      code: c.company_code,
-    }));
-    if (fromDirectory.length > 0) {
-      return fromDirectory.map((c) => [c.id, c.name, c.code] as const);
+    if (directoryClients.length > 0) {
+      return directoryClients.map((c) => [c.id, contactDisplayName(c), c.company_code] as const);
     }
     return [...fromProjects.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => [String(id), name, ""] as const);
   }, [projects, directoryClients]);
 
+  const projectPoPreview = useMemo(() => {
+    const row = clientsSorted.find(([id]) => id === clientSelect);
+    if (!row) return null;
+    const clientCode = row[2] || clientCodeByName(row[1]) || "XX";
+    return generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
+  }, [clientSelect, clientsSorted, projects]);
+
   const resetForm = useCallback(() => {
     const firstId = clientsSorted[0]?.[0];
     setName("");
-    setClientSelect(firstId != null ? String(firstId) : NEW_CLIENT);
-    setNewClientName("");
+    setClientSelect(firstId != null ? String(firstId) : "");
     setStatus("PENDING");
     setDueDate("");
     setDescription("");
   }, [clientsSorted]);
 
+  async function saveNewClient(draft: NewClientDraft): Promise<SavedNewClient | { error: string }> {
+    const contacts = loadContacts();
+    const email = draft.email.trim();
+    const code = draft.companyCode.trim().toUpperCase();
+    const isCompany = draft.kind === "company";
+    const label = draft.companyName.trim();
+
+    if (!label || !email) {
+      return {
+        error: isCompany ? "Company name and email are required." : "Name and email are required.",
+      };
+    }
+    const fieldErrors = validateClientContactFields(contacts, {
+      kind: draft.kind,
+      name: label,
+      email,
+      companyCode: code,
+    });
+    if (fieldErrors.companyCode) return { error: fieldErrors.companyCode };
+    if (fieldErrors.email?.includes("already used for")) {
+      return { error: fieldErrors.email };
+    }
+    const existingEmail = findContactByEmail(contacts, email);
+
+    const now = new Date().toISOString();
+    const id = existingEmail?.id ?? newContactId();
+    const contact: Contact = {
+      id,
+      segment: "client",
+      kind: draft.kind,
+      company_code: code,
+      name: label,
+      contact_name: isCompany ? draft.contactName.trim() || undefined : undefined,
+      email,
+      phone: draft.phone.trim() || undefined,
+      avatar_url: null,
+      member_contact_ids: [],
+      permissions: defaultPermissionsForSegment("client"),
+      created_at: existingEmail?.created_at ?? now,
+      updated_at: now,
+    };
+
+    try {
+      const saved = await commitSingleContact(contact);
+      if (isClientLiveBackend()) {
+        upsertLiveContact(saved);
+      }
+      setContactsTick((t) => t + 1);
+      if (!isClientMockBackend()) {
+        router.refresh();
+      }
+      return {
+        id: saved.id,
+        name: contactDisplayName(saved),
+        code: saved.company_code,
+      };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not save client" };
+    }
+  }
+
   const openModal = useCallback(() => {
+    setCreateError(null);
     resetForm();
     setModalOpen(true);
   }, [resetForm]);
@@ -210,48 +336,74 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   }, []);
 
   useEffect(() => {
-    if (!modalOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeModal();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [modalOpen, closeModal]);
+    function onOpenEvent() {
+      openModal();
+    }
+    window.addEventListener(OPEN_NEW_PROJECT_EVENT, onOpenEvent);
+    return () => window.removeEventListener(OPEN_NEW_PROJECT_EVENT, onOpenEvent);
+  }, [openModal]);
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
     const trimmedName = name.trim();
     if (!trimmedName) return;
 
-    let client: Client;
-    let clientCode = "XX";
-    if (clientSelect === NEW_CLIENT) {
-      const cn = newClientName.trim();
-      if (!cn) return;
-      const maxClient = Math.max(0, ...projects.map((p) => p.client.id));
-      client = { id: maxClient + 1, name: cn, avatar_url: null };
-      clientCode = clientCodeByName(cn) ?? cn.slice(0, 3).toUpperCase();
-    } else {
-      const row = clientsSorted.find(([cid]) => cid === clientSelect);
-      if (!row) return;
-      const idNum = Number.isFinite(Number(row[0])) ? Number(row[0]) : Math.max(0, ...projects.map((p) => p.client.id)) + 1;
-      client = { id: idNum, name: row[1], avatar_url: null };
-      clientCode = row[2] || clientCodeByName(row[1]) || "XX";
+    const row = clientsSorted.find(([cid]) => cid === clientSelect);
+    if (!row) {
+      setCreateError("Select a client for this project.");
+      return;
     }
 
+    const clientId = Number(row[0]);
+    if (!Number.isFinite(clientId)) {
+      setCreateError("Select a valid client for this project.");
+      return;
+    }
+
+    const client: Client = { id: clientId, name: row[1], avatar_url: null };
+    const clientCode = row[2] || clientCodeByName(row[1]) || "XX";
     const po = generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
+    const dueIso = dueDate ? dateInputToIso(dueDate) : null;
+    const creatorName = user?.fullName?.trim() || null;
+
+    if (isClientLiveBackend()) {
+      setCreating(true);
+      setCreateError(null);
+      try {
+        const saved = await persistProjectToDb({
+          name: trimmedName,
+          description: description.trim() || null,
+          clientId,
+          status,
+          projectNumber: po,
+          dueDate: dueIso,
+          leadTeamMember: creatorName,
+          leadVendor: null,
+        });
+        upsertLiveProject(saved);
+        setProjects((prev) => mergeProjectLists(prev, [saved]));
+        closeModal();
+        if (showCoverPage) openProjects();
+        router.refresh();
+      } catch (err) {
+        setCreateError(err instanceof Error ? err.message : "Could not create project");
+      } finally {
+        setCreating(false);
+      }
+      return;
+    }
 
     const nextId = Math.max(0, ...projects.map((p) => p.id)) + 1;
-    const dueIso = dueDate ? dateInputToIso(dueDate) : null;
     const proj = {
       ...emptyProjectRecord(nextId, trimmedName, client, status, po, dueIso, description.trim() || null),
       po_number: po,
+      lead_team_member: creatorName,
     };
 
     appendSessionProject(proj);
     setProjects((prev) => [...prev, proj]);
     closeModal();
-    router.push(`/projects/${nextId}`);
+    if (showCoverPage) openProjects();
   }
 
   return (
@@ -259,7 +411,8 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       <div className="shrink-0">
         <PageHeader
           title="Projects"
-          subtitle="Track progress and manage production projects."
+          onInfoClick={projectCount === 0 ? openCoverPage : undefined}
+          infoLabel={projectCount === 0 ? "About Projects" : undefined}
           action={
             <button
               type="button"
@@ -269,118 +422,48 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
               + New project
             </button>
           }
-          kpis={[
-            { label: "Total projects", value: k.total, tone: "accent" },
-            { label: "On track", value: k.onTrack, tone: "ok" },
-            { label: "At risk", value: k.atRisk, tone: "warn" },
-            { label: "Delayed", value: k.delayed, tone: "bad" },
-          ]}
+          kpis={
+            showHero
+              ? undefined
+              : [
+                  { label: "Total projects", value: k.total, tone: "accent" },
+                  { label: "On track", value: k.onTrack, tone: "ok" },
+                  { label: "At risk", value: k.atRisk, tone: "warn" },
+                  { label: "Delayed", value: k.delayed, tone: "bad" },
+                ]
+          }
         />
       </div>
-      <ProjectsBrowser projects={projects} />
+      {showHero ? (
+        <ProjectsConnectHero
+          onCreateProject={openModal}
+          onDismiss={projectCount > 0 ? openProjectBoard : undefined}
+        />
+      ) : (
+        <ProjectsBrowser projects={boardProjects} />
+      )}
 
-      {modalOpen ? (
-        <ModalShell
-          titleId="new-project-title"
-          title="New project"
-          description="Creates a project in this session (mock UI — not saved to a server)."
-          onClose={closeModal}
-        >
-          <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-              <label className={labelClass}>
-                Project name
-                <input
-                  className={fieldClass}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Spring capsule"
-                  required
-                  autoComplete="off"
-                />
-              </label>
-              <label className={labelClass}>
-                Client
-                <select
-                  className={fieldClass}
-                  value={clientSelect}
-                  onChange={(e) => setClientSelect(e.target.value)}
-                >
-                  {clientsSorted.map(([id, clientName]) => (
-                    <option key={id} value={id}>
-                      {clientName}
-                    </option>
-                  ))}
-                  <option value={NEW_CLIENT}>New client…</option>
-                </select>
-              </label>
-              {clientSelect === NEW_CLIENT ? (
-                <label className={labelClass}>
-                  New client name
-                  <input
-                    className={fieldClass}
-                    value={newClientName}
-                    onChange={(e) => setNewClientName(e.target.value)}
-                    placeholder="Brand or company name"
-                    required={clientSelect === NEW_CLIENT}
-                  />
-                </label>
-              ) : null}
-              <label className={labelClass}>
-                Status
-                <select
-                  className={fieldClass}
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as ProjectStatus)}
-                >
-                  {PROJECT_STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="rounded-lg border border-border-light bg-surface-body/50 px-3 py-2 text-xs text-text-secondary">
-                PO number is assigned automatically on create (ClientCode-Year-Month-Seq, e.g. GG-2026-05-001).
-              </p>
-              <label className={labelClass}>
-                Due date <span className="font-normal text-text-secondary">(optional)</span>
-                <input
-                  type="date"
-                  className={fieldClass}
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                />
-              </label>
-              <label className={labelClass}>
-                Notes <span className="font-normal text-text-secondary">(optional)</span>
-                <textarea
-                  className={fieldClass}
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Short description for the team"
-                />
-              </label>
-            </div>
-            <div className="flex shrink-0 justify-end gap-2 border-t border-border-light px-5 py-4">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-text-secondary hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-              >
-                Create project
-              </button>
-            </div>
-          </form>
-        </ModalShell>
-      ) : null}
+      <NewProjectModal
+        open={modalOpen}
+        name={name}
+        onNameChange={setName}
+        clientSelect={clientSelect}
+        onClientSelectChange={setClientSelect}
+        clientsSorted={clientsSorted}
+        poPreview={projectPoPreview}
+        onSaveNewClient={saveNewClient}
+        status={status}
+        onStatusChange={(v) => setStatus(v as ProjectStatus)}
+        statusOptions={PROJECT_STATUS_OPTIONS}
+        dueDate={dueDate}
+        onDueDateChange={setDueDate}
+        description={description}
+        onDescriptionChange={setDescription}
+        onClose={closeModal}
+        onSubmit={submit}
+        submitError={createError}
+        submitting={creating}
+      />
     </div>
   );
 }

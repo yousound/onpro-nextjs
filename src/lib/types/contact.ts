@@ -30,6 +30,8 @@ export interface Contact {
   /** Company name or individual display name */
   name: string;
   contact_name?: string;
+  /** Team / operator workspace company label (stored in `contacts.company_name`). */
+  company_name?: string;
   email: string;
   other_emails?: string[];
   phone?: string;

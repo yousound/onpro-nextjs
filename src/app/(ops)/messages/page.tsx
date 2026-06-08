@@ -1,13 +1,21 @@
 import { Suspense } from "react";
+import { LiveDataHydrator } from "@/components/live-data-hydrator";
 import { MessagesView } from "@/components/messages-view";
-import { getConversations } from "@/lib/mock/conversations";
+import { isLiveBackendEnabled } from "@/lib/config/backend";
+import { fetchContacts } from "@/lib/data/contacts";
+import { ensureSelfTeamContactForSession } from "@/lib/server/ensure-self-contact";
 
-export default function MessagesPage() {
-  const conversations = getConversations();
+export default async function MessagesPage() {
+  const live = await isLiveBackendEnabled();
+  if (live) await ensureSelfTeamContactForSession();
+  const initialContacts = await fetchContacts();
 
   return (
-    <Suspense fallback={null}>
-      <MessagesView conversations={conversations} />
-    </Suspense>
+    <>
+      {live ? <LiveDataHydrator contacts={initialContacts} /> : null}
+      <Suspense fallback={null}>
+        <MessagesView />
+      </Suspense>
+    </>
   );
 }

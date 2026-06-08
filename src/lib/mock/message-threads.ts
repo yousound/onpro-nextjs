@@ -19,6 +19,8 @@ export type ThreadMessage = {
   time_label: string;
   /** Optional placeholder “images” count for demo bubbles */
   image_slots?: number;
+  /** Local preview URLs from image picker (object URLs). */
+  image_urls?: string[];
   smart_attachment?: ThreadSmartAttachment;
 };
 

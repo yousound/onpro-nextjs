@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { ToastViewport } from "@/components/toast-viewport";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { segmentBadgeSoftClass, segmentLabel } from "@/lib/mock/people";
 
 export type InviteToastPayload = {
   email: string;
   segment: PeopleSegment;
+  loginUrl?: string;
 };
 
 export function InviteSentToast({
@@ -28,7 +30,7 @@ export function InviteSentToast({
   if (!payload) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[280] flex justify-center pb-8 px-4 sm:pb-10">
+    <ToastViewport>
       <div
         role="status"
         aria-live="polite"
@@ -55,13 +57,26 @@ export function InviteSentToast({
             Invitation sent
           </p>
           <p className="mt-1 truncate text-[13px] font-medium text-text-primary">{payload.email}</p>
+          {payload.loginUrl ? (
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(payload.loginUrl!);
+              }}
+              className="mt-2 text-left text-[11px] font-semibold text-[#7c3aed] hover:underline"
+            >
+              Copy invite link
+            </button>
+          ) : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(payload.segment)}`}
             >
               {segmentLabel(payload.segment)}
             </span>
-            <span className="text-[11px] leading-none text-text-secondary">Listed in pending invites below</span>
+            <span className="text-[11px] leading-none text-text-secondary">
+              {payload.loginUrl ? "Invite link ready — copy and send" : "Listed in pending invites below"}
+            </span>
           </div>
         </div>
 
@@ -76,6 +91,6 @@ export function InviteSentToast({
           </svg>
         </button>
       </div>
-    </div>
+    </ToastViewport>
   );
 }

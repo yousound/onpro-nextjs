@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Project } from "@/lib/types/project";
-import { clientInitials } from "@/lib/format";
+import { DirectoryAvatar } from "@/components/directory-avatar";
 import { loadContacts } from "@/lib/contacts-store";
 import { segmentBadgeSoftClass, segmentLabel } from "@/lib/mock/people";
 import type { ProjectPersonRow } from "@/lib/project-people";
@@ -89,9 +89,11 @@ export function ProjectPersonPermissionsModal({
       >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
           <div className="flex min-w-0 gap-3">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-slate-200 text-sm font-bold text-slate-800">
-              {clientInitials(person.displayName)}
-            </span>
+            <DirectoryAvatar
+              name={person.displayName}
+              avatarUrl={person.avatarUrl}
+              size="md"
+            />
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">On project</p>
               <p className="truncate text-sm font-semibold text-accent">{project.name}</p>

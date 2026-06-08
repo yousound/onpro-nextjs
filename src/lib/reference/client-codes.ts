@@ -1,3 +1,5 @@
+import { deriveCompanyCode } from "@/lib/types/contact";
+
 /** Auto-generated from Connect Dots masterlist — client codes */
 export type ClientCodeEntry = { code: string; name: string };
 
@@ -99,6 +101,21 @@ export function clientCodeByName(name: string): string | null {
   const n = name.trim().toLowerCase();
   const hit = CLIENT_CODES.find((c) => c.name.toLowerCase() === n);
   return hit?.code ?? null;
+}
+
+/** Client code for PO / project numbers — catalog match, then brand initials (e.g. ZOE Conference → ZC). */
+export function resolveClientCode(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "XX";
+  const exact = clientCodeByName(trimmed);
+  if (exact) return exact;
+  const lower = trimmed.toLowerCase();
+  const prefix = CLIENT_CODES.find((c) => {
+    const cn = c.name.toLowerCase();
+    return lower === cn || lower.startsWith(`${cn} `) || lower.startsWith(`${cn}-`);
+  });
+  if (prefix) return prefix.code;
+  return deriveCompanyCode(trimmed);
 }
 
 /** Max style sequence per style prefix (e.g. GGT -> 148) */

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   MOCK_PENDING_INVITES,
   projectsForPerson,
@@ -13,26 +13,27 @@ import {
   type PendingInvite,
   type PeopleSegment,
 } from "@/lib/mock/people";
-import type { Contact, TeamRole } from "@/lib/types/contact";
-import { findContactByEmail, loadContacts, saveContacts, clientListContacts, searchContacts, upsertInvitedContact } from "@/lib/contacts-store";
+import type { Contact } from "@/lib/types/contact";
+import { loadContacts, clientListContacts, searchContacts } from "@/lib/contacts-store";
+import { commitContactPermissions } from "@/lib/data/commit-contacts";
+import { useDeleteContact } from "@/lib/use-delete-contact";
+import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { effectiveContactPermissions, permissionsLabel } from "@/lib/contact-permissions";
 import {
   AddClientModal,
   AddTeamMemberModal,
   AddVendorModal,
   contactToDirectoryRow,
-  TEAM_ROLE_OPTIONS,
 } from "@/components/add-contact-modals";
-import { AvatarUpload, fieldClass } from "@/components/contact-form-fields";
 import { formatShortDate } from "@/lib/format";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib/project-permissions";
-import { buildPendingInvite } from "@/lib/people-invite";
 import { InviteSentToast, type InviteToastPayload } from "@/components/invite-sent-toast";
+import { PendingInviteDetailModal } from "@/components/pending-invite-detail-modal";
 import { PermissionsEditor } from "@/components/permissions-editor";
+import { DirectoryAvatar } from "@/components/directory-avatar";
 import { addInternalTeamMemberToProject } from "@/lib/internal-team-roster";
-import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
-import { mockProjects } from "@/lib/mock/projects";
+import { resolveClientProjectList } from "@/lib/mock/project-session";
 import type { Project } from "@/lib/types/project";
 
 function inviteHasCustomPermissions(inv: PendingInvite): boolean {
@@ -41,6 +42,11 @@ function inviteHasCustomPermissions(inv: PendingInvite): boolean {
 }
 
 const SEGMENTS: PeopleSegment[] = ["team", "vendor", "client"];
+
+export type PeopleAddSignal = {
+  kind: "client" | "team" | "vendor";
+  tick: number;
+};
 
 function initials(name: string) {
   const p = name.trim().split(/\s+/);
@@ -57,12 +63,18 @@ function segmentFromRoleLabel(role: string): PeopleSegment | null {
   return null;
 }
 
-function AddTeamMemberToProjectRoster({ teamPeople }: { teamPeople: DirectoryPerson[] }) {
-  const [projects, setProjects] = useState<Project[]>(() => mockProjects);
+function AddTeamMemberToProjectRoster({
+  teamPeople,
+  initialProjects,
+}: {
+  teamPeople: DirectoryPerson[];
+  initialProjects?: Project[];
+}) {
+  const [projects, setProjects] = useState<Project[]>(initialProjects ?? []);
 
   useEffect(() => {
-    setProjects(mergeProjectLists(mockProjects, readSessionProjects()));
-  }, []);
+    setProjects(resolveClientProjectList(initialProjects ?? []));
+  }, [initialProjects]);
 
   const projectsSorted = useMemo(
     () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
@@ -171,7 +183,18 @@ function AddTeamMemberToProjectRoster({ teamPeople }: { teamPeople: DirectoryPer
   );
 }
 
-export function PeopleView() {
+export function PeopleView({
+  initialContacts,
+  initialProjects,
+  addSignal,
+  onContactsChange,
+}: {
+  initialContacts?: Contact[];
+  initialProjects?: Project[];
+  addSignal?: PeopleAddSignal | null;
+  onContactsChange?: (count: number) => void;
+} = {}) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [segment, setSegment] = useState<PeopleSegment>(() => {
     const s = searchParams.get("segment");
@@ -180,37 +203,107 @@ export function PeopleView() {
   const [q, setQ] = useState(() => searchParams.get("q") ?? "");
   const [detailPerson, setDetailPerson] = useState<ReturnType<typeof contactToDirectoryRow> | null>(null);
   const [pendingInviteDetail, setPendingInviteDetail] = useState<PendingInvite | null>(null);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [inviteInitialSegment, setInviteInitialSegment] = useState<PeopleSegment>("team");
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [editClientContact, setEditClientContact] = useState<Contact | null>(null);
   const [vendorModalOpen, setVendorModalOpen] = useState(false);
+  const [editVendorContact, setEditVendorContact] = useState<Contact | null>(null);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [editTeamContact, setEditTeamContact] = useState<Contact | null>(null);
   const [inviteToast, setInviteToast] = useState<InviteToastPayload | null>(null);
-  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>(() => [...MOCK_PENDING_INVITES]);
-  const [contacts, setContacts] = useState<Contact[]>(() => loadContacts());
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>(() =>
+    isClientMockBackend() ? [...MOCK_PENDING_INVITES] : [],
+  );
+  const [contacts, setContacts] = useState<Contact[]>(() =>
+    initialContacts?.length ? initialContacts : loadContacts(),
+  );
   const [contactsVersion, setContactsVersion] = useState(0);
 
+  async function refreshContacts() {
+    setContactsVersion((v) => v + 1);
+    if (isClientLiveBackend()) {
+      try {
+        const res = await fetch("/api/contacts", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as { contacts?: Contact[] };
+          if (Array.isArray(data.contacts)) {
+            const { mergeSeedLiveContacts } = await import("@/lib/data/live-cache");
+            mergeSeedLiveContacts(data.contacts);
+            setContacts(loadContacts());
+          }
+        }
+      } catch {
+        /* router.refresh still re-seeds from RSC */
+      }
+      router.refresh();
+      return;
+    }
+    setContacts(loadContacts());
+  }
+
   useEffect(() => {
+    if (initialContacts) setContacts(initialContacts);
+  }, [initialContacts]);
+
+  useEffect(() => {
+    onContactsChange?.(contacts.length);
+  }, [contacts.length, onContactsChange]);
+
+  useEffect(() => {
+    if (!addSignal?.tick) return;
+    setDetailPerson(null);
+    setPendingInviteDetail(null);
+    if (addSignal.kind === "client") {
+      setEditClientContact(null);
+      setClientModalOpen(true);
+    } else if (addSignal.kind === "team") {
+      setEditTeamContact(null);
+      setTeamModalOpen(true);
+    } else {
+      setVendorModalOpen(true);
+    }
+  }, [addSignal?.tick, addSignal?.kind]);
+
+  useEffect(() => {
+    if (!isClientMockBackend()) return;
     setContacts(loadContacts());
   }, [contactsVersion]);
 
   useEffect(() => {
-    const saved = readMockLs<PendingInvite[]>(MOCK_LS.pendingInvites);
-    if (saved !== null && Array.isArray(saved)) setPendingInvites(saved);
+    function onContactsChanged() {
+      setContacts(loadContacts());
+      setContactsVersion((v) => v + 1);
+    }
+    window.addEventListener("onpro-contacts-changed", onContactsChanged);
+    return () => window.removeEventListener("onpro-contacts-changed", onContactsChanged);
   }, []);
 
   useEffect(() => {
-    if (!detailPerson && !inviteModalOpen && !pendingInviteDetail && !clientModalOpen && !vendorModalOpen && !teamModalOpen) return;
+    if (isClientMockBackend()) {
+      const saved = readMockLs<PendingInvite[]>(MOCK_LS.pendingInvites);
+      if (saved !== null && Array.isArray(saved)) setPendingInvites(saved);
+      return;
+    }
+    if (!isClientLiveBackend()) return;
+    void fetch("/api/invites")
+      .then((r) => r.json())
+      .then((data: { invites?: PendingInvite[] }) => {
+        if (Array.isArray(data.invites)) setPendingInvites(data.invites);
+      })
+      .catch(() => {});
+  }, [contactsVersion]);
+
+  useEffect(() => {
+    if (!detailPerson && !pendingInviteDetail && !clientModalOpen && !vendorModalOpen && !teamModalOpen) return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (inviteModalOpen) setInviteModalOpen(false);
-      else if (clientModalOpen) {
+      if (clientModalOpen) {
         setClientModalOpen(false);
         setEditClientContact(null);
       }
-      else if (vendorModalOpen) setVendorModalOpen(false);
+      else if (vendorModalOpen) {
+        setVendorModalOpen(false);
+        setEditVendorContact(null);
+      }
       else if (teamModalOpen) {
         setTeamModalOpen(false);
         setEditTeamContact(null);
@@ -220,7 +313,7 @@ export function PeopleView() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailPerson, inviteModalOpen, pendingInviteDetail, clientModalOpen, vendorModalOpen, teamModalOpen]);
+  }, [detailPerson, pendingInviteDetail, clientModalOpen, vendorModalOpen, teamModalOpen]);
 
   const teamPeople = useMemo(
     () =>
@@ -239,20 +332,39 @@ export function PeopleView() {
     return rows.map((c) => contactToDirectoryRow(c, contacts));
   }, [contacts, segment, q]);
 
-  function queueInvite(inv: PendingInvite) {
+  async function copyPendingInviteLink(inviteId: string): Promise<void> {
+    const res = await fetch("/api/invites/resend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invite_id: inviteId, refresh_expiry: true }),
+    });
+    const data = (await res.json()) as { loginUrl?: string; error?: string };
+    if (!res.ok || !data.loginUrl) {
+      throw new Error(data.error ?? "Could not get invite link");
+    }
+    await navigator.clipboard.writeText(data.loginUrl);
+    setInviteToast({
+      email: pendingInvites.find((i) => i.id === inviteId)?.email ?? "Invitee",
+      segment: pendingInvites.find((i) => i.id === inviteId)?.segment ?? "client",
+      loginUrl: data.loginUrl,
+    });
+  }
+
+  function queueInvite(inv: PendingInvite, loginUrl?: string) {
+    if (isClientLiveBackend()) {
+      setPendingInvites((prev) => {
+        const exists = prev.some((p) => p.id === inv.id);
+        return exists ? prev : [...prev, inv];
+      });
+      setInviteToast({ email: inv.email, segment: inv.segment, loginUrl });
+      return;
+    }
     setPendingInvites((prev) => {
       const next = [...prev, inv];
       writeMockLs(MOCK_LS.pendingInvites, next);
       return next;
     });
-    setInviteToast({ email: inv.email, segment: inv.segment });
-  }
-
-  function openInviteModal(forSegment: "team" | "vendor") {
-    setDetailPerson(null);
-    setPendingInviteDetail(null);
-    setInviteInitialSegment(forSegment);
-    setInviteModalOpen(true);
+    setInviteToast({ email: inv.email, segment: inv.segment, loginUrl });
   }
 
   const clientTable = segment === "client";
@@ -263,12 +375,19 @@ export function PeopleView() {
         <PendingInviteDetailModal
           invite={pendingInviteDetail}
           onClose={() => setPendingInviteDetail(null)}
+          onCopyInviteLink={isClientLiveBackend() ? copyPendingInviteLink : undefined}
           onDelete={(id) => {
-            setPendingInvites((prev) => {
-              const next = prev.filter((i) => i.id !== id);
-              writeMockLs(MOCK_LS.pendingInvites, next);
-              return next;
-            });
+            if (isClientLiveBackend()) {
+              void fetch(`/api/invites?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => {
+                setPendingInvites((prev) => prev.filter((i) => i.id !== id));
+              });
+            } else {
+              setPendingInvites((prev) => {
+                const next = prev.filter((i) => i.id !== id);
+                writeMockLs(MOCK_LS.pendingInvites, next);
+                return next;
+              });
+            }
             setPendingInviteDetail(null);
           }}
         />
@@ -278,20 +397,23 @@ export function PeopleView() {
           person={detailPerson}
           contacts={contacts}
           onClose={() => setDetailPerson(null)}
-          onContactsUpdated={() => setContactsVersion((v) => v + 1)}
+          onContactsUpdated={refreshContacts}
+          onDeleted={refreshContacts}
           onEditClient={(contact) => {
             setDetailPerson(null);
             setEditClientContact(contact);
             setClientModalOpen(true);
           }}
-        />
-      ) : null}
-      {inviteModalOpen ? (
-        <InviteByEmailModal
-          initialSegment={inviteInitialSegment}
-          onClose={() => setInviteModalOpen(false)}
-          onSent={queueInvite}
-          onSaved={() => setContactsVersion((v) => v + 1)}
+          onEditTeam={(contact) => {
+            setDetailPerson(null);
+            setEditTeamContact(contact);
+            setTeamModalOpen(true);
+          }}
+          onEditVendor={(contact) => {
+            setDetailPerson(null);
+            setEditVendorContact(contact);
+            setVendorModalOpen(true);
+          }}
         />
       ) : null}
       {teamModalOpen ? (
@@ -301,7 +423,7 @@ export function PeopleView() {
             setTeamModalOpen(false);
             setEditTeamContact(null);
           }}
-          onSaved={() => setContactsVersion((v) => v + 1)}
+          onSaved={refreshContacts}
           onInviteSent={queueInvite}
         />
       ) : null}
@@ -312,14 +434,19 @@ export function PeopleView() {
             setClientModalOpen(false);
             setEditClientContact(null);
           }}
-          onSaved={() => setContactsVersion((v) => v + 1)}
+          onSaved={refreshContacts}
           onInviteSent={queueInvite}
         />
       ) : null}
       {vendorModalOpen ? (
         <AddVendorModal
-          onClose={() => setVendorModalOpen(false)}
-          onSaved={() => setContactsVersion((v) => v + 1)}
+          existing={editVendorContact}
+          onClose={() => {
+            setVendorModalOpen(false);
+            setEditVendorContact(null);
+          }}
+          onSaved={refreshContacts}
+          onInviteSent={queueInvite}
         />
       ) : null}
 
@@ -328,27 +455,11 @@ export function PeopleView() {
       <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 pb-10 pt-5">
         <div className="mx-auto max-w-[1600px] space-y-8">
           <section>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-text-primary">Pending invitations</h2>
-                <p className="mt-1 text-xs text-text-secondary">
-                  Client and teammate contacts are added with Add client / Add teammate. Vendor invites save permissions on the contact profile.
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDetailPerson(null);
-                    setPendingInviteDetail(null);
-                    setEditClientContact(null);
-                    setClientModalOpen(true);
-                  }}
-                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-                >
-                  + Add client
-                </button>
-              </div>
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary">Pending invitations</h2>
+              <p className="mt-1 text-xs text-text-secondary">
+                Copy invite links from each card or open to resend. Links expire after 14 days.
+              </p>
             </div>
             {pendingInvites.length === 0 ? (
               <p className="mt-4 text-sm text-text-secondary">No pending invites.</p>
@@ -364,14 +475,12 @@ export function PeopleView() {
                       tabIndex={0}
                       onClick={() => {
                         setDetailPerson(null);
-                        setInviteModalOpen(false);
                         setPendingInviteDetail(inv);
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setDetailPerson(null);
-                          setInviteModalOpen(false);
                           setPendingInviteDetail(inv);
                         }
                       }}
@@ -388,6 +497,20 @@ export function PeopleView() {
                       <p className="mt-2 text-[11px] text-text-secondary">Sent {formatShortDate(`${inv.sent_at}T12:00:00`)}</p>
                       {inviteHasCustomPermissions(inv) ? (
                         <p className="mt-2 text-[11px] font-semibold text-violet-700">Custom permissions</p>
+                      ) : null}
+                      {isClientLiveBackend() ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void copyPendingInviteLink(inv.id).catch((err) => {
+                              window.alert(err instanceof Error ? err.message : "Could not copy link");
+                            });
+                          }}
+                          className="mt-3 text-left text-[11px] font-semibold text-[#7c3aed] hover:underline"
+                        >
+                          Resend invite link
+                        </button>
                       ) : null}
                       <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
                         Tap to manage
@@ -436,22 +559,32 @@ export function PeopleView() {
                   </button>
                 ) : null}
                 {segment === "vendor" ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setVendorModalOpen(true)}
-                      className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
-                    >
-                      + Add vendor
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openInviteModal("vendor")}
-                      className="shrink-0 rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
-                    >
-                      + Invite by email
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailPerson(null);
+                      setPendingInviteDetail(null);
+                      setEditVendorContact(null);
+                      setVendorModalOpen(true);
+                    }}
+                    className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
+                  >
+                    + Add vendor
+                  </button>
+                ) : null}
+                {segment === "client" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailPerson(null);
+                      setPendingInviteDetail(null);
+                      setEditClientContact(null);
+                      setClientModalOpen(true);
+                    }}
+                    className="shrink-0 rounded-xl border-2 border-dashed border-accent/40 px-4 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50"
+                  >
+                    + Add client
+                  </button>
                 ) : null}
                 <input
                   value={q}
@@ -504,7 +637,12 @@ export function PeopleView() {
                 </table>
               </div>
 
-              {segment === "team" ? <AddTeamMemberToProjectRoster teamPeople={teamPeople} /> : null}
+              {segment === "team" ? (
+                <AddTeamMemberToProjectRoster
+                  teamPeople={teamPeople}
+                  initialProjects={initialProjects}
+                />
+              ) : null}
             </section>
           </div>
         </div>
@@ -523,7 +661,7 @@ function PersonRow({
   onOpen: () => void;
 }) {
   const n = projectsForPerson(p.id).length;
-  const avatarUrl = p.contact.avatar_url;
+  const avatarUrl = p.contact.avatar_url ?? null;
   const companyLabel = p.clientCompanyName ?? (p.clientCompanyCode ? p.clientCompanyCode : "Individual");
   const avatarText = clientTable ? initials(companyLabel) : initials(p.name);
 
@@ -561,18 +699,7 @@ function PersonRow({
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatarUrl}
-                alt=""
-                className="h-10 w-10 shrink-0 rounded-full object-cover ring-2 ring-border-light"
-              />
-            ) : (
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
-                {avatarText}
-              </span>
-            )}
+            <DirectoryAvatar name={p.name} avatarUrl={avatarUrl} size="sm" />
             <div className="min-w-0">
               <p className="font-medium text-accent underline-offset-2 hover:underline">{p.name}</p>
               {p.subtitle ? <p className="mt-0.5 text-xs text-text-secondary">{p.subtitle}</p> : null}
@@ -607,435 +734,38 @@ function PersonRow({
   );
 }
 
-function PendingInviteDetailModal({
-  invite: inv,
-  onClose,
-  onDelete,
-}: {
-  invite: PendingInvite;
-  onClose: () => void;
-  onDelete: (id: string) => void;
-}) {
-  function handleDelete() {
-    if (!window.confirm(`Remove the pending invite for ${inv.email}?`)) return;
-    onDelete(inv.id);
-  }
-
-  return (
-    <div className="fixed inset-0 z-[223] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
-      <button type="button" className="absolute inset-0 cursor-default" aria-label="Close" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="pending-invite-title"
-        className="relative z-10 flex max-h-[min(720px,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-border-light sm:max-w-xl"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Pending invitation</p>
-            <span
-              className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(inv.segment)}`}
-            >
-              {segmentLabel(inv.segment)}
-            </span>
-            <h2 id="pending-invite-title" className="mt-2 break-all text-lg font-bold text-text-primary">
-              {inv.email}
-            </h2>
-            <p className="mt-1 text-sm text-text-secondary">{inv.invited_label}</p>
-            <p className="mt-2 text-xs text-text-secondary">
-              Sent {formatShortDate(`${inv.sent_at}T12:00:00`)} · mock, stored in this browser
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-lg p-2 text-text-secondary hover:bg-surface-body hover:text-text-primary"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Access after accept</p>
-          <p className="mt-2 text-sm text-text-secondary">
-            This email only tracks the invitation. Permissions come from the contact or company profile in People, and
-            from each project&apos;s <span className="font-semibold text-text-primary">People &amp; access</span> tab.
-          </p>
-          <p className="mt-3 text-sm text-text-secondary">
-            Company members inherit their company&apos;s permission profile automatically.
-          </p>
-        </div>
-
-        <div className="flex shrink-0 flex-col gap-2 border-t border-border-light px-5 py-3 sm:flex-row sm:justify-end sm:gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
-          >
-            Close
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-800 hover:bg-red-100"
-          >
-            Delete invite
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const INVITE_SEGMENTS: PeopleSegment[] = ["team", "vendor"];
-
-function InviteByEmailModal({
-  onClose,
-  onSent,
-  onSaved,
-  initialSegment = "team",
-}: {
-  onClose: () => void;
-  onSent: (invite: PendingInvite) => void;
-  onSaved: () => void;
-  initialSegment?: PeopleSegment;
-}) {
-  const emailRef = useRef<HTMLInputElement>(null);
-  const [email, setEmail] = useState("");
-  const [inviteSegment, setInviteSegment] = useState<PeopleSegment>(
-    initialSegment === "client" ? "team" : initialSegment,
-  );
-  const [note, setNote] = useState("");
-  const [teamRole, setTeamRole] = useState<TeamRole>("staff");
-  const [teamRoleCustom, setTeamRoleCustom] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [vendorName, setVendorName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [permissions, setPermissions] = useState<ProjectPermissionFlags>(() =>
-    defaultPermissionsForSegment(initialSegment === "client" ? "team" : initialSegment),
-  );
-  const [existingMatch, setExistingMatch] = useState<Contact | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setPermissions(defaultPermissionsForSegment(inviteSegment));
-  }, [inviteSegment]);
-
-  useEffect(() => {
-    requestAnimationFrame(() => emailRef.current?.focus());
-  }, []);
-
-  function validateEmail(value: string): boolean {
-    const v = value.trim();
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-  }
-
-  function checkExistingEmail(value: string) {
-    const trimmed = value.trim();
-    if (!trimmed || !validateEmail(trimmed)) {
-      setExistingMatch(null);
-      return;
-    }
-    const match = findContactByEmail(loadContacts(), trimmed) ?? null;
-    setExistingMatch(match);
-    if (match?.permissions) setPermissions(match.permissions);
-    if (match?.segment === "vendor" && match.kind === "company") {
-      setVendorName(match.name);
-      if (match.contact_name) setContactName(match.contact_name);
-    } else if (match?.segment === "team") {
-      setContactName(match.contact_name ?? match.name);
-      if (match.team_role) setTeamRole(match.team_role);
-      if (match.team_role_custom) setTeamRoleCustom(match.team_role_custom);
-    }
-    if (match?.phone) setPhone(match.phone);
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed) {
-      setError("Enter an email address.");
-      return;
-    }
-    if (!validateEmail(trimmed)) {
-      setError("That doesn't look like a valid email.");
-      return;
-    }
-    if (inviteSegment === "vendor" && !vendorName.trim() && !existingMatch) {
-      setError("Vendor company name is required for new contacts.");
-      return;
-    }
-    if (inviteSegment === "team" && !contactName.trim() && !existingMatch) {
-      setError("Contact name is required for new teammates.");
-      return;
-    }
-    setError(null);
-    upsertInvitedContact({
-      segment: inviteSegment,
-      email: trimmed,
-      permissions,
-      name: inviteSegment === "vendor" ? vendorName.trim() : contactName.trim(),
-      contactName: inviteSegment === "vendor" ? contactName.trim() || undefined : contactName.trim(),
-      phone: phone.trim() || undefined,
-      teamRole: inviteSegment === "team" ? teamRole : undefined,
-      teamRoleCustom: inviteSegment === "team" ? teamRoleCustom : undefined,
-    });
-    onSaved();
-    onSent(
-      buildPendingInvite({
-        email: trimmed,
-        segment: inviteSegment,
-        note,
-        teamRole: inviteSegment === "team" ? teamRole : undefined,
-        teamRoleCustom: inviteSegment === "team" ? teamRoleCustom : undefined,
-        contactName: inviteSegment === "team" ? contactName : undefined,
-        phone: inviteSegment === "team" ? phone : undefined,
-      }),
-    );
-    onClose();
-  }
-
-  return (
-    <div className="fixed inset-0 z-[225] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
-      <button type="button" className="absolute inset-0 cursor-default" aria-label="Close" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="invite-email-title"
-        className="relative z-10 flex min-h-0 max-h-[min(680px,92vh)] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-border-light sm:max-w-2xl"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
-          <div>
-            <h2 id="invite-email-title" className="text-lg font-bold text-text-primary">
-              Invite {inviteSegment === "team" ? "teammate" : "vendor"} by email
-            </h2>
-            <p className="mt-1 text-sm text-text-secondary">
-              For clients, use Add client and optionally send an invite from there.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-lg p-2 text-text-secondary hover:bg-surface-body hover:text-text-primary"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <label htmlFor="invite-email-input" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            Email
-          </label>
-          <input
-            ref={emailRef}
-            id="invite-email-input"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(ev) => {
-              setEmail(ev.target.value);
-              setError(null);
-              checkExistingEmail(ev.target.value);
-            }}
-            onBlur={(ev) => checkExistingEmail(ev.target.value)}
-            placeholder="name@company.com"
-            className="mt-2 h-11 w-full rounded-xl border border-border-light bg-surface-card px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
-          />
-          {existingMatch ? (
-            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 ring-1 ring-amber-200">
-              Will update existing contact
-            </p>
-          ) : null}
-
-          <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-text-secondary">Segment</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {INVITE_SEGMENTS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setInviteSegment(s)}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${
-                  inviteSegment === s
-                    ? segmentPillSelectedClass(s)
-                    : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
-                }`}
-              >
-                {segmentLabel(s)}
-              </button>
-            ))}
-          </div>
-
-          {inviteSegment === "team" ? (
-            <div className="mt-5 space-y-4">
-              <label htmlFor="invite-team-role" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Team role
-              </label>
-              <select
-                id="invite-team-role"
-                value={teamRole}
-                onChange={(ev) => setTeamRole(ev.target.value as TeamRole)}
-                className={fieldClass}
-              >
-                {TEAM_ROLE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              {teamRole === "custom" ? (
-                <label htmlFor="invite-team-role-custom" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  Custom role label
-                  <input
-                    id="invite-team-role-custom"
-                    type="text"
-                    value={teamRoleCustom}
-                    onChange={(ev) => setTeamRoleCustom(ev.target.value)}
-                    placeholder="e.g. Project coordinator"
-                    className={fieldClass}
-                  />
-                </label>
-              ) : null}
-              <label htmlFor="invite-contact-name" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Contact name
-                <input
-                  id="invite-contact-name"
-                  type="text"
-                  value={contactName}
-                  onChange={(ev) => setContactName(ev.target.value)}
-                  placeholder="Full name"
-                  className={fieldClass}
-                  required={!existingMatch}
-                />
-              </label>
-              <label htmlFor="invite-phone" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Phone <span className="font-normal normal-case text-text-secondary">(optional)</span>
-                <input
-                  id="invite-phone"
-                  type="tel"
-                  value={phone}
-                  onChange={(ev) => setPhone(ev.target.value)}
-                  placeholder="+1 555 0100"
-                  className={fieldClass}
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {inviteSegment === "vendor" ? (
-            <div className="mt-5 space-y-4">
-              <label htmlFor="invite-vendor-name" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Vendor company name
-                <input
-                  id="invite-vendor-name"
-                  type="text"
-                  value={vendorName}
-                  onChange={(ev) => setVendorName(ev.target.value)}
-                  placeholder="Millworks Collective"
-                  className={fieldClass}
-                  required={!existingMatch}
-                />
-              </label>
-              <label htmlFor="invite-vendor-contact" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Contact name <span className="font-normal normal-case text-text-secondary">(optional)</span>
-                <input
-                  id="invite-vendor-contact"
-                  type="text"
-                  value={contactName}
-                  onChange={(ev) => setContactName(ev.target.value)}
-                  placeholder="Primary contact"
-                  className={fieldClass}
-                />
-              </label>
-              <label htmlFor="invite-vendor-phone" className="block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                Phone <span className="font-normal normal-case text-text-secondary">(optional)</span>
-                <input
-                  id="invite-vendor-phone"
-                  type="tel"
-                  value={phone}
-                  onChange={(ev) => setPhone(ev.target.value)}
-                  placeholder="+1 555 0100"
-                  className={fieldClass}
-                />
-              </label>
-            </div>
-          ) : null}
-
-          <label htmlFor="invite-note-input" className="mt-5 block text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            Label <span className="font-normal normal-case text-text-secondary">(optional)</span>
-          </label>
-          <input
-            id="invite-note-input"
-            type="text"
-            value={note}
-            onChange={(ev) => setNote(ev.target.value)}
-            placeholder="e.g. Vendor · QC lane"
-            className="mt-2 h-11 w-full rounded-xl border border-border-light bg-surface-card px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
-          />
-
-          <fieldset className="mt-5 rounded-xl border border-border-light bg-surface-body/30 px-3 py-3">
-            <p className="text-sm font-semibold text-text-primary">
-              {inviteSegment === "vendor" ? "Company permissions" : "Contact permissions"}
-            </p>
-            <p className="mt-1 text-[11px] text-text-secondary">
-              Saved on the contact profile when you send this invite. Per-project overrides are set under each
-              project&apos;s <span className="font-semibold text-text-primary">People &amp; access</span> tab.
-            </p>
-            <div className="mt-3 max-h-[min(220px,32vh)] overflow-y-auto rounded-xl border border-border-light bg-white p-3">
-              <PermissionsEditor segment={inviteSegment} flags={permissions} onChange={setPermissions} dense />
-            </div>
-          </fieldset>
-
-          {error ? (
-            <p className="mt-3 text-sm font-medium text-red-600" role="alert">
-              {error}
-            </p>
-          ) : null}
-          </div>
-
-          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border-light px-5 py-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-            >
-              Save contact &amp; send invite
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 function PersonDetailModal({
   person: p,
   contacts,
   onClose,
   onEditClient,
+  onEditTeam,
+  onEditVendor,
   onContactsUpdated,
+  onDeleted,
 }: {
   person: ReturnType<typeof contactToDirectoryRow>;
   contacts: Contact[];
   onClose: () => void;
   onEditClient: (contact: Contact) => void;
+  onEditTeam: (contact: Contact) => void;
+  onEditVendor: (contact: Contact) => void;
   onContactsUpdated: () => void;
+  onDeleted: () => void;
 }) {
   const access = projectsForPerson(p.id);
   const contact = p.contact;
   const effective = effectiveContactPermissions(contacts, contact);
   const [permDraft, setPermDraft] = useState<ProjectPermissionFlags>(effective.flags);
   const [permSaved, setPermSaved] = useState(false);
+  const [membershipId, setMembershipId] = useState<number | null>(null);
+  const [revoking, setRevoking] = useState(false);
+  const { deleting, deleteError, clearDeleteError, handleDelete } = useDeleteContact({
+    onSuccess: () => {
+      onDeleted();
+      onClose();
+    },
+  });
   const companyMembers =
     p.isCompany && contact.member_contact_ids?.length
       ? contacts.filter((c) => contact.member_contact_ids!.includes(c.id))
@@ -1045,33 +775,94 @@ function PersonDetailModal({
     setPermDraft(effectiveContactPermissions(contacts, contact).flags);
   }, [contact, contacts]);
 
-  function openEdit() {
-    if (p.segment !== "client") return;
-    if (p.isCompanyMember && contact.parent_company_id) {
-      const parent = contacts.find((c) => c.id === contact.parent_company_id);
-      if (parent) {
-        onEditClient(parent);
-        return;
-      }
+  useEffect(() => {
+    if (
+      !isClientLiveBackend() ||
+      p.isCompanyMember ||
+      (p.segment !== "client" && p.segment !== "team" && p.segment !== "vendor")
+    ) {
+      setMembershipId(null);
+      return;
     }
-    onEditClient(contact);
-  }
+    void fetch(`/api/workspace/memberships?contact_id=${encodeURIComponent(contact.id)}`)
+      .then((r) => r.json())
+      .then((data: { membership?: { id: number } | null }) => {
+        setMembershipId(data.membership?.id ?? null);
+      })
+      .catch(() => setMembershipId(null));
+  }, [contact.id, p.segment, p.isCompanyMember]);
 
-  function savePermissions() {
+  async function savePermissions() {
     if (p.isCompanyMember) return;
-    const targetId = p.isCompany ? contact.id : contact.id;
-    const now = new Date().toISOString();
-    const next = loadContacts().map((c) =>
-      c.id === targetId ? { ...c, permissions: permDraft, updated_at: now } : c,
-    );
-    saveContacts(next);
-    onContactsUpdated();
-    setPermSaved(true);
-    window.setTimeout(() => setPermSaved(false), 2000);
+    const targetId = contact.id;
+    try {
+      await commitContactPermissions(targetId, permDraft);
+      onContactsUpdated();
+      setPermSaved(true);
+      window.setTimeout(() => setPermSaved(false), 2000);
+    } catch {
+      setPermSaved(false);
+    }
   }
 
-  const canEditClient = p.segment === "client";
+  async function revokeLinkedAccess() {
+    if (membershipId == null) return;
+    setRevoking(true);
+    try {
+      await fetch("/api/workspace/memberships/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: Number(contact.id) }),
+      });
+      setMembershipId(null);
+      onContactsUpdated();
+    } finally {
+      setRevoking(false);
+    }
+  }
+
   const canEditPermissions = !p.isCompanyMember;
+
+  function openEdit() {
+    if (p.segment === "client") {
+      if (p.isCompanyMember && contact.parent_company_id) {
+        const parent = contacts.find((c) => c.id === contact.parent_company_id);
+        if (parent) {
+          onEditClient(parent);
+          return;
+        }
+      }
+      onEditClient(contact);
+      return;
+    }
+    if (p.segment === "team") {
+      onEditTeam(contact);
+      return;
+    }
+    if (p.segment === "vendor") {
+      onEditVendor(contact);
+    }
+  }
+
+  const editLabel =
+    p.segment === "client"
+      ? p.isCompanyMember
+        ? "Edit company"
+        : p.isCompany
+          ? "Edit client & members"
+          : "Edit client"
+      : p.segment === "team"
+        ? "Edit teammate"
+        : "Edit vendor";
+
+  const deleteLabel =
+    p.segment === "client"
+      ? p.isCompany
+        ? "Delete client"
+        : "Remove contact"
+      : p.segment === "team"
+        ? "Delete teammate"
+        : "Delete vendor";
 
   return (
     <div className="fixed inset-0 z-[220] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
@@ -1103,11 +894,6 @@ function PersonDetailModal({
                   {p.clientCompanyCode}
                 </p>
               ) : null}
-              {p.clientPeople.length > 0 ? (
-                <p className="truncate text-sm text-text-secondary">
-                  People: {p.clientPeople.join(", ")}
-                </p>
-              ) : null}
               <p className="truncate text-sm text-text-secondary">{p.email}</p>
               {!p.isCompany && p.company ? (
                 <p className="truncate text-xs text-text-secondary">{p.company}</p>
@@ -1125,6 +911,22 @@ function PersonDetailModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {membershipId != null && isClientLiveBackend() ? (
+            <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50/90 px-4 py-3">
+              <p className="text-sm font-semibold text-emerald-900">App account linked</p>
+              <p className="mt-1 text-xs text-emerald-800">
+                This contact joined your workspace with the email above. Revoke if the wrong person claimed the profile.
+              </p>
+              <button
+                type="button"
+                disabled={revoking}
+                onClick={() => void revokeLinkedAccess()}
+                className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                {revoking ? "Revoking…" : "Revoke access"}
+              </button>
+            </div>
+          ) : null}
           {companyMembers.length > 0 ? (
             <div className="mb-6">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Company members</h3>
@@ -1236,23 +1038,39 @@ function PersonDetailModal({
           )}
         </div>
 
-        <div className="shrink-0 space-y-2 border-t border-border-light px-5 py-3">
-          {canEditClient ? (
+        {deleteError ? (
+          <p className="shrink-0 border-t border-border-light px-5 py-2 text-sm font-semibold text-red-600">
+            {deleteError}
+          </p>
+        ) : null}
+        <div className="shrink-0 flex items-center justify-between gap-3 border-t border-border-light px-5 py-3">
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => {
+              clearDeleteError();
+              void handleDelete(contact);
+            }}
+            className="rounded-xl px-2 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {deleting ? "Deleting…" : deleteLabel}
+          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+            >
+              Close
+            </button>
             <button
               type="button"
               onClick={openEdit}
-              className="w-full rounded-xl bg-accent py-2.5 text-sm font-semibold text-white hover:opacity-95"
+              className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-95"
             >
-              {p.isCompanyMember ? "Edit company" : p.isCompany ? "Edit client & members" : "Edit client"}
+              {editLabel}
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full rounded-xl border border-border-light bg-white py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
-          >
-            Close
-          </button>
+          </div>
         </div>
       </div>
     </div>

@@ -46,10 +46,17 @@ export function resetLedgerOverrides(): void {
   localStorage.removeItem(OVERRIDES_KEY);
 }
 
+const LEGACY_CAP_SYSTEM_IDS: Record<string, string> = {
+  "cap-rails": "cap-supabase-api",
+};
+
 /** Merge saved cap rows with seed so partial completion (e.g. iOS 95%) is not lost. */
 export function mergeCapSystemsWithSeed(overrides?: LedgerCapSystem[]): LedgerCapSystem[] {
   const seedById = new Map(LEDGER_SEED.capSystems.map((s) => [s.id, s]));
-  const rows = overrides ?? LEDGER_SEED.capSystems;
+  const rows = (overrides ?? LEDGER_SEED.capSystems).map((row) => {
+    const id = LEGACY_CAP_SYSTEM_IDS[row.id] ?? row.id;
+    return id === row.id ? row : { ...row, id };
+  });
   return rows.map((row) => {
     const seed = seedById.get(row.id);
     if (!seed) return row;

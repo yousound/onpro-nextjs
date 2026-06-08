@@ -12,11 +12,14 @@ import type {
 import { printPackingSlip } from "@/lib/packing-slip-print";
 import { loadContacts } from "@/lib/contacts-store";
 import { loadProjectJobs } from "@/lib/project-wip-edits";
+import { useCurrentUser } from "@/components/profile-provider";
 import {
   buildPackingSlipLinesFromJobs,
   createPackingSlipDraft,
   exportPackingSlipCsv,
+  MOCK_PACKING_SLIP_ORIGIN,
   packingSlipCompanyName,
+  packingSlipOriginFromUser,
   totalPieces,
 } from "@/lib/packing-slip";
 import {
@@ -41,8 +44,6 @@ function cloneSlip(slip: PackingSlipDocument): PackingSlipDocument {
     lines: slip.lines.map((l) => ({ ...l })),
   };
 }
-
-const DEFAULT_FROM_ADDRESS = "456 Industrial Blvd, Los Angeles, CA 90001";
 
 function PackingContactSelect({
   label,
@@ -239,6 +240,7 @@ function PackingSlipEditor({
   draft,
   contacts,
   partyOptions,
+  defaultFromAddress,
   onChange,
   onSave,
   onCancel,
@@ -247,6 +249,7 @@ function PackingSlipEditor({
   draft: PackingSlipDocument;
   contacts: Contact[];
   partyOptions: Contact[];
+  defaultFromAddress: string;
   onChange: (slip: PackingSlipDocument) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -377,7 +380,7 @@ function PackingSlipEditor({
           savedName={draft.ship_from_name}
           emptyLabel="Select ship from…"
           onSelect={(c) =>
-            onChange(applyShipFromContact(draft, c, contacts, DEFAULT_FROM_ADDRESS))
+            onChange(applyShipFromContact(draft, c, contacts, defaultFromAddress))
           }
         />
         <ContactAddressNote address={draft.ship_from_address} />
@@ -571,6 +574,11 @@ export function PackingSlipSection({
   project: Project;
   onPatchProject: (patch: Partial<Project>) => void;
 }) {
+  const { user } = useCurrentUser();
+  const operatorOrigin = useMemo(() => packingSlipOriginFromUser(user), [user]);
+  const defaultFromAddress =
+    operatorOrigin?.shipFromAddress ?? MOCK_PACKING_SLIP_ORIGIN.shipFromAddress;
+
   const jobs = useMemo(() => loadProjectJobs(project.id, project), [project]);
   const contacts = useMemo(() => loadContacts(), []);
   const partyOptions = useMemo(() => packingSlipContactOptions(contacts), [contacts]);
@@ -587,7 +595,7 @@ export function PackingSlipSection({
 
   function startCreate() {
     setViewId(null);
-    setEditing(cloneSlip(createPackingSlipDraft(project, jobs, contacts)));
+    setEditing(cloneSlip(createPackingSlipDraft(project, jobs, contacts, operatorOrigin)));
   }
 
   function startEdit(slip: PackingSlipDocument) {
@@ -648,6 +656,7 @@ export function PackingSlipSection({
           draft={editing}
           contacts={contacts}
           partyOptions={partyOptions}
+          defaultFromAddress={defaultFromAddress}
           onChange={setEditing}
           onSave={saveEditing}
           onCancel={() => setEditing(null)}

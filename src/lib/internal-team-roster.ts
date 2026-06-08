@@ -1,4 +1,4 @@
-import { MOCK_INTERNAL_TEAM_MEMBERS } from "@/lib/mock-internal-team";
+import { contactDisplayName, loadContacts } from "@/lib/contacts-store";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 
 function mergeDedupeSorted(parts: string[][]): string[] {
@@ -17,6 +17,13 @@ function mergeDedupeSorted(parts: string[][]): string[] {
   return out.sort((a, b) => a.localeCompare(b));
 }
 
+function teamNamesFromDirectory(): string[] {
+  return loadContacts()
+    .filter((c) => c.segment === "team")
+    .map((c) => contactDisplayName(c))
+    .filter((name) => name.trim().length > 0);
+}
+
 export function readLegacyGlobalInternalExtras(): string[] {
   const raw = readMockLs<string[]>(MOCK_LS.internalTeamMembersExtra);
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
@@ -27,16 +34,16 @@ export function readProjectInternalExtras(projectId: number): string[] {
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
 }
 
-/** Names shown in Internal tab assignee dropdowns for this project (seed + legacy global + per-project extras). */
+/** Names shown in Internal tab assignee dropdowns (team directory + per-project extras). */
 export function mergedInternalTeamRoster(projectId: number): string[] {
   return mergeDedupeSorted([
-    MOCK_INTERNAL_TEAM_MEMBERS,
+    teamNamesFromDirectory(),
     readLegacyGlobalInternalExtras(),
     readProjectInternalExtras(projectId),
   ]);
 }
 
-/** Returns false if empty, duplicate (case-insensitive), or already in seed/global/project roster. */
+/** Returns false if empty, duplicate (case-insensitive), or already in roster. */
 export function addInternalTeamMemberToProject(projectId: number, rawName: string): boolean {
   const t = rawName.trim();
   if (!t) return false;

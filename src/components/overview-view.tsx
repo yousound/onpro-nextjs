@@ -1,19 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AssistantQuickOpenButton,
+  PAGE_HEADER_ASSISTANT_CLASS,
+} from "@/components/assistant-quick-open-button";
 import { NotificationsPopover } from "@/components/notifications-popover";
+import { calendarEventsForDay, dedupeCalendarEvents } from "@/lib/calendar-google";
 import { mockCalendarEvents } from "@/lib/mock/calendar-events";
 import { mockDocuments } from "@/lib/mock/documents";
 import { OverviewAssistant } from "@/components/overview-assistant";
+import { useCurrentUser } from "@/components/profile-provider";
+import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { buildOverviewDigest, type OverviewFocusItem } from "@/lib/mock/overview-digest";
+import type { CalendarEvent } from "@/lib/types/calendar";
+import type { Project } from "@/lib/types/project";
+import type { ProjectJob } from "@/lib/types/wip";
+import type { WorkspaceMatch } from "@/lib/types/workspace";
 
-const MOCK_USER = {
-  firstName: "Jerry",
-  displayName: "Jerry M",
-  org: "Fillio Design",
-  avatarSrc: "/user-avatar-demo.png",
-};
+const MOCK_FIRST_NAME = "Jerry";
 
 function greetingForHour(h: number): string {
   if (h < 12) return "Good morning";
@@ -89,28 +95,182 @@ const IN_PROGRESS_CARDS: {
   },
 ];
 
-export function OverviewView() {
-  const digest = useMemo(() => {
-    const ymd = new Date().toISOString().slice(0, 10);
-    return buildOverviewDigest(ymd);
+type InProgressCard = {
+  kind: "Project" | "Job";
+  title: string;
+  subtitle: string;
+  pct: number;
+  next: string;
+  href: string;
+};
+
+function liveInProgressCards(
+  projects: Project[],
+  jobsByProject: Record<number, ProjectJob[]>,
+): InProgressCard[] {
+  const cards: InProgressCard[] = [];
+  for (const p of projects.filter((x) => x.status === "IN-PROGRESS" || x.status === "PENDING").slice(0, 4)) {
+    cards.push({
+      kind: "Project",
+      title: p.name,
+      subtitle: p.client.name,
+      pct: p.status === "IN-PROGRESS" ? 50 : 25,
+      next: p.status_overview?.trim() || "Review milestones",
+      href: `/projects/${p.id}`,
+    });
+  }
+  for (const p of projects) {
+    const jobs = jobsByProject[p.id] ?? [];
+    for (const j of jobs.filter((x) => x.status === "In progress").slice(0, 2)) {
+      if (cards.length >= 4) return cards;
+      cards.push({
+        kind: "Job",
+        title: j.name,
+        subtitle: p.name,
+        pct: 40,
+        next: j.subtitle || "Open job",
+        href: `/projects/${p.id}?inspectJob=${p.id}:${j.id}`,
+      });
+    }
+  }
+  return cards;
+}
+
+export function OverviewView({
+  liveMode = false,
+  projects = [],
+  jobsByProject = {},
+  calendarEvents: initialCalendarEvents = [],
+  todayYmd: initialTodayYmd,
+}: {
+  liveMode?: boolean;
+  projects?: Project[];
+  jobsByProject?: Record<number, ProjectJob[]>;
+  calendarEvents?: CalendarEvent[];
+  todayYmd?: string;
+}) {
+  const fallbackTodayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayYmd = initialTodayYmd ?? fallbackTodayYmd;
+  const [calendarEvents, setCalendarEvents] = useState(initialCalendarEvents);
+  const calendarSeedKeyRef = useRef("");
+
+  useEffect(() => {
+    const seedKey = initialCalendarEvents
+      .map((e) => `${e.calendar_owner_email ?? ""}:${e.external_id ?? e.id}:${e.start_time}`)
+      .join("|");
+    if (seedKey === calendarSeedKeyRef.current) return;
+    calendarSeedKeyRef.current = seedKey;
+    setCalendarEvents(initialCalendarEvents);
+  }, [initialCalendarEvents]);
+
+  const refreshCalendar = useCallback(async () => {
+    if (!isClientLiveBackend()) return;
+    const res = await fetch("/api/calendar/events", { cache: "no-store" });
+    if (!res.ok) return;
+    const json = (await res.json()) as { events?: CalendarEvent[] };
+    if (json.events) setCalendarEvents(dedupeCalendarEvents(json.events));
   }, []);
+
+  const didMountRefreshRef = useRef(false);
+  useEffect(() => {
+    if (!liveMode) return;
+    if (!didMountRefreshRef.current) {
+      didMountRefreshRef.current = true;
+      void refreshCalendar();
+    }
+    const onFocus = () => void refreshCalendar();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [liveMode, refreshCalendar]);
+
+  const digest = useMemo(() => {
+    if (liveMode) {
+      const overdue = projects.filter(
+        (p) =>
+          p.due_date &&
+          p.due_date < todayYmd &&
+          p.status !== "COMPLETED" &&
+          p.status !== "DELIVERED",
+      );
+      const focusItems: OverviewFocusItem[] = overdue.map((p) => ({
+        id: `live-overdue-${p.id}`,
+        area: "Projects",
+        title: p.name,
+        subtitle: p.client.name,
+        href: `/projects/${p.id}`,
+        tone: "warn",
+      }));
+      return {
+        focusItems,
+        overdueProjectCount: overdue.length,
+        projectsInFlight: projects.length,
+        totalUnreadMessages: 0,
+        pendingInvites: 0,
+        totalJobs: Object.values(jobsByProject).reduce((n, j) => n + j.length, 0),
+        documentsCount: 0,
+        calendarNext7d: calendarEvents.filter((e) => e.date >= todayYmd).length,
+        jobsInProgressCount: Object.values(jobsByProject)
+          .flat()
+          .filter((j) => j.status === "In progress").length,
+      };
+    }
+    return buildOverviewDigest(todayYmd);
+  }, [liveMode, projects, jobsByProject, todayYmd, calendarEvents]);
+
+  const inProgressCards = useMemo(
+    () => (liveMode ? liveInProgressCards(projects, jobsByProject) : IN_PROGRESS_CARDS),
+    [liveMode, projects, jobsByProject],
+  );
+
+  const { user: profileUser } = useCurrentUser();
+  const firstName = isClientMockBackend()
+    ? MOCK_FIRST_NAME
+    : (profileUser?.firstName ?? "there");
 
   const hour = new Date().getHours();
   const greeting = greetingForHour(hour);
   const needYou = digest.focusItems.filter((f) => f.tone === "warn" || f.tone === "accent").length;
   const headlineCount = needYou > 0 ? needYou : digest.focusItems.length;
 
+  const showOwnerOnAgenda = useMemo(() => {
+    const owners = new Set(
+      calendarEvents.map((e) => e.calendar_owner_email).filter(Boolean) as string[],
+    );
+    return owners.size > 1;
+  }, [calendarEvents]);
+
   const agenda = useMemo(() => {
+    if (liveMode) {
+      return calendarEventsForDay(calendarEvents, todayYmd).slice(0, 6);
+    }
     return [...mockCalendarEvents]
       .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
       .slice(0, 4);
-  }, []);
+  }, [liveMode, calendarEvents, todayYmd]);
 
   const activity = useMemo(() => {
+    if (liveMode) return [];
     return [...mockDocuments]
       .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
       .slice(0, 3);
-  }, []);
+  }, [liveMode]);
+
+  const [joinedTeams, setJoinedTeams] = useState<WorkspaceMatch[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!liveMode) return;
+    setTeamsLoading(true);
+    void fetch("/api/onboarding/workspace-matches", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { matches: [] }))
+      .then((data: { matches?: WorkspaceMatch[] }) => {
+        setJoinedTeams((data.matches ?? []).filter((m) => m.alreadyJoined));
+      })
+      .catch(() => setJoinedTeams([]))
+      .finally(() => setTeamsLoading(false));
+  }, [liveMode]);
+
+  const showYourTeams = liveMode && (teamsLoading || joinedTeams.length > 0);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-white">
@@ -119,7 +279,7 @@ export function OverviewView() {
           <div className="mx-auto flex max-w-[880px] flex-col gap-6 lg:max-w-none lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight text-text-primary sm:text-4xl">
-                {greeting}, {MOCK_USER.firstName}
+                {greeting}, {firstName}
               </h1>
               <p className="mt-2 text-base text-text-secondary">Here&apos;s what&apos;s most important today.</p>
             </div>
@@ -136,6 +296,7 @@ export function OverviewView() {
                 />
               </label>
               <div className="flex shrink-0 items-center gap-2">
+                <AssistantQuickOpenButton buttonClassName={PAGE_HEADER_ASSISTANT_CLASS} />
                 <NotificationsPopover buttonClassName="relative flex h-10 w-10 items-center justify-center rounded-xl border border-border-light bg-white text-text-secondary shadow-sm transition hover:bg-surface-body" />
               </div>
             </div>
@@ -159,7 +320,9 @@ export function OverviewView() {
                 <ul className="mt-4 space-y-4">
                   {digest.focusItems.length === 0 ? (
                     <li className="rounded-2xl border border-dashed border-border-light bg-surface-body/30 px-4 py-8 text-center text-sm text-text-secondary">
-                      Nothing queued in the mock digest.
+                      {liveMode
+                        ? "Nothing overdue in your live projects."
+                        : "Nothing queued in the mock digest."}
                     </li>
                   ) : (
                     digest.focusItems.map((f) => {
@@ -207,11 +370,16 @@ export function OverviewView() {
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-lg font-semibold text-text-primary">In progress</h2>
                   <span className="rounded-full bg-slate-200/90 px-2.5 py-0.5 text-xs font-bold text-slate-700">
-                    {IN_PROGRESS_CARDS.length}
+                    {inProgressCards.length}
                   </span>
                 </div>
                 <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-                  {IN_PROGRESS_CARDS.map((c) => (
+                  {inProgressCards.length === 0 ? (
+                    <li className="col-span-full rounded-2xl border border-dashed border-border-light bg-surface-body/30 px-4 py-8 text-center text-sm text-text-secondary">
+                      {liveMode ? "No in-progress projects or jobs in live data." : null}
+                    </li>
+                  ) : null}
+                  {inProgressCards.map((c) => (
                     <li key={c.title}>
                       <Link
                         href={c.href}
@@ -240,22 +408,82 @@ export function OverviewView() {
                   ))}
                 </ul>
               </section>
+
+              {showYourTeams ? (
+                <section>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-semibold text-text-primary">Your teams</h2>
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+                      {teamsLoading ? "…" : joinedTeams.length}
+                    </span>
+                  </div>
+                  <ul className="mt-4 space-y-3">
+                    {teamsLoading ? (
+                      <li className="rounded-2xl border border-dashed border-border-light bg-surface-body/30 px-4 py-6 text-center text-sm text-text-secondary">
+                        Loading workspaces…
+                      </li>
+                    ) : (
+                      joinedTeams.map((team) => {
+                        const key = `${team.operatorUserId}:${team.contactId}`;
+                        return (
+                          <li key={key}>
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-light bg-surface-card p-4 shadow-sm">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-text-primary">{team.workspaceName}</p>
+                                <p className="mt-0.5 text-sm text-text-secondary">
+                                  {team.contactDisplayName} · {team.projectCount}{" "}
+                                  {team.projectCount === 1 ? "project" : "projects"}
+                                </p>
+                              </div>
+                              <Link
+                                href="/projects"
+                                className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                              >
+                                Open projects
+                              </Link>
+                            </div>
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
+                </section>
+              ) : null}
             </div>
 
             <aside className="shrink-0 space-y-8 border-t border-border-light pt-8 lg:w-[min(100%,320px)] lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
               <section>
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-text-primary">Today&apos;s agenda</h3>
-                  <Link href="/calendar" className="text-xs font-semibold text-accent hover:underline">
-                    View calendar
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    {liveMode ? (
+                      <button
+                        type="button"
+                        onClick={() => void refreshCalendar()}
+                        className="text-xs font-semibold text-text-secondary hover:text-accent"
+                      >
+                        Sync
+                      </button>
+                    ) : null}
+                    <Link href="/calendar" className="text-xs font-semibold text-accent hover:underline">
+                      View calendar
+                    </Link>
+                  </div>
                 </div>
+                {liveMode && agenda.length === 0 ? (
+                  <p className="mt-3 text-sm text-text-secondary">
+                    No events today. Team calendars sync when each person connects Gmail in Mailroom.
+                  </p>
+                ) : null}
                 <ol className="relative mt-4 space-y-0 border-l border-slate-200 pl-5">
-                  {agenda.map((ev) => (
-                    <li key={ev.id} className="relative pb-6 last:pb-0">
+                  {agenda.map((ev, index) => (
+                    <li key={`${ev.calendar_owner_email ?? ""}-${ev.external_id ?? ev.id}-${index}`} className="relative pb-6 last:pb-0">
                       <span className="absolute -left-[21px] top-1.5 size-2.5 rounded-full border-2 border-white bg-accent shadow ring-1 ring-slate-200" />
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
                         {formatAgendaTime(ev.start_time)}
+                        {showOwnerOnAgenda && ev.calendar_owner_name ? (
+                          <span className="normal-case text-accent"> · {ev.calendar_owner_name}</span>
+                        ) : null}
                       </p>
                       <p className="mt-0.5 text-sm font-medium text-text-primary">{ev.name}</p>
                     </li>

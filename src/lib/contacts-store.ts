@@ -1,19 +1,20 @@
+import { contactIdsForDelete } from "@/lib/contacts-delete";
 import type { Contact, PeopleSegment, TeamRole } from "@/lib/types/contact";
 import { deriveCompanyCode } from "@/lib/types/contact";
 import type { ProjectPermissionFlags } from "@/lib/project-permissions";
 import { defaultPermissionsForSegment } from "@/lib/project-permissions";
 import type { CompanyMemberDraft } from "@/lib/company-members";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { getLiveCachedContacts } from "@/lib/data/live-cache";
 import { MOCK_DIRECTORY_PEOPLE } from "@/lib/mock/people";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
-import { clientCodeByName } from "@/lib/reference/client-codes";
+import { clientCodeByName, resolveClientCode } from "@/lib/reference/client-codes";
 
 const now = () => new Date().toISOString();
 
 function directoryToContact(p: (typeof MOCK_DIRECTORY_PEOPLE)[0]): Contact {
   const kind = p.company && p.company !== p.name ? "company" : "individual";
-  const code =
-    clientCodeByName(p.company ?? p.name) ??
-    deriveCompanyCode(p.company ?? p.name);
+  const code = resolveClientCode(p.company ?? p.name);
   const contact: Contact = {
     id: p.id,
     segment: p.segment,
@@ -65,21 +66,40 @@ function migrateClientContact(c: Contact): Contact {
 }
 
 export function loadContacts(): Contact[] {
+  if (isClientLiveBackend()) return getLiveCachedContacts();
   const saved = readMockLs<Contact[]>(MOCK_LS.contacts);
   if (saved?.length) return saved.map(migrateClientContact);
   return SEED_CONTACTS.map((c) => ({ ...c }));
 }
 
 export function saveContacts(contacts: Contact[]): void {
+  if (isClientLiveBackend()) return;
   writeMockLs(MOCK_LS.contacts, contacts);
 }
 
-export function findContactByEmail(contacts: Contact[], email: string): Contact | undefined {
+export function findContactByEmail(
+  contacts: readonly Contact[],
+  email: string,
+): Contact | undefined {
   const e = email.trim().toLowerCase();
   return contacts.find((c) => c.email.toLowerCase() === e);
 }
 
-export function isCompanyCodeTaken(contacts: Contact[], code: string, excludeId?: string): boolean {
+/** Match email within one People segment (avoids overwriting a client when adding a teammate). */
+export function findContactByEmailInSegment(
+  contacts: readonly Contact[],
+  email: string,
+  segment: PeopleSegment,
+): Contact | undefined {
+  const e = email.trim().toLowerCase();
+  return contacts.find((c) => c.segment === segment && c.email.toLowerCase() === e);
+}
+
+export function isCompanyCodeTaken(
+  contacts: readonly Contact[],
+  code: string,
+  excludeId?: string,
+): boolean {
   const c = code.trim().toUpperCase();
   return contacts.some((x) => x.id !== excludeId && x.company_code.toUpperCase() === c);
 }
@@ -129,11 +149,10 @@ export function newContactId(): string {
   return `c-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Date.now()}`;
 }
 
-export function upsertInvitedContact(params: {
+function buildInvitedContactPayload(params: {
   segment: PeopleSegment;
   email: string;
   permissions: ProjectPermissionFlags;
-  /** Vendor company name, or team member display name. */
   name: string;
   contactName?: string;
   phone?: string;
@@ -146,11 +165,12 @@ export function upsertInvitedContact(params: {
   const trimmedEmail = params.email.trim();
   const kind = params.segment === "vendor" ? "company" : "individual";
   const teamName = params.name.trim() || params.contactName?.trim() || trimmedEmail;
-  const payload: Contact = {
+  return {
     id: existing?.id ?? newContactId(),
     segment: params.segment,
     kind,
-    company_code: existing?.company_code ?? deriveCompanyCode(params.segment === "vendor" ? params.name : teamName),
+    company_code:
+      existing?.company_code ?? deriveCompanyCode(params.segment === "vendor" ? params.name : teamName),
     name: params.segment === "vendor" ? params.name.trim() : teamName,
     contact_name:
       params.segment === "vendor"
@@ -169,11 +189,41 @@ export function upsertInvitedContact(params: {
     created_at: existing?.created_at ?? now,
     updated_at: now,
   };
+}
+
+export function upsertInvitedContact(params: {
+  segment: PeopleSegment;
+  email: string;
+  permissions: ProjectPermissionFlags;
+  name: string;
+  contactName?: string;
+  phone?: string;
+  teamRole?: TeamRole;
+  teamRoleCustom?: string;
+}): Contact {
+  const payload = buildInvitedContactPayload(params);
+  const contacts = loadContacts();
+  const existing = findContactByEmail(contacts, params.email);
   const next = existing
     ? contacts.map((c) => (c.id === payload.id ? { ...existing, ...payload } : c))
     : [...contacts, payload];
   saveContacts(next);
   return payload;
+}
+
+export async function upsertInvitedContactAsync(params: {
+  segment: PeopleSegment;
+  email: string;
+  permissions: ProjectPermissionFlags;
+  name: string;
+  contactName?: string;
+  phone?: string;
+  teamRole?: TeamRole;
+  teamRoleCustom?: string;
+}): Promise<Contact> {
+  const payload = buildInvitedContactPayload(params);
+  const { commitSingleContact } = await import("@/lib/data/commit-contacts");
+  return commitSingleContact(payload);
 }
 
 export function contactDisplayName(c: Contact, contacts?: Contact[]): string {
@@ -281,4 +331,11 @@ export function persistCompanyWithMembers(
   next = next.filter((c) => !prevMemberIds.has(c.id) || keepIds.has(c.id));
 
   return [...next, companyPayload, ...savedMembers];
+}
+
+/** Remove a contact and, for client companies, linked member rows. */
+export function removeContactsById(contacts: Contact[], contactId: string): Contact[] {
+  const drop = new Set(contactIdsForDelete(contacts, contactId));
+  if (drop.size === 0) return contacts;
+  return contacts.filter((c) => !drop.has(c.id));
 }

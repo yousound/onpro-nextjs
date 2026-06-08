@@ -3,9 +3,19 @@ import type { LedgerWorkRecord } from "@/lib/ledger/types";
 
 const INTERNAL_WORK_RECORD_IDS = new Set(["wr-ledger"]);
 
-/** Deliverables only — no retainer/invoice payout rows or internal tooling. */
+/** Cap-system mirror rows — dollar weight lives in capSystems / progress pair, not deliverables. */
+const CAP_MIRROR_WORK_RECORD_IDS = new Set([
+  "wr-cap-ios",
+  "wr-cap-next",
+  "wr-supabase-api",
+  "wr-admin",
+]);
+
+/** Engineering deliverables in date order (includes invoice-period tasks; no per-task billing). */
 export function taskWorkRecordsOnly(records: LedgerWorkRecord[]): LedgerWorkRecord[] {
-  return records.filter((r) => !r.invoiceId && !INTERNAL_WORK_RECORD_IDS.has(r.id));
+  return records.filter(
+    (r) => !INTERNAL_WORK_RECORD_IDS.has(r.id) && !CAP_MIRROR_WORK_RECORD_IDS.has(r.id),
+  );
 }
 
 export function sortWorkRecords(records: LedgerWorkRecord[]): LedgerWorkRecord[] {

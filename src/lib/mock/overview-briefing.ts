@@ -1,13 +1,25 @@
-import { mockCalendarEvents } from "@/lib/mock/calendar-events";
-import { getConversations } from "@/lib/mock/conversations";
-import { mockDocuments } from "@/lib/mock/documents";
+import { withBriefingPartSpacing } from "@/lib/briefing-part-spacing";
+import { loadContacts, SEED_CONTACTS } from "@/lib/contacts-store";
 import { getJobsForProject } from "@/lib/mock/project-jobs";
-import { getProjectById, mockProjects } from "@/lib/mock/projects";
+import { mockProjects } from "@/lib/mock/projects";
 import { buildOverviewDigest } from "@/lib/mock/overview-digest";
+import {
+  findEmailThreadByQuery,
+  labelLooksLikeMailroomEmail,
+} from "@/lib/assistant-mailroom-links";
+import { MOCK_EMAIL_THREADS } from "@/lib/mock/email-threads";
+import { formatAssistantPrefsForPrompt, briefingIncludesSection } from "@/lib/assistant/prefs";
+import type { AssistantPrefs } from "@/lib/types/assistant-prefs";
+import { DEFAULT_ASSISTANT_PREFS } from "@/lib/types/assistant-prefs";
+import type {
+  AssistantContactSnapshot,
+  AssistantOpsSnapshot,
+} from "@/lib/server/assistant-ops-snapshot";
 
 export type BriefingLinkAction =
   | { kind: "job"; projectId: number; jobId: string; label: string }
   | { kind: "project"; projectId: number; label: string }
+  | { kind: "mailroom"; label: string; threadId?: string }
   | { kind: "messages"; label: string; href?: string }
   | { kind: "calendar"; label: string }
   | { kind: "people"; label: string }
@@ -30,94 +42,70 @@ export function greetingForHour(h: number): string {
   return "Good evening";
 }
 
-/** Plain-language overnight summary with linkable entities (mock — future AI). */
-export function buildOvernightBriefing(userName: string, todayYmd: string): BriefingBlock[] {
+/** Plain-language workspace summary with linkable entities (mock — future AI). */
+export function buildOvernightBriefing(
+  userName: string,
+  todayYmd: string,
+  assistantPrefs: AssistantPrefs = DEFAULT_ASSISTANT_PREFS,
+): BriefingBlock[] {
   const digest = buildOverviewDigest(todayYmd);
-  const gloGang = getProjectById(1);
-  const voidStar = mockProjects.find((p) => p.name.toLowerCase().includes("void"));
-  const teeJob = getJobsForProject(1).find((j) => j.id === "job-1-ggt148");
-  const unread = getConversations().find((c) => (c.unread_count ?? 0) > 0);
-  const recentDoc = [...mockDocuments].sort(
-    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-  )[0];
-  const nextEvent = [...mockCalendarEvents].sort(
-    (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-  )[0];
+  const ctx = buildAssistantContext(todayYmd);
+  const greeting = greetingForHour(new Date().getHours());
+  const includeProjects = briefingIncludesSection(assistantPrefs, "projects");
+  const includeJobs = briefingIncludesSection(assistantPrefs, "jobs");
+  const includeMessages = briefingIncludesSection(assistantPrefs, "messages");
+  const includeContacts = briefingIncludesSection(assistantPrefs, "contacts");
 
   const blocks: BriefingBlock[] = [
     {
       id: "intro",
-      parts: [
-        {
-          type: "text",
-          value: `Here's what happened while you were away, ${userName}. Nothing critical is blocked, but a few threads need your eyes:`,
-        },
-      ],
+      parts: [{ type: "text", value: `${greeting}, ${userName}. Here's what's in your workspace today:` }],
     },
   ];
 
-  if (unread && teeJob) {
+  if (includeMessages && ctx.unreadMessages > 0) {
     blocks.push({
-      id: "message-job",
+      id: "messages",
       parts: [
         { type: "text", value: "• " },
-        { type: "link", action: { kind: "messages", label: "John from Glo Gang", href: "/messages" } },
-        { type: "text", value: " left a message overnight about " },
-        {
-          type: "link",
-          action: {
-            kind: "job",
-            projectId: 1,
-            jobId: teeJob.id,
-            label: teeJob.name,
-          },
-        },
+        { type: "link", action: { kind: "messages", label: "Messages", href: "/messages" } },
         {
           type: "text",
-          value: ` — they're waiting on strike-off before bulk (${unread.unread_count} unread in that room).`,
+          value: ` — ${ctx.unreadMessages} unread conversation${ctx.unreadMessages === 1 ? "" : "s"}.`,
         },
       ],
     });
   }
 
-  if (voidStar) {
+  if (includeProjects && digest.overdueProjectCount > 0) {
     blocks.push({
       id: "overdue",
       parts: [
         { type: "text", value: "• " },
+        { type: "link", action: { kind: "projects", label: "Projects" } },
         {
-          type: "link",
-          action: { kind: "project", projectId: voidStar.id, label: voidStar.name },
+          type: "text",
+          value: ` — ${digest.overdueProjectCount} past due and may need a date or status update.`,
         },
-        { type: "text", value: " slipped past its due date — milestones should be updated or the date pushed." },
       ],
     });
   }
 
-  if (recentDoc) {
+  if (includeJobs && ctx.jobsInProgress > 0) {
     blocks.push({
-      id: "doc",
+      id: "jobs",
       parts: [
         { type: "text", value: "• " },
-        { type: "text", value: `${recentDoc.uploaded_by} uploaded ` },
-        { type: "text", value: `"${recentDoc.name}"` },
-        { type: "text", value: ` for ${recentDoc.project_name ?? "a project"}.` },
+        { type: "link", action: { kind: "production", label: "Production board" } },
+        {
+          type: "text",
+          value: ` — ${ctx.jobsInProgress} job${ctx.jobsInProgress === 1 ? "" : "s"} in progress.`,
+        },
       ],
     });
   }
 
-  if (gloGang && nextEvent) {
-    blocks.push({
-      id: "calendar",
-      parts: [
-        { type: "text", value: "• Your calendar has " },
-        { type: "link", action: { kind: "calendar", label: nextEvent.name } },
-        { type: "text", value: " coming up — ex-factory timing for Glo Gang." },
-      ],
-    });
-  }
-
-  if (digest.pendingInvites > 0) {
+  if (includeContacts && digest.pendingInvites > 0) {
     blocks.push({
       id: "invites",
       parts: [
@@ -126,25 +114,40 @@ export function buildOvernightBriefing(userName: string, todayYmd: string): Brie
           type: "link",
           action: {
             kind: "people",
-            label: `${digest.pendingInvites} pending team invite${digest.pendingInvites === 1 ? "" : "s"}`,
+            label: `${digest.pendingInvites} pending invite${digest.pendingInvites === 1 ? "" : "s"}`,
           },
         },
-        { type: "text", value: " still need a response." },
+        { type: "text", value: " on People." },
       ],
     });
   }
 
-  blocks.push({
-    id: "cta",
-    parts: [
-      {
-        type: "text",
-        value: " Ask me about any project, job, vendor, or person — I'll pull from everything in OnPro.",
-      },
-    ],
-  });
+  if (blocks.length === 1) {
+    blocks.push({
+      id: "empty",
+      parts: [
+        {
+          type: "text",
+          value: "Nothing urgent right now. Ask me about any project, job, or person in OnPro.",
+        },
+      ],
+    });
+  } else {
+    blocks.push({
+      id: "cta",
+      parts: [
+        {
+          type: "text",
+          value: " Ask me about any project, job, vendor, or person — I'll pull from everything in OnPro.",
+        },
+      ],
+    });
+  }
 
-  return blocks;
+  return blocks.map((block) => ({
+    ...block,
+    parts: withBriefingPartSpacing(block.parts),
+  }));
 }
 
 export type AssistantContext = {
@@ -153,6 +156,10 @@ export type AssistantContext = {
   jobsInProgress: number;
   unreadMessages: number;
   pendingInvites: number;
+  contactCount?: number;
+  clientCount?: number;
+  vendorCount?: number;
+  teamCount?: number;
 };
 
 export function buildAssistantContext(todayYmd: string): AssistantContext {
@@ -163,6 +170,10 @@ export function buildAssistantContext(todayYmd: string): AssistantContext {
     jobsInProgress: d.jobsInProgressCount,
     unreadMessages: d.totalUnreadMessages,
     pendingInvites: d.pendingInvites,
+    contactCount: SEED_CONTACTS.length,
+    clientCount: SEED_CONTACTS.filter((c) => c.segment === "client").length,
+    vendorCount: SEED_CONTACTS.filter((c) => c.segment === "vendor").length,
+    teamCount: SEED_CONTACTS.filter((c) => c.segment === "team").length,
   };
 }
 
@@ -171,11 +182,14 @@ export type AssistantReply = {
 };
 
 export function assistantReplyPlain(reply: AssistantReply): string {
-  return reply.parts.map((p) => (p.type === "text" ? p.value : p.action.label)).join("");
+  const parts = withBriefingPartSpacing(reply.parts);
+  return parts
+    .map((p) => (p.type === "text" ? p.value : p.action.label))
+    .join("");
 }
 
 function reply(...parts: BriefingPart[]): AssistantReply {
-  return { parts };
+  return { parts: withBriefingPartSpacing(parts) };
 }
 
 function wantsNavigationLink(q: string): boolean {
@@ -195,8 +209,54 @@ function wantsNavigationLink(q: string): boolean {
 
 const TEE_JOB_ID = "job-1-ggt148";
 
+/** Client-side fallback when the assistant API is unreachable. */
+export function buildClientAssistantFallbackSnapshot(
+  userName: string,
+  todayYmd: string,
+  assistantPrefs: AssistantPrefs = DEFAULT_ASSISTANT_PREFS,
+): AssistantOpsSnapshot {
+  const contacts = loadContacts();
+  const cStats = {
+    total: contacts.length,
+    clients: contacts.filter((c) => c.segment === "client").length,
+    vendors: contacts.filter((c) => c.segment === "vendor").length,
+    team: contacts.filter((c) => c.segment === "team").length,
+  };
+  const contactSnapshots: AssistantContactSnapshot[] = contacts.slice(0, 100).map((c) => ({
+    id: c.id,
+    segment: c.segment,
+    name: c.name,
+    email: c.email,
+    kind: c.kind,
+    company_code: c.company_code,
+    ...(c.contact_name ? { contact_name: c.contact_name } : {}),
+    ...(c.phone ? { phone: c.phone } : {}),
+    ...(c.parent_company_id ? { parent_company_id: c.parent_company_id } : {}),
+  }));
+  const ctx = buildAssistantContext(todayYmd);
+  return {
+    userName,
+    todayYmd,
+    assistantPrefs,
+    context: {
+      ...ctx,
+      contactCount: cStats.total,
+      clientCount: cStats.clients,
+      vendorCount: cStats.vendors,
+      teamCount: cStats.team,
+    },
+    projects: [],
+    jobs: [],
+    contacts: contactSnapshots,
+    emailThreadRefs: MOCK_EMAIL_THREADS.map((t) => ({ id: t.id, subject: t.subject })),
+    promptContext: formatAssistantPrefsForPrompt(assistantPrefs),
+  };
+}
+
 /** Mock replies until real AI is wired — keyword routing over mock ops data. */
-export function mockAssistantReply(query: string, ctx: AssistantContext): AssistantReply {
+export function mockAssistantReply(query: string, snapshot: AssistantOpsSnapshot): AssistantReply {
+  const ctx = snapshot.context;
+  const contacts = snapshot.contacts;
   const q = query.trim().toLowerCase();
   if (!q) {
     return reply({
@@ -239,14 +299,44 @@ export function mockAssistantReply(query: string, ctx: AssistantContext): Assist
       );
     }
 
-    if (q.includes("message") || q.includes("chat") || q.includes("inbox") || q.includes("unread")) {
+    if (
+      q.includes("mailroom") ||
+      q.includes("mail room") ||
+      (q.includes("email") && !q.includes("message")) ||
+      q.includes("gmail") ||
+      (q.includes("inbox") && (q.includes("mail") || q.includes("exact") || q.includes("thread")))
+    ) {
+      const threads = snapshot.emailThreadRefs ?? [];
+      const thread = findEmailThreadByQuery(threads, query);
+      if (thread) {
+        return reply(
+          { type: "text", value: "Here's that Mailroom thread — " },
+          {
+            type: "link",
+            action: { kind: "mailroom", threadId: thread.id, label: thread.subject },
+          },
+          { type: "text", value: "." },
+        );
+      }
       return reply(
-        { type: "text", value: "Opening your inbox — " },
+        { type: "text", value: "Open Mailroom for Gmail threads — " },
+        { type: "link", action: { kind: "mailroom", label: "Mailroom inbox" } },
+        { type: "text", value: "." },
+      );
+    }
+
+    if (
+      (q.includes("message") || q.includes("chat") || q.includes("unread")) &&
+      !q.includes("mailroom") &&
+      !q.includes("mail room")
+    ) {
+      return reply(
+        { type: "text", value: "Opening in-app Messages — " },
         { type: "link", action: { kind: "messages", label: "Go to Messages" } },
         {
           type: "text",
           value: ctx.unreadMessages
-            ? ` (${ctx.unreadMessages} unread; Glo Gang is the hot thread).`
+            ? ` (${ctx.unreadMessages} unread in team chat).`
             : ".",
         },
       );
@@ -385,30 +475,98 @@ export function mockAssistantReply(query: string, ctx: AssistantContext): Assist
     );
   }
 
-  if (q.includes("message") || q.includes("unread")) {
+  const mailroomThread = findEmailThreadByQuery(snapshot.emailThreadRefs ?? [], query);
+  if (
+    mailroomThread &&
+    (q.includes("mailroom") ||
+      q.includes("mail room") ||
+      q.includes("api usage") ||
+      q.includes("usage limit") ||
+      q.includes("openai") ||
+      (q.includes("email") && q.includes("link")))
+  ) {
+    return reply(
+      { type: "text", value: "That email is in Mailroom — " },
+      {
+        type: "link",
+        action: { kind: "mailroom", threadId: mailroomThread.id, label: mailroomThread.subject },
+      },
+      { type: "text", value: "." },
+    );
+  }
+
+  if (
+    (q.includes("message") || q.includes("unread")) &&
+    !q.includes("mailroom") &&
+    !q.includes("mail room") &&
+    !q.includes("gmail")
+  ) {
     return reply(
       {
         type: "text",
         value: ctx.unreadMessages
-          ? `You have ${ctx.unreadMessages} unread. `
-          : "Inbox is clear. ",
+          ? `You have ${ctx.unreadMessages} unread in team chat. `
+          : "Team chat is clear. ",
       },
       { type: "link", action: { kind: "messages", label: "Open Messages" } },
       { type: "text", value: "." },
     );
   }
 
-  if (q.includes("team") || q.includes("people") || q.includes("invite")) {
-    return reply(
+  if (
+    q.includes("contact") ||
+    q.includes("people") ||
+    q.includes("team") ||
+    q.includes("invite") ||
+    q.includes("client") ||
+    q.includes("vendor") ||
+    q.includes("directory")
+  ) {
+    const total = ctx.contactCount ?? contacts.length;
+    if (total === 0) {
+      return reply(
+        { type: "text", value: "Your People directory is empty. " },
+        { type: "link", action: { kind: "people", label: "Open People" } },
+        { type: "text", value: " to add clients, vendors, or team." },
+      );
+    }
+
+    const segment =
+      q.includes("vendor") ? "vendor" : q.includes("client") ? "client" : q.includes("team") ? "team" : null;
+    const filtered = segment ? contacts.filter((c) => c.segment === segment) : contacts;
+    const label = segment ? `${segment}s` : "contacts";
+
+    if (filtered.length === 0) {
+      return reply(
+        { type: "text", value: `No ${label} in your directory yet. ` },
+        { type: "link", action: { kind: "people", label: "Open People" } },
+        { type: "text", value: "." },
+      );
+    }
+
+    const listed = filtered.slice(0, 6);
+    const parts: BriefingPart[] = [
       {
         type: "text",
-        value: ctx.pendingInvites
-          ? `${ctx.pendingInvites} pending invite${ctx.pendingInvites === 1 ? "" : "s"}. `
-          : "No pending invites. ",
+        value: `You have ${filtered.length} ${label} (${total} total in People): `,
       },
-      { type: "link", action: { kind: "people", label: "Open People" } },
-      { type: "text", value: "." },
-    );
+    ];
+    listed.forEach((c, i) => {
+      if (i > 0) parts.push({ type: "text", value: ", " });
+      parts.push({ type: "text", value: c.name });
+      if (c.email) parts.push({ type: "text", value: ` (${c.email})` });
+    });
+    parts.push({ type: "text", value: ". " });
+    parts.push({ type: "link", action: { kind: "people", label: "Open People" } });
+    if (ctx.pendingInvites) {
+      parts.push({
+        type: "text",
+        value: ` (${ctx.pendingInvites} pending invite${ctx.pendingInvites === 1 ? "" : "s"}).`,
+      });
+    } else {
+      parts.push({ type: "text", value: "" });
+    }
+    return reply(...parts.filter((p) => p.type !== "text" || p.value.length > 0));
   }
 
   if (q.includes("today") || q.includes("calendar") || q.includes("agenda")) {
@@ -433,7 +591,7 @@ export function mockAssistantReply(query: string, ctx: AssistantContext): Assist
   return reply(
     {
       type: "text",
-      value: `I can scan ${ctx.projectCount} projects and ${ctx.jobCount} jobs. Try “link me to messages” or “link me anywhere”.`,
+      value: `I can see ${ctx.projectCount} projects, ${ctx.jobCount} jobs, and ${ctx.contactCount ?? contacts.length} contacts. Try “link me to messages”, “who are my clients”, or “link me anywhere”.`,
     },
   );
 }

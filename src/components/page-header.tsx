@@ -1,6 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import {
+  AssistantQuickOpenButton,
+  PAGE_HEADER_ASSISTANT_CLASS,
+} from "@/components/assistant-quick-open-button";
 import { NotificationsPopover } from "@/components/notifications-popover";
 
 export const PAGE_HEADER_NOTIFICATIONS_CLASS =
@@ -36,8 +40,25 @@ export function PageHeader(props: {
   kpis?: Kpi[];
   variant?: "dark" | "light";
   showNotifications?: boolean;
+  /** When set, the page title toggles views (e.g. Mailroom cover ↔ inbox). */
+  onTitleClick?: () => void;
+  titleClickLabel?: string;
+  /** Info control beside the title — opens section overview / cover. */
+  onInfoClick?: () => void;
+  infoLabel?: string;
 }) {
-  const { title, subtitle, action, kpis, variant = "light", showNotifications = true } = props;
+  const {
+    title,
+    subtitle,
+    action,
+    kpis,
+    variant = "light",
+    showNotifications = true,
+    onTitleClick,
+    titleClickLabel,
+    onInfoClick,
+    infoLabel,
+  } = props;
   const light = variant === "light";
   const toneClass = light ? toneClassLight : toneClassDark;
 
@@ -51,8 +72,32 @@ export function PageHeader(props: {
     >
       <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{title}</h1>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              {onTitleClick ? (
+                <button
+                  type="button"
+                  onClick={onTitleClick}
+                  aria-label={titleClickLabel ?? title}
+                  className="text-left text-2xl font-bold tracking-tight transition hover:text-accent md:text-3xl"
+                >
+                  {title}
+                </button>
+              ) : (
+                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{title}</h1>
+              )}
+              {onInfoClick ? (
+                <button
+                  type="button"
+                  onClick={onInfoClick}
+                  aria-label={infoLabel ?? `About ${title}`}
+                  title={infoLabel ?? `About ${title}`}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border-light bg-white text-slate-500 shadow-sm transition hover:bg-surface-body hover:text-accent"
+                >
+                  <HeaderInfoIcon />
+                </button>
+              ) : null}
+            </div>
             {subtitle ? (
               <p className={`mt-1 max-w-2xl text-sm ${light ? "text-text-secondary" : "text-text-muted-chrome"}`}>
                 {subtitle}
@@ -63,7 +108,10 @@ export function PageHeader(props: {
             <div className="flex shrink-0 items-center gap-2">
               {action}
               {showNotifications ? (
-                <NotificationsPopover buttonClassName={PAGE_HEADER_NOTIFICATIONS_CLASS} />
+                <>
+                  <AssistantQuickOpenButton buttonClassName={PAGE_HEADER_ASSISTANT_CLASS} />
+                  <NotificationsPopover buttonClassName={PAGE_HEADER_NOTIFICATIONS_CLASS} />
+                </>
               ) : null}
             </div>
           ) : null}
@@ -96,5 +144,14 @@ export function PageHeader(props: {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function HeaderInfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 10v6M12 7h.01" strokeLinecap="round" />
+    </svg>
   );
 }

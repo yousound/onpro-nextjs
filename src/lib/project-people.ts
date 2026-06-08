@@ -5,11 +5,7 @@ import {
   loadContacts,
   vendorDisplayName,
 } from "@/lib/contacts-store";
-import {
-  MOCK_PERSON_PROJECT_ACCESS,
-  type PersonProjectAccess,
-  type PersonProjectPermissionGroup,
-} from "@/lib/mock/people";
+import type { PersonProjectPermissionGroup } from "@/lib/mock/people";
 
 export type ProjectPersonRow = {
   key: string;
@@ -19,6 +15,7 @@ export type ProjectPersonRow = {
   subtitle: string;
   roleOnProject: string;
   permissionGroups: PersonProjectPermissionGroup[];
+  avatarUrl: string | null;
 };
 
 function normalizeName(s: string): string {
@@ -37,8 +34,14 @@ function findTeamContactByName(contacts: Contact[], name: string): Contact | und
   });
 }
 
-function findClientContactForProject(contacts: Contact[], clientName: string): Contact | undefined {
-  const n = normalizeName(clientName);
+function findClientContactForProject(
+  contacts: Contact[],
+  client: { id: number; name: string },
+): Contact | undefined {
+  const idKey = String(client.id);
+  const byId = contacts.find((c) => c.segment === "client" && c.id === idKey);
+  if (byId) return byId;
+  const n = normalizeName(client.name);
   if (!n) return undefined;
   return contacts.find((c) => {
     if (c.segment !== "client") return false;
@@ -50,13 +53,6 @@ function findVendorContactByCompany(contacts: Contact[], companyName: string): C
   const n = normalizeName(companyName);
   if (!n) return undefined;
   return contacts.find((c) => c.segment === "vendor" && normalizeName(vendorDisplayName(c)) === n);
-}
-
-function segmentFromRoleLabel(role: string): PeopleSegment {
-  const r = role.toLowerCase();
-  if (r.includes("vendor")) return "vendor";
-  if (r.includes("client")) return "client";
-  return "team";
 }
 
 function upsertRow(
@@ -78,25 +74,8 @@ function upsertRow(
     permissionGroups: groups,
     subtitle: row.subtitle || existing.subtitle,
     contactId: existing.contactId ?? row.contactId,
+    avatarUrl: row.avatarUrl ?? existing.avatarUrl,
   });
-}
-
-function rowFromMockAccess(
-  contacts: Contact[],
-  personId: string,
-  access: PersonProjectAccess,
-): ProjectPersonRow {
-  const contact = contacts.find((c) => c.id === personId);
-  const segment = segmentFromRoleLabel(access.role_on_project);
-  return {
-    key: personId,
-    contactId: personId,
-    segment: contact?.segment ?? segment,
-    displayName: contact ? contactDisplayName(contact, contacts) : personId,
-    subtitle: contact?.email ?? access.role_on_project,
-    roleOnProject: access.role_on_project,
-    permissionGroups: access.permission_groups,
-  };
 }
 
 function addAssignment(
@@ -120,25 +99,134 @@ function addAssignment(
     subtitle: c?.email ?? (c ? vendorDisplayName(c) : roleOnProject),
     roleOnProject,
     permissionGroups: [],
+    avatarUrl: c?.avatar_url ?? null,
   });
 }
 
-/** Everyone attached to a project — mock directory access + project field assignments. */
-export function peopleForProject(project: Project, contacts?: Contact[]): ProjectPersonRow[] {
+export type PeopleForProjectOptions = {
+  /** Signed-in operator — `profiles.self_contact_id`. */
+  ownerContactId?: string | null;
+  ownerEmail?: string | null;
+  ownerFullName?: string | null;
+  ownerAvatarUrl?: string | null;
+};
+
+function findTeamContactByEmail(contacts: Contact[], email: string): Contact | undefined {
+  const e = email.trim().toLowerCase();
+  if (!e) return undefined;
+  return contacts.find((c) => c.segment === "team" && c.email.toLowerCase() === e);
+}
+
+function findOwnerContact(
+  directory: Contact[],
+  options?: PeopleForProjectOptions,
+): Contact | undefined {
+  const id = options?.ownerContactId?.trim();
+  if (id) {
+    const byId = directory.find((c) => c.id === id);
+    if (byId) return byId;
+  }
+  const email = options?.ownerEmail?.trim();
+  if (email) {
+    const byEmail = findTeamContactByEmail(directory, email);
+    if (byEmail) return byEmail;
+  }
+  const name = options?.ownerFullName?.trim();
+  if (name) {
+    const byName = findTeamContactByName(directory, name);
+    if (byName) return byName;
+  }
+  return undefined;
+}
+
+function creatorRowFromProfile(options?: PeopleForProjectOptions): ProjectPersonRow | null {
+  const email = options?.ownerEmail?.trim();
+  if (!email) return null;
+  const displayName = options?.ownerFullName?.trim() || email.split("@")[0] || "You";
+  const key = options?.ownerContactId?.trim() || `creator:${email.toLowerCase()}`;
+  return {
+    key,
+    contactId: options?.ownerContactId?.trim() || null,
+    segment: "team",
+    displayName,
+    subtitle: email,
+    roleOnProject: "Project creator",
+    permissionGroups: [],
+    avatarUrl: options?.ownerAvatarUrl ?? null,
+  };
+}
+
+function addProjectCreator(
+  map: Map<string, ProjectPersonRow>,
+  directory: Contact[],
+  options?: PeopleForProjectOptions,
+) {
+  const owner = findOwnerContact(directory, options);
+  if (owner) {
+    upsertRow(map, {
+      key: owner.id,
+      contactId: owner.id,
+      segment: owner.segment,
+      displayName: contactDisplayName(owner, directory),
+      subtitle: owner.email,
+      roleOnProject: "Project creator",
+      permissionGroups: [],
+      avatarUrl: owner.avatar_url ?? options?.ownerAvatarUrl ?? null,
+    });
+    return;
+  }
+  const fallback = creatorRowFromProfile(options);
+  if (fallback) upsertRow(map, fallback);
+}
+
+function addTeamFieldAssignments(
+  map: Map<string, ProjectPersonRow>,
+  directory: Contact[],
+  project: Project,
+) {
+  const slots: { value: string | null | undefined; role: string }[] = [
+    { value: project.lead_team_member, role: "Lead team" },
+    { value: project.dev_prod_assigned_team_member, role: "Dev & production" },
+    { value: project.cs_tech_pack_assigned_member, role: "C&S tech pack" },
+    { value: project.artwork_tech_pack_assigned_member, role: "Artwork tech pack" },
+  ];
+  for (const slot of slots) {
+    if (!slot.value?.trim()) continue;
+    const contact = findTeamContactByName(directory, slot.value);
+    addAssignment(map, directory, {
+      name: slot.value,
+      roleOnProject: slot.role,
+      segment: "team",
+      contact: contact ?? undefined,
+    });
+  }
+}
+
+function sortProjectPeople(rows: ProjectPersonRow[]): ProjectPersonRow[] {
+  const order: Record<PeopleSegment, number> = { client: 0, team: 1, vendor: 2 };
+  return [...rows].sort((a, b) => {
+    const seg = order[a.segment] - order[b.segment];
+    if (seg !== 0) return seg;
+    return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+  });
+}
+
+/** People on a project from directory + field assignments (no demo seed rows). */
+export function peopleForProject(
+  project: Project,
+  contacts?: Contact[],
+  options?: PeopleForProjectOptions,
+): ProjectPersonRow[] {
   const directory = contacts ?? loadContacts();
   const map = new Map<string, ProjectPersonRow>();
 
-  for (const [personId, rows] of Object.entries(MOCK_PERSON_PROJECT_ACCESS)) {
-    for (const access of rows) {
-      if (access.project_id !== project.id) continue;
-      upsertRow(map, rowFromMockAccess(directory, personId, access));
-    }
-  }
+  addProjectCreator(map, directory, options);
+  addTeamFieldAssignments(map, directory, project);
 
   if (project.client?.name) {
-    const clientContact = findClientContactForProject(directory, project.client.name);
+    const clientContact = findClientContactForProject(directory, project.client);
     addAssignment(map, directory, {
-      name: project.client.name,
+      name: clientContact ? contactDisplayName(clientContact, directory) : project.client.name,
       roleOnProject: "Client",
       segment: "client",
       contact: clientContact,
@@ -155,27 +243,7 @@ export function peopleForProject(project: Project, contacts?: Contact[]): Projec
     });
   }
 
-  const teamSlots: { value: string | null | undefined; role: string }[] = [
-    { value: project.lead_team_member, role: "Lead team" },
-    { value: project.dev_prod_assigned_team_member, role: "Dev & production" },
-    { value: project.cs_tech_pack_assigned_member, role: "C&S tech pack" },
-    { value: project.artwork_tech_pack_assigned_member, role: "Artwork tech pack" },
-  ];
-  for (const slot of teamSlots) {
-    if (!slot.value?.trim()) continue;
-    addAssignment(map, directory, {
-      name: slot.value,
-      roleOnProject: slot.role,
-      segment: "team",
-    });
-  }
-
-  const order: Record<PeopleSegment, number> = { client: 0, team: 1, vendor: 2 };
-  return [...map.values()].sort((a, b) => {
-    const seg = order[a.segment] - order[b.segment];
-    if (seg !== 0) return seg;
-    return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
-  });
+  return sortProjectPeople([...map.values()]);
 }
 
 export function permissionSummary(groups: PersonProjectPermissionGroup[]): string {

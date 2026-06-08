@@ -1,0 +1,11 @@
+segment,name,contact_name,email,phone,company_code,notes
+client,Glo Gang,Riley Chen,riley.import@test.com,+1 415 555 1001,GNG,Test code GNG — not the catalog code GG
+client,VOID STAR Import,Dev Singh,dev.import@test.com,+1 212 555 1002,VDS,Test code VDS — catalog VS is another brand
+vendor,Millworks Collective,Alex Chen,alex.import@test.com,+86 21 5555 8821,MWC,Test code MWC — catalog MC is Mint Condition
+team,Jordan Lee,,jordan.import@onpro.test,+1 415 555 0101,JTM,Team import test
+team,Sam Rivera,,sam.import@onpro.test,+1 415 555 0102,SRT,Team import test
+,,Pacific Trim Co,Patricia Ng,patricia.import@test.com,+1 503 555 4400,PTC,Empty segment — pick type on review
+,,R. Chen Studio,,studio.import@artist.test,,RCS,No segment — pick type on review
+ambiguous,Jordan Wells Partner,,jwells.import@partner.test,+1 555 0100,JWP,Pick type on review
+unknown,Metro Logistics,,metro.import@freight.test,+1 312 555 7700,MTL,Pick type on review
+client,LNQ Import Co,,buyer.import@retailer.test,+1 617 555 8800,LNX,Test code LNX — catalog uses LNQ for LNQ brand

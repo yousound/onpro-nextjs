@@ -11,17 +11,38 @@ import {
   findPackingContactForProjectClient,
 } from "@/lib/packing-slip-contacts";
 import { labelDescription } from "@/lib/style-number";
+import type { CurrentUserDisplay } from "@/lib/current-user-display";
 
-const DEFAULT_FROM = {
-  company: "Connect Dots",
-  name: "Connect Dots",
-  address: "456 Industrial Blvd, Los Angeles, CA 90001",
+/** Demo letterhead when no operator company is on file (mock / empty profile). */
+export const MOCK_PACKING_SLIP_ORIGIN = {
+  companyName: "Connect Dots",
+  shipFromName: "Connect Dots",
+  shipFromAddress: "456 Industrial Blvd, Los Angeles, CA 90001",
+} as const;
+
+export type PackingSlipOrigin = {
+  companyName: string;
+  shipFromName: string;
+  shipFromAddress: string;
 };
+
+/** Operator workspace company + business address from Supabase profile. */
+export function packingSlipOriginFromUser(
+  user: Pick<CurrentUserDisplay, "companyName" | "businessAddress"> | null | undefined,
+): PackingSlipOrigin | null {
+  const companyName = user?.companyName?.trim();
+  if (!companyName) return null;
+  return {
+    companyName,
+    shipFromName: companyName,
+    shipFromAddress: user?.businessAddress?.trim() ?? "",
+  };
+}
 
 /** Letterhead company name; falls back for slips saved before company_name existed. */
 export function packingSlipCompanyName(slip: PackingSlipDocument): string {
   const name = slip.company_name?.trim() || slip.ship_from_name?.trim();
-  return name || DEFAULT_FROM.company;
+  return name || MOCK_PACKING_SLIP_ORIGIN.companyName;
 }
 
 export function generatePackingSlipNumber(project: Project, existing: PackingSlipDocument[]): string {
@@ -109,13 +130,12 @@ export function createPackingSlipDraft(
   project: Project,
   jobs: ProjectJob[],
   contacts: Contact[],
+  operatorOrigin?: PackingSlipOrigin | null,
 ): PackingSlipDocument {
   const existing = project.packaging_slips ?? [];
   const now = new Date().toISOString();
   const docNum = generatePackingSlipNumber(project, existing);
-  const shipFrom =
-    findPackingContactByName(contacts, DEFAULT_FROM.name) ??
-    findPackingContactByName(contacts, DEFAULT_FROM.company);
+  const letterhead = operatorOrigin ?? MOCK_PACKING_SLIP_ORIGIN;
   const shipTo = findPackingContactForProjectClient(contacts, project);
 
   let slip: PackingSlipDocument = {
@@ -125,10 +145,10 @@ export function createPackingSlipDraft(
     created_at: now,
     updated_at: now,
     ship_date: now.slice(0, 10),
-    company_name: DEFAULT_FROM.company,
+    company_name: letterhead.companyName,
     company_contact_id: null,
-    ship_from_name: DEFAULT_FROM.name,
-    ship_from_address: DEFAULT_FROM.address,
+    ship_from_name: letterhead.shipFromName,
+    ship_from_address: letterhead.shipFromAddress,
     ship_from_contact_id: null,
     ship_to_name: project.client.name,
     ship_to_address: "",
@@ -140,11 +160,22 @@ export function createPackingSlipDraft(
     lines: buildPackingSlipLinesFromJobs(jobs),
   };
 
-  const origin = shipFrom ?? shipTo;
-  if (origin) {
-    slip = applyCompanyContact(slip, origin, contacts);
-    slip = applyShipFromContact(slip, shipFrom ?? origin, contacts, DEFAULT_FROM.address);
+  if (!operatorOrigin) {
+    const shipFrom =
+      findPackingContactByName(contacts, MOCK_PACKING_SLIP_ORIGIN.shipFromName) ??
+      findPackingContactByName(contacts, MOCK_PACKING_SLIP_ORIGIN.companyName);
+    const origin = shipFrom ?? shipTo;
+    if (origin) {
+      slip = applyCompanyContact(slip, origin, contacts);
+      slip = applyShipFromContact(
+        slip,
+        shipFrom ?? origin,
+        contacts,
+        MOCK_PACKING_SLIP_ORIGIN.shipFromAddress,
+      );
+    }
   }
+
   if (shipTo) {
     slip = applyShipToContact(slip, shipTo, contacts);
   }

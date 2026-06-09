@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
 import {
   enrichThreadsWithGoogleProfile,
-  fetchGmailInboxThreads,
+  fetchGmailInboxThreadPage,
   fetchGoogleUserProfile,
+  GMAIL_INBOX_PAGE_SIZE,
 } from "@/lib/gmail/fetch-threads";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
 import {
@@ -12,8 +13,10 @@ import {
 } from "@/lib/supabase/gmail-connection";
 import { createClient } from "@/lib/supabase/server";
 
+export const maxDuration = 60;
+
 /** Live: Gmail inbox threads only. Mock mode returns empty (client uses demo threads). */
-export async function GET() {
+export async function GET(request: Request) {
   const live = await isLiveBackendEnabled();
   if (!live) {
     return NextResponse.json({ threads: [], source: "mock" });
@@ -46,15 +49,27 @@ export async function GET() {
     });
   }
 
+  const url = new URL(request.url);
+  const pageToken = url.searchParams.get("pageToken")?.trim() || undefined;
+  const maxResultsRaw = Number(url.searchParams.get("maxResults") ?? GMAIL_INBOX_PAGE_SIZE);
+  const maxResults = Number.isFinite(maxResultsRaw)
+    ? Math.min(GMAIL_INBOX_PAGE_SIZE, Math.max(1, maxResultsRaw))
+    : GMAIL_INBOX_PAGE_SIZE;
+
   try {
     const { accessToken } = await getValidGmailAccessToken(connection);
-    const [threads, profile] = await Promise.all([
-      fetchGmailInboxThreads(accessToken),
+    const [page, profile] = await Promise.all([
+      fetchGmailInboxThreadPage(accessToken, { pageToken, maxResults }),
       fetchGoogleUserProfile(accessToken).catch(() => null),
     ]);
-    const enriched = profile ? enrichThreadsWithGoogleProfile(threads, profile) : threads;
+    const enriched = profile
+      ? enrichThreadsWithGoogleProfile(page.threads, profile)
+      : page.threads;
     return NextResponse.json({
       threads: enriched,
+      nextPageToken: page.nextPageToken,
+      hasMore: Boolean(page.nextPageToken),
+      pageSize: maxResults,
       source: "live",
       connected: true,
       email: connection.email,

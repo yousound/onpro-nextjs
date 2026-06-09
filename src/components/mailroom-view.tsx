@@ -115,6 +115,11 @@ import {
   type MailroomChatResponse,
 } from "@/lib/data/mailroom-api";
 import { detectMailroomChatIntent } from "@/lib/mailroom/chat-intent";
+import {
+  clearMailroomGmailThreadCache,
+  getCachedMailroomGmailThreads,
+  mergeCachedMailroomGmailThreads,
+} from "@/lib/mailroom/gmail-thread-cache";
 import { MailroomConnectHero } from "@/components/mailroom-connect-hero";
 import { shouldShowSectionCover } from "@/lib/section-cover";
 import { useStripSectionCoverWhenPopulated } from "@/lib/section-cover-hooks";
@@ -284,6 +289,16 @@ function suggestionFromChatProposal(
   });
 }
 
+function mergeGmailThreadLists(existing: EmailThread[], incoming: EmailThread[]): EmailThread[] {
+  const byId = new Map(existing.map((t) => [t.id, t]));
+  for (const t of incoming) byId.set(t.id, t);
+  return [...byId.values()].sort((a, b) => {
+    const atA = a.messages[a.messages.length - 1]?.at ?? "";
+    const atB = b.messages[b.messages.length - 1]?.at ?? "";
+    return atB.localeCompare(atA);
+  });
+}
+
 export function MailroomView() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -293,6 +308,9 @@ export function MailroomView() {
   const isLiveMailroom = mailroomApiEnabled();
   const [state, setState] = useState<MailroomState | null>(null);
   const [gmailThreads, setGmailThreads] = useState<EmailThread[]>([]);
+  const [gmailNextPageToken, setGmailNextPageToken] = useState<string | null>(null);
+  const [gmailLoadingMore, setGmailLoadingMore] = useState(false);
+  const gmailBackgroundLoadRef = useRef(false);
   const [gmailStatus, setGmailStatus] = useState({
     loading: isLiveMailroom,
     connected: false,
@@ -385,6 +403,30 @@ export function MailroomView() {
 
   const gmailOAuthFlag = searchParams.get("gmail");
 
+  async function loadMoreGmailPages(startToken: string) {
+    if (gmailBackgroundLoadRef.current) return;
+    gmailBackgroundLoadRef.current = true;
+    setGmailLoadingMore(true);
+    const maxBackgroundPages = 4;
+    try {
+      let token: string | null = startToken;
+      let pagesLoaded = 0;
+      while (token && pagesLoaded < maxBackgroundPages) {
+        const data = await fetchMailroomThreadsViaApi({ pageToken: token, maxResults: 40 });
+        setGmailThreads((prev) => mergeGmailThreadLists(prev, data.threads));
+        mergeCachedMailroomGmailThreads(data.threads, data.nextPageToken ?? null);
+        token = data.nextPageToken ?? null;
+        setGmailNextPageToken(token);
+        pagesLoaded += 1;
+      }
+    } catch (e) {
+      console.warn("[mailroom] background Gmail page load failed", e);
+    } finally {
+      gmailBackgroundLoadRef.current = false;
+      setGmailLoadingMore(false);
+    }
+  }
+
   useEffect(() => {
     if (!isLiveMailroom) {
       setGmailStatus((s) => ({ ...s, loading: false }));
@@ -393,9 +435,11 @@ export function MailroomView() {
     let cancelled = false;
 
     async function loadGmailStatus(attempt = 0) {
+      let statusConnected = false;
       try {
         const status = await fetchGmailStatusViaApi();
         if (cancelled) return;
+        statusConnected = status.connected;
         setGmailStatus({
           loading: false,
           connected: status.connected,
@@ -403,26 +447,67 @@ export function MailroomView() {
           oauthConfigured: status.oauthConfigured ?? true,
           message: status.message,
         });
-        if (status.connected) {
-          const data = await fetchMailroomThreadsViaApi();
-          if (!cancelled) {
-            setGmailThreads(data.threads);
-            if (!selectedThreadId && data.threads[0]) {
-              setSelectedThreadId(data.threads[0].id);
+        if (!status.connected) {
+          setGmailThreads([]);
+          if (gmailOAuthFlag === "connected" && attempt < 2) {
+            await new Promise((r) => setTimeout(r, 500));
+            if (!cancelled) await loadGmailStatus(attempt + 1);
+          }
+          return;
+        }
+
+        if (gmailOAuthFlag === "connected") {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("gmail");
+          params.delete("cover");
+          const q = params.toString();
+          router.replace(q ? `/mailroom?${q}` : "/mailroom", { scroll: false });
+        }
+
+        try {
+          const cached = getCachedMailroomGmailThreads();
+          if (!cancelled && cached.fresh && cached.threads.length > 0) {
+            setGmailThreads(cached.threads);
+            setGmailNextPageToken(cached.nextPageToken);
+            if (!selectedThreadId && cached.threads[0]) {
+              setSelectedThreadId(cached.threads[0].id);
             }
           }
-          if (gmailOAuthFlag === "connected") {
-            const params = new URLSearchParams(searchParams.toString());
-            params.delete("gmail");
-            params.delete("cover");
-            const q = params.toString();
-            router.replace(q ? `/mailroom?${q}` : "/mailroom", { scroll: false });
+
+          const data = await fetchMailroomThreadsViaApi({ maxResults: 40 });
+          if (!cancelled) {
+            const merged = mergeCachedMailroomGmailThreads(
+              data.threads,
+              data.nextPageToken ?? null,
+            );
+            setGmailThreads(merged);
+            setGmailNextPageToken(data.nextPageToken ?? null);
+            if (!selectedThreadId && merged[0]) {
+              setSelectedThreadId(merged[0].id);
+            }
+            if (data.nextPageToken) {
+              void loadMoreGmailPages(data.nextPageToken);
+            }
           }
-        } else if (gmailOAuthFlag === "connected" && attempt < 2) {
-          await new Promise((r) => setTimeout(r, 500));
-          if (!cancelled) await loadGmailStatus(attempt + 1);
-        } else {
-          setGmailThreads([]);
+        } catch (threadErr) {
+          console.warn("[mailroom] Gmail threads load failed", threadErr);
+          if (!cancelled) {
+            setGmailThreads([]);
+            const msg =
+              threadErr instanceof Error
+                ? threadErr.message
+                : "Could not load inbox threads.";
+            setGmailStatus((s) => ({
+              ...s,
+              loading: false,
+              connected: true,
+              message:
+                msg.includes("502") || msg.includes("Failed to load")
+                  ? "Gmail is connected but inbox load timed out — try Refresh. Large inboxes may take a moment."
+                  : `Gmail is connected but inbox could not load: ${msg}`,
+            }));
+            setToast("Inbox load failed — tap Refresh or try again in a moment.");
+          }
         }
       } catch (e) {
         console.warn("[mailroom] Gmail status load failed", e);
@@ -430,7 +515,7 @@ export function MailroomView() {
           const needsSignIn = e instanceof GmailStatusError && e.status === 401;
           setGmailStatus({
             loading: false,
-            connected: false,
+            connected: statusConnected,
             email: null,
             oauthConfigured: true,
             message: needsSignIn
@@ -439,8 +524,8 @@ export function MailroomView() {
                 ? e.message
                 : "Could not reach Mailroom. Refresh and try again.",
           });
-          setGmailThreads([]);
-          if (gmailOAuthFlag === "connected" && attempt < 2) {
+          if (!statusConnected) setGmailThreads([]);
+          if (gmailOAuthFlag === "connected" && attempt < 2 && !statusConnected) {
             await new Promise((r) => setTimeout(r, 500));
             if (!cancelled) await loadGmailStatus(attempt + 1);
           }
@@ -743,7 +828,11 @@ export function MailroomView() {
     }
     try {
       await disconnectGmailViaApi();
+      clearMailroomGmailThreadCache();
       setGmailThreads([]);
+      setGmailNextPageToken(null);
+      setGmailLoadingMore(false);
+      gmailBackgroundLoadRef.current = false;
       setGmailStatus({
         loading: false,
         connected: false,
@@ -1322,6 +1411,8 @@ export function MailroomView() {
           suggestionCounts={suggestionCountsByThread(threads, state)}
           canRemove={(t) => canRemoveThreadFromMailroom(t, state)}
           onRemove={handleRemovePromotedThread}
+          loadingMore={!isMock && gmailLoadingMore}
+          hasMore={!isMock && (gmailLoadingMore || Boolean(gmailNextPageToken))}
         />
         <ConversationPane
           className="min-h-0"
@@ -1559,6 +1650,8 @@ function ThreadList({
   suggestionCounts,
   canRemove,
   onRemove,
+  loadingMore = false,
+  hasMore = false,
 }: {
   threads: EmailThread[];
   selectedId: string | null;
@@ -1566,6 +1659,8 @@ function ThreadList({
   suggestionCounts: Record<string, number>;
   canRemove?: (t: EmailThread) => boolean;
   onRemove?: (t: EmailThread) => void;
+  loadingMore?: boolean;
+  hasMore?: boolean;
 }) {
   return (
     <ul className="min-h-0 overflow-y-auto">
@@ -1652,6 +1747,11 @@ function ThreadList({
           </li>
         );
       })}
+      {hasMore ? (
+        <li className="border-b border-border-light/70 px-3 py-3 text-center text-[11px] text-text-secondary">
+          {loadingMore ? "Loading more inbox…" : "More inbox threads available"}
+        </li>
+      ) : null}
     </ul>
   );
 }

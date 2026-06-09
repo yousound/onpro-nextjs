@@ -245,10 +245,65 @@ async function mapGmailThread(
   };
 }
 
-/** Fetch inbox threads from Gmail API using a valid access token. */
-export async function fetchGmailInboxThreads(accessToken: string): Promise<EmailThread[]> {
+export const GMAIL_INBOX_PAGE_SIZE = 40;
+const GMAIL_THREAD_FETCH_CONCURRENCY = 6;
+
+export type GmailInboxPage = {
+  threads: EmailThread[];
+  nextPageToken: string | null;
+};
+
+function sortThreadsByLatest(threads: EmailThread[]): EmailThread[] {
+  return [...threads].sort((a, b) => {
+    const atA = a.messages[a.messages.length - 1]?.at ?? "";
+    const atB = b.messages[b.messages.length - 1]?.at ?? "";
+    return atB.localeCompare(atA);
+  });
+}
+
+async function fetchGmailThreadById(
+  accessToken: string,
+  id: string,
+): Promise<EmailThread | null> {
+  const threadRes = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}?format=full`,
+    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
+  );
+  if (!threadRes.ok) return null;
+  const raw = (await threadRes.json()) as Parameters<typeof mapGmailThread>[1];
+  return mapGmailThread(accessToken, raw);
+}
+
+async function fetchGmailThreadsByIds(
+  accessToken: string,
+  ids: string[],
+): Promise<EmailThread[]> {
+  const threads: EmailThread[] = [];
+  for (let i = 0; i < ids.length; i += GMAIL_THREAD_FETCH_CONCURRENCY) {
+    const batch = ids.slice(i, i + GMAIL_THREAD_FETCH_CONCURRENCY);
+    const mapped = await Promise.all(batch.map((id) => fetchGmailThreadById(accessToken, id)));
+    for (const t of mapped) if (t) threads.push(t);
+  }
+  return sortThreadsByLatest(threads);
+}
+
+/** One page of INBOX threads (default 40) with optional Gmail `pageToken`. */
+export async function fetchGmailInboxThreadPage(
+  accessToken: string,
+  opts?: { maxResults?: number; pageToken?: string },
+): Promise<GmailInboxPage> {
+  const maxResults = Math.min(
+    GMAIL_INBOX_PAGE_SIZE,
+    Math.max(1, opts?.maxResults ?? GMAIL_INBOX_PAGE_SIZE),
+  );
+  const params = new URLSearchParams({
+    maxResults: String(maxResults),
+    labelIds: "INBOX",
+  });
+  if (opts?.pageToken) params.set("pageToken", opts.pageToken);
+
   const listRes = await fetch(
-    "https://gmail.googleapis.com/gmail/v1/users/me/threads?maxResults=40&labelIds=INBOX",
+    `https://gmail.googleapis.com/gmail/v1/users/me/threads?${params}`,
     { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
   );
   if (!listRes.ok) {
@@ -256,26 +311,23 @@ export async function fetchGmailInboxThreads(accessToken: string): Promise<Email
     throw new Error(`Gmail list failed (${listRes.status}): ${text.slice(0, 200)}`);
   }
 
-  const listJson = (await listRes.json()) as { threads?: Array<{ id: string }> };
-  const ids = (listJson.threads ?? []).map((t) => t.id).slice(0, 40);
+  const listJson = (await listRes.json()) as {
+    threads?: Array<{ id: string }>;
+    nextPageToken?: string;
+  };
+  const ids = (listJson.threads ?? []).map((t) => t.id);
+  const threads = await fetchGmailThreadsByIds(accessToken, ids);
 
-  const threads: EmailThread[] = [];
-  for (const id of ids) {
-    const threadRes = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}?format=full`,
-      { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
-    );
-    if (!threadRes.ok) continue;
-    const raw = (await threadRes.json()) as Parameters<typeof mapGmailThread>[1];
-    const mapped = await mapGmailThread(accessToken, raw);
-    if (mapped) threads.push(mapped);
-  }
+  return {
+    threads,
+    nextPageToken: listJson.nextPageToken ?? null,
+  };
+}
 
-  return threads.sort((a, b) => {
-    const atA = a.messages[a.messages.length - 1]?.at ?? "";
-    const atB = b.messages[b.messages.length - 1]?.at ?? "";
-    return atB.localeCompare(atA);
-  });
+/** @deprecated Prefer fetchGmailInboxThreadPage for pagination. */
+export async function fetchGmailInboxThreads(accessToken: string): Promise<EmailThread[]> {
+  const page = await fetchGmailInboxThreadPage(accessToken);
+  return page.threads;
 }
 
 export function enrichThreadsWithGoogleProfile(

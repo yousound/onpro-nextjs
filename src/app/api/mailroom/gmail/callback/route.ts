@@ -2,7 +2,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { exchangeGmailCode } from "@/lib/gmail/oauth";
 import { fetchGoogleUserEmail } from "@/lib/gmail/fetch-threads";
-import { upsertGmailConnection } from "@/lib/supabase/gmail-connection";
+import {
+  getGmailConnectionForUser,
+  upsertGmailConnection,
+} from "@/lib/supabase/gmail-connection";
 import { createClient } from "@/lib/supabase/server";
 
 const STATE_COOKIE = "onpro_gmail_oauth_state";
@@ -36,14 +39,16 @@ export async function GET(request: Request) {
 
   try {
     const tokens = await exchangeGmailCode(origin, code);
-    if (!tokens.refresh_token) {
+    const existing = await getGmailConnectionForUser(user.id);
+    const refreshToken = tokens.refresh_token ?? existing?.refresh_token;
+    if (!refreshToken) {
       return NextResponse.redirect(`${origin}/mailroom?gmail=no_refresh`);
     }
     const email = await fetchGoogleUserEmail(tokens.access_token);
     await upsertGmailConnection({
       user_id: user.id,
       email,
-      refresh_token: tokens.refresh_token,
+      refresh_token: refreshToken,
       access_token: tokens.access_token,
       expires_in: tokens.expires_in,
       scopes: tokens.scope,

@@ -19,6 +19,7 @@ export function buildGmailAuthUrl(origin: string, state: string): string {
     response_type: "code",
     scope: GMAIL_SCOPES,
     access_type: "offline",
+    include_granted_scopes: "true",
     prompt: "consent",
     state,
   });

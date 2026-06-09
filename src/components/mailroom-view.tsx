@@ -383,13 +383,16 @@ export function MailroomView() {
     };
   }, []);
 
+  const gmailOAuthFlag = searchParams.get("gmail");
+
   useEffect(() => {
     if (!isLiveMailroom) {
       setGmailStatus((s) => ({ ...s, loading: false }));
       return;
     }
     let cancelled = false;
-    (async () => {
+
+    async function loadGmailStatus(attempt = 0) {
       try {
         const status = await fetchGmailStatusViaApi();
         if (cancelled) return;
@@ -408,6 +411,16 @@ export function MailroomView() {
               setSelectedThreadId(data.threads[0].id);
             }
           }
+          if (gmailOAuthFlag === "connected") {
+            const params = new URLSearchParams(searchParams.toString());
+            params.delete("gmail");
+            params.delete("cover");
+            const q = params.toString();
+            router.replace(q ? `/mailroom?${q}` : "/mailroom", { scroll: false });
+          }
+        } else if (gmailOAuthFlag === "connected" && attempt < 2) {
+          await new Promise((r) => setTimeout(r, 500));
+          if (!cancelled) await loadGmailStatus(attempt + 1);
         } else {
           setGmailThreads([]);
         }
@@ -427,21 +440,32 @@ export function MailroomView() {
                 : "Could not reach Mailroom. Refresh and try again.",
           });
           setGmailThreads([]);
+          if (gmailOAuthFlag === "connected" && attempt < 2) {
+            await new Promise((r) => setTimeout(r, 500));
+            if (!cancelled) await loadGmailStatus(attempt + 1);
+          }
         }
       }
-    })();
+    }
+
+    void loadGmailStatus();
     return () => {
       cancelled = true;
     };
-  }, [isLiveMailroom]);
+  }, [isLiveMailroom, gmailOAuthFlag, router, searchParams]);
 
   useEffect(() => {
-    const flag = searchParams.get("gmail");
-    if (flag === "connected") setToast("Gmail connected — loading your inbox.");
-    if (flag === "denied") setToast("Gmail connection was cancelled.");
-    if (flag === "not_configured") setToast("Gmail OAuth is not configured on the server.");
-    if (flag === "error") setToast("Gmail connection failed — try again.");
-  }, [searchParams]);
+    if (gmailOAuthFlag === "connected") setToast("Gmail connected — loading your inbox.");
+    if (gmailOAuthFlag === "denied") setToast("Gmail connection was cancelled.");
+    if (gmailOAuthFlag === "not_configured") setToast("Gmail OAuth is not configured on the server.");
+    if (gmailOAuthFlag === "error") setToast("Gmail connection failed — try again.");
+    if (gmailOAuthFlag === "no_refresh") {
+      setToast("Google did not return a new token — revoke OnPro in Google Account settings, then connect again.");
+    }
+    if (gmailOAuthFlag === "invalid_state") {
+      setToast("Gmail session expired — try Connect Gmail again (avoid private browsing).");
+    }
+  }, [gmailOAuthFlag]);
 
   const threads = useMemo(() => {
     const promoted = state ? state.promoted_threads : [];
@@ -683,7 +707,7 @@ export function MailroomView() {
       ? state.oauth_connected
       : gmailStatus.connected
     : false;
-  const mailroomContentCount = inboxConnectedForCover ? threads.length : 0;
+  const mailroomContentCount = inboxConnectedForCover ? Math.max(threads.length, 1) : 0;
   useStripSectionCoverWhenPopulated("/mailroom", searchParams, mailroomContentCount);
 
   if (!state || (isLiveMailroom && gmailStatus.loading)) {

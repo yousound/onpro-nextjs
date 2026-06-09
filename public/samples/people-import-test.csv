@@ -1,5 +1,5 @@
-segment,name,contact_name,email,phone,company_code,notes
-client,Glo Gang,Riley Chen,riley.import@test.com,+1 415 555 1001,GNG,Test code GNG — not the catalog code GG
+segment,name,contact_name,email,phone,company_code,notes,location 1,location 2,billing
+client,Glo Gang,Riley Chen,riley.import@test.com,+1 415 555 1001,GNG,Test code GNG — not the catalog code GG,"1200 Market St, San Francisco, CA 94103","88 Warehouse Rd, Oakland, CA 94607","500 Billing Ave, San Francisco, CA 94105"
 client,VOID STAR Import,Dev Singh,dev.import@test.com,+1 212 555 1002,VDS,Test code VDS — catalog VS is another brand
 vendor,Millworks Collective,Alex Chen,alex.import@test.com,+86 21 5555 8821,MWC,Test code MWC — catalog MC is Mint Condition
 team,Jordan Lee,,jordan.import@onpro.test,+1 415 555 0101,JTM,Team import test

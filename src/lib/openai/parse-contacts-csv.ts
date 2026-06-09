@@ -1,4 +1,9 @@
 import { expandParsedImportRows } from "@/lib/csv/expand-import-rows";
+import {
+  filterImportRowsByCompanies,
+  parseCompanyFilterText,
+} from "@/lib/csv/filter-import-by-companies";
+import { mergeImportLocations } from "@/lib/csv/parse-import-locations";
 import { normalizeImportSegment } from "@/lib/csv/normalize-import-segment";
 import { IMPORT_AI_MAX_CHARS, IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
 import { openAiChatJson } from "@/lib/openai/chat-completion";
@@ -33,9 +38,24 @@ function normalizeTeamRole(raw: string | undefined): TeamRole | undefined {
   return "custom";
 }
 
-export async function parseContactsCsvWithOpenAi(csvText: string): Promise<ParseContactsCsvResponse> {
+export type ParseContactsCsvOptions = {
+  /** When set, only return rows for these company names (flexible match). */
+  companyFilter?: string;
+};
+
+export async function parseContactsCsvWithOpenAi(
+  csvText: string,
+  opts?: ParseContactsCsvOptions,
+): Promise<ParseContactsCsvResponse> {
   const clipped =
     csvText.length > IMPORT_AI_MAX_CHARS ? csvText.slice(0, IMPORT_AI_MAX_CHARS) : csvText;
+  const companyFilters = parseCompanyFilterText(opts?.companyFilter ?? "");
+  const filterInstruction =
+    companyFilters.length > 0
+      ? `\n\nCOMPANY FILTER — return ONLY rows for these companies (include every person/contact at each company):
+${companyFilters.map((name) => `- ${name}`).join("\n")}
+Match flexibly on company name (partial/case-insensitive). Skip all other companies.`
+      : "";
 
   const result = await openAiChatJson<AiPayload>(
     [
@@ -61,9 +81,11 @@ Fields per row:
 - name (required), contact_name, email, phone, company_code, other_emails, notes
 - team_role for team rows only
 - business_structure for vendor when present
-- billing_address / shipping_address when columns exist
+- locations: unlimited array of { label?, line1?, line2?, city?, state?, postal_code?, country? }
+- Put billing/shipping/site/warehouse columns into locations (labels like "Billing", "Shipping", "Location 1", etc.)
+- billing_address / shipping_address still accepted — also mirror them into locations when present
 - warnings: optional string array
-Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.`,
+Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.${filterInstruction}`,
       },
       {
         role: "user",
@@ -77,6 +99,11 @@ Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.`,
     .filter((r) => r && (r.email?.trim() || r.name?.trim()))
     .map((r) => {
       const segment = parseSegmentFromAi(r.segment);
+      const locations = mergeImportLocations(
+        r.locations,
+        r.billing_address,
+        r.shipping_address,
+      );
       return {
         ...r,
         segment,
@@ -85,19 +112,28 @@ Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.`,
         email: String(r.email ?? "").trim(),
         company_code: r.company_code?.trim().toUpperCase().slice(0, 3),
         team_role: segment === "team" ? normalizeTeamRole(r.team_role) ?? "staff" : undefined,
+        locations,
+        billing_address: undefined,
+        shipping_address: undefined,
       };
     });
 
-  const rows = expandParsedImportRows(normalized).slice(0, IMPORT_ROW_LIMIT);
+  const expanded = expandParsedImportRows(normalized);
+  const filtered = filterImportRowsByCompanies(expanded, opts?.companyFilter);
+  const rows = filtered.slice(0, IMPORT_ROW_LIMIT);
 
   const labeled = rows.filter((r) => r.segment);
   const unlabeled = rows.length - labeled.length;
+  const filterNote =
+    companyFilters.length > 0
+      ? ` Matched ${rows.length} row(s) for ${companyFilters.join(", ")}.`
+      : "";
 
   return {
     rows,
     summary:
       result.summary?.trim() ||
-      `Parsed ${rows.length} row(s) — ${labeled.filter((r) => r.segment === "client").length} client, ${labeled.filter((r) => r.segment === "vendor").length} vendor, ${labeled.filter((r) => r.segment === "team").length} team${unlabeled ? `, ${unlabeled} need a type on review` : ""}.`,
+      `Parsed ${rows.length} row(s) — ${labeled.filter((r) => r.segment === "client").length} client, ${labeled.filter((r) => r.segment === "vendor").length} vendor, ${labeled.filter((r) => r.segment === "team").length} team${unlabeled ? `, ${unlabeled} need a type on review` : ""}.${filterNote}`,
     source: "openai",
   };
 }

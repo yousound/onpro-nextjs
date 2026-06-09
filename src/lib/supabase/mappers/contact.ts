@@ -40,6 +40,7 @@ export function contactFromRow(row: ContactRowDb): Contact {
     business_structure: extra.business_structure,
     billing_address: extra.billing_address,
     shipping_address: extra.shipping_address,
+    locations: extra.locations,
     other_emails: extra.other_emails,
     notes: extra.notes,
     created_at: created,

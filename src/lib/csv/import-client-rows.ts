@@ -1,11 +1,13 @@
 import {
   validateClientCompanyCode,
   validateClientContactFields,
+  validateDirectoryCompanyCode,
 } from "@/lib/contact-field-validation";
-import { findContactByEmail, isCompanyCodeTaken, newContactId } from "@/lib/contacts-store";
+import { resolveClientCode } from "@/lib/reference/client-codes";
+import { findContactByEmail, newContactId } from "@/lib/contacts-store";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { defaultPermissionsForSegment } from "@/lib/project-permissions";
-import type { Contact } from "@/lib/types/contact";
+import type { Address, Contact, ContactLocation } from "@/lib/types/contact";
 import { deriveCompanyCode } from "@/lib/types/contact";
 import type { ParsedImportContactRow } from "@/lib/types/contact-import";
 
@@ -23,14 +25,45 @@ function resolvedCode(row: ParsedImportContactRow): string {
   return (row.company_code?.trim() || deriveCompanyCode(row.name)).toUpperCase().slice(0, 3);
 }
 
-function validateDirectoryCompanyCode(
-  contacts: readonly Contact[],
-  code: string,
-): string | undefined {
-  const c = code.trim().toUpperCase();
-  if (c.length < 2 || c.length > 3) return "Code must be 2–3 letters.";
-  if (isCompanyCodeTaken(contacts, c)) return `Code ${c} is already used.`;
-  return undefined;
+function locationLabelNorm(label: string | undefined): string {
+  return (label ?? "").trim().toLowerCase();
+}
+
+function locationToAddress(loc: ContactLocation): Address {
+  const { label: _label, ...addr } = loc;
+  return addr;
+}
+
+function legacyAddressesFromLocations(locations: ContactLocation[] | undefined): {
+  billing_address?: Address;
+  shipping_address?: Address;
+} {
+  if (!locations?.length) return {};
+  const billing = locations.find((loc) => {
+    const label = locationLabelNorm(loc.label);
+    return label === "billing" || label.includes("bill");
+  });
+  const shipping = locations.find((loc) => {
+    const label = locationLabelNorm(loc.label);
+    return label === "shipping" || label.includes("ship");
+  });
+  return {
+    billing_address: billing ? locationToAddress(billing) : undefined,
+    shipping_address: shipping ? locationToAddress(shipping) : undefined,
+  };
+}
+
+function suggestImportCompanyCode(row: ParsedImportContactRow): string | undefined {
+  if (row.segment !== "client" && row.segment !== "vendor") return row.company_code;
+  if (row.segment === "client") {
+    return resolveClientCode(row.name);
+  }
+  return row.company_code?.trim().toUpperCase().slice(0, 3) || deriveCompanyCode(row.name);
+}
+
+function withSuggestedCompanyCode(row: ParsedImportContactRow): ParsedImportContactRow {
+  if (row.segment !== "client" && row.segment !== "vendor") return row;
+  return { ...row, company_code: suggestImportCompanyCode(row) };
 }
 
 export function validateImportRow(
@@ -99,9 +132,10 @@ export function buildImportPreviews(
   existingContacts: Contact[],
 ): ImportContactRowPreview[] {
   return rows.map((row, i) => {
-    const rowKey = `${i}-${row.email || row.name}`;
-    const check = validateImportRow(row, existingContacts);
-    return { ...row, rowKey, ...check };
+    const hinted = withSuggestedCompanyCode(row);
+    const rowKey = `${i}-${hinted.email || hinted.name}`;
+    const check = validateImportRow(hinted, existingContacts);
+    return { ...hinted, rowKey, ...check };
   });
 }
 
@@ -123,6 +157,17 @@ export function previewToContact(row: ImportContactRowPreview): Contact {
   const name = row.name.trim();
   const email = row.email.trim();
   const code = resolvedCode(row);
+  const locations = row.locations?.filter(
+    (loc) =>
+      loc.label?.trim() ||
+      loc.line1?.trim() ||
+      loc.line2?.trim() ||
+      loc.city?.trim() ||
+      loc.state?.trim() ||
+      loc.postal_code?.trim() ||
+      loc.country?.trim(),
+  );
+  const legacyAddresses = legacyAddressesFromLocations(locations);
 
   const base: Contact = {
     id: newContactId(),
@@ -139,8 +184,9 @@ export function previewToContact(row: ImportContactRowPreview): Contact {
     email,
     phone: row.phone?.trim() || undefined,
     other_emails: row.other_emails?.filter(Boolean),
-    billing_address: row.billing_address,
-    shipping_address: row.shipping_address,
+    billing_address: row.billing_address ?? legacyAddresses.billing_address,
+    shipping_address: row.shipping_address ?? legacyAddresses.shipping_address,
+    locations: locations?.length ? locations : undefined,
     notes: row.notes?.trim() || undefined,
     avatar_url: null,
     member_contact_ids: [],
@@ -200,18 +246,20 @@ export function patchImportPreview(
           ? "company"
           : row.kind;
   }
-  return revalidateImportPreview(
-    {
-      ...row,
-      ...patch,
-      segment,
-      kind,
-      company_code:
-        patch.company_code !== undefined
-          ? patch.company_code.toUpperCase().slice(0, 3)
-          : row.company_code,
-      team_role: segment === "team" ? (patch.team_role ?? row.team_role ?? "staff") : undefined,
-    },
-    contacts,
-  );
+  const merged = {
+    ...row,
+    ...patch,
+    segment,
+    kind,
+    company_code:
+      patch.company_code !== undefined
+        ? patch.company_code.toUpperCase().slice(0, 3)
+        : row.company_code,
+    team_role: segment === "team" ? (patch.team_role ?? row.team_role ?? "staff") : undefined,
+  };
+  const hinted =
+    patch.company_code === undefined && (patch.segment !== undefined || patch.name !== undefined)
+      ? withSuggestedCompanyCode(merged)
+      : merged;
+  return revalidateImportPreview(hinted as ImportContactRowPreview, contacts);
 }

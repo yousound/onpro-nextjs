@@ -1,6 +1,7 @@
 import {
   contactDisplayName,
   findContactByEmail,
+  isCompanyCodeTaken,
 } from "@/lib/contacts-store";
 import { CLIENT_CODES } from "@/lib/reference/client-codes";
 import type { Contact, ContactKind } from "@/lib/types/contact";
@@ -112,4 +113,19 @@ export function clientContactFormCanSubmit(
 
 export function isClientEmailWarning(messages: ClientContactFieldMessages): boolean {
   return Boolean(messages.email?.includes("on file for"));
+}
+
+/** Vendor / non-client directory code — unique in People, 2–3 letters. */
+export function validateDirectoryCompanyCode(
+  contacts: readonly Contact[],
+  code: string,
+  excludeContactId?: string,
+): string | undefined {
+  const c = code.trim().toUpperCase();
+  if (!c) return "Company code is required.";
+  if (c.length < 2 || c.length > 3) return "Code must be 2–3 letters.";
+  if (isCompanyCodeTaken(contacts, c, excludeContactId)) {
+    return `Code ${c} is already used.`;
+  }
+  return undefined;
 }

@@ -13,6 +13,7 @@ import {
   clientContactFormCanSubmit,
   isClientEmailWarning,
   validateClientContactFields,
+  validateDirectoryCompanyCode,
 } from "@/lib/contact-field-validation";
 import type { Contact, ContactKind, PeopleSegment, TeamRole } from "@/lib/types/contact";
 import { BUSINESS_STRUCTURE_OPTIONS, deriveCompanyCode } from "@/lib/types/contact";
@@ -852,6 +853,9 @@ export function AddVendorModal({ onClose, onSaved, existing, onInviteSent }: Cli
   const [activeSection, setActiveSection] = useState("profile");
   const [name, setName] = useState(existing?.name ?? "");
   const [contactName, setContactName] = useState(existing?.contact_name ?? "");
+  const [companyCode, setCompanyCode] = useState(
+    existing?.company_code ?? deriveCompanyCode(existing?.name ?? ""),
+  );
   const [email, setEmail] = useState(existing?.email ?? "");
   const [phone, setPhone] = useState(existing?.phone ?? "");
   const [businessStructure, setBusinessStructure] = useState(existing?.business_structure ?? "");
@@ -876,6 +880,12 @@ export function AddVendorModal({ onClose, onSaved, existing, onInviteSent }: Cli
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  useEffect(() => {
+    if (!existing) {
+      setCompanyCode(deriveCompanyCode(name || "XX"));
+    }
+  }, [name, existing]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const contacts = loadContacts();
@@ -884,12 +894,18 @@ export function AddVendorModal({ onClose, onSaved, existing, onInviteSent }: Cli
       setError("Vendor name and email are required.");
       return;
     }
+    const code = companyCode.trim().toUpperCase();
+    const codeErr = validateDirectoryCompanyCode(contacts, code, existing?.id);
+    if (codeErr) {
+      setError(codeErr);
+      return;
+    }
     const now = new Date().toISOString();
     const payload: Contact = {
       id: existing?.id ?? byEmail?.id ?? newContactId(),
       segment: "vendor",
       kind: "company",
-      company_code: existing?.company_code ?? deriveCompanyCode(name),
+      company_code: code,
       name: name.trim(),
       contact_name: contactName.trim() || undefined,
       email: email.trim(),
@@ -994,6 +1010,16 @@ export function AddVendorModal({ onClose, onSaved, existing, onInviteSent }: Cli
             <label className={POLISHED_LABEL_CLASS}>
               Contact name
               <input className={POLISHED_FIELD_CLASS} value={contactName} onChange={(e) => setContactName(e.target.value)} />
+            </label>
+            <label className={POLISHED_LABEL_CLASS}>
+              Company code (2–3 chars)
+              <input
+                className={POLISHED_FIELD_CLASS}
+                value={companyCode}
+                onChange={(e) => setCompanyCode(e.target.value.toUpperCase().slice(0, 3))}
+                maxLength={3}
+                required
+              />
             </label>
             <label className={POLISHED_LABEL_CLASS}>
               Business structure

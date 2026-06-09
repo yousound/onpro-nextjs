@@ -1,5 +1,24 @@
-import type { Address, Contact, ContactKind, PeopleSegment, TeamRole } from "@/lib/types/contact";
+import type {
+  Address,
+  Contact,
+  ContactKind,
+  ContactLocation,
+  PeopleSegment,
+  TeamRole,
+} from "@/lib/types/contact";
 import type { ProjectPermissionFlags } from "@/lib/project-permissions";
+
+function locationHasContent(loc: ContactLocation): boolean {
+  return Boolean(
+    loc.label?.trim() ||
+      loc.line1?.trim() ||
+      loc.line2?.trim() ||
+      loc.city?.trim() ||
+      loc.state?.trim() ||
+      loc.postal_code?.trim() ||
+      loc.country?.trim(),
+  );
+}
 
 export type ContactAddressPayload = {
   kind?: ContactKind;
@@ -13,6 +32,7 @@ export type ContactAddressPayload = {
   team_role_label?: string;
   billing_address?: Address;
   shipping_address?: Address;
+  locations?: ContactLocation[];
   other_emails?: string[];
   business_structure?: string;
   /** Legacy plain-text notes when not JSON. */
@@ -59,6 +79,7 @@ export function decodeContactAddress(address: string | null | undefined): Partia
         team_role_custom: parsed.team_role_custom,
         billing_address: parsed.billing_address,
         shipping_address: parsed.shipping_address,
+        locations: parsed.locations,
         other_emails: parsed.other_emails,
         business_structure: parsed.business_structure,
         notes: parsed.notes,

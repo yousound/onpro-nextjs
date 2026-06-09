@@ -2,8 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { parseCompanyFilterText } from "@/lib/csv/filter-import-by-companies";
+import {
+  clearImportCsvSession,
+  loadImportCsvSession,
+  saveImportCsvSession,
+  updateImportCsvCompanyFilter,
+  type SavedImportCsvSession,
+} from "@/lib/csv/import-csv-session";
+import { importBatchHint, IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
 import { readCsvFileAsText } from "@/lib/csv/read-csv-file";
-import { IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
+import { clientCodeByName, resolveClientCode } from "@/lib/reference/client-codes";
 import {
   chunkRowRange,
   planCsvImportChunks,
@@ -15,6 +24,7 @@ import {
   validateImportCodeForContact,
   type ImportContactRowPreview,
 } from "@/lib/csv/import-client-rows";
+import type { ContactLocation } from "@/lib/types/contact";
 import type { ParsedImportContactRow } from "@/lib/types/contact-import";
 import { segmentLabel } from "@/lib/mock/people";
 import type { PeopleSegment } from "@/lib/mock/people";
@@ -45,7 +55,7 @@ const IMPORT_SECTIONS: ModalSectionItem[] = [
 ];
 
 const SECTION_SUBTITLES: Record<string, string> = {
-  upload: "One .csv can mix labeled and unlabeled rows — you assign type on Review when needed.",
+  upload: "Upload once, save your CSV, then pull only the companies you need — no re-uploading.",
   review: "Scroll the list, edit fields, and mark Team / Client / Vendor for unlabeled rows.",
 };
 
@@ -54,6 +64,17 @@ const SAMPLE_CSV_URL = "/samples/people-import-test.csv";
 
 const reviewFieldClass = `${projectModalFieldClass} !mt-1 !h-9 !py-1.5 text-sm`;
 const reviewLabelClass = `${projectModalLabelClass} !text-[10px]`;
+const reviewTextareaClass = `${projectModalFieldClass} !mt-1 !h-auto min-h-[4.5rem] resize-y !py-2 text-sm`;
+
+function patchImportLocation(
+  locations: ContactLocation[] | undefined,
+  index: number,
+  patch: Partial<ContactLocation>,
+): ContactLocation[] {
+  const list = [...(locations ?? [])];
+  list[index] = { ...list[index], ...patch };
+  return list;
+}
 
 type Props = {
   open: boolean;
@@ -78,6 +99,8 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
     fileName: string;
   } | null>(null);
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
+  const [savedSession, setSavedSession] = useState<SavedImportCsvSession | null>(null);
+  const [companyFilter, setCompanyFilter] = useState("");
 
   const visibleSections = useMemo(() => {
     if (previews.length === 0) {
@@ -98,15 +121,23 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
   useEffect(() => {
     if (!open) {
       setActiveSection("upload");
-      setFileName(null);
       setError(null);
       setParseMeta(null);
       setPreviews([]);
       setChunkPlan(null);
       setBatchNotice(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    const session = loadImportCsvSession();
+    if (session) {
+      setSavedSession(session);
+      setCompanyFilter(session.companyFilter);
+      setFileName(session.fileName);
     }
   }, [open]);
+
+  const companyFilterNames = useMemo(() => parseCompanyFilterText(companyFilter), [companyFilter]);
 
   useEffect(() => {
     if (!visibleSections.some((s) => s.id === activeSection)) {
@@ -128,10 +159,27 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
       ? chunkRowRange(chunkIndex, IMPORT_ROW_LIMIT, totalRowsInFile)
       : null;
 
+  function persistCsvSession(csvText: string, name: string, filter = companyFilter) {
+    const session = saveImportCsvSession({
+      fileName: name,
+      csvText,
+      companyFilter: filter,
+    });
+    setSavedSession(session);
+    setFileName(session.fileName);
+    setCompanyFilter(session.companyFilter);
+    setPreviews([]);
+    setParseMeta(null);
+    setChunkPlan(null);
+    setBatchNotice(null);
+    setActiveSection("upload");
+  }
+
   async function analyzeCsvText(
     csvText: string,
     label: string,
     plan?: { chunks: string[]; chunkIndex: number; totalDataRows: number; fileName: string },
+    filter?: string,
   ) {
     setError(null);
     setAnalyzing(true);
@@ -147,6 +195,7 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           csvText: chunkCsv,
+          companyFilter: filter?.trim() || undefined,
           batch:
             chunkCount > 1
               ? {
@@ -183,27 +232,33 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
     }
   }
 
-  function startImportSession(csvText: string, name: string) {
+  function startImportSession(csvText: string, name: string, filter?: string) {
     const plan = planCsvImportChunks(csvText);
     if (plan.totalDataRows === 0) {
       setError("No data rows found — add contacts below the header row.");
       return;
     }
-    void analyzeCsvText(csvText, name, {
-      chunks: plan.chunks,
-      chunkIndex: 0,
-      totalDataRows: plan.totalDataRows,
-      fileName: name,
-    });
+    saveImportCsvSession({ fileName: name, csvText, companyFilter: filter ?? companyFilter });
+    void analyzeCsvText(
+      csvText,
+      name,
+      {
+        chunks: plan.chunks,
+        chunkIndex: 0,
+        totalDataRows: plan.totalDataRows,
+        fileName: name,
+      },
+      filter ?? companyFilter,
+    );
   }
 
   async function analyzeFile(file: File) {
     try {
       const csvText = await readCsvFileAsText(file);
-      startImportSession(csvText, file.name);
+      persistCsvSession(csvText, file.name);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not read CSV");
-      setAnalyzing(false);
     }
   }
 
@@ -212,11 +267,36 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
       const res = await fetch(SAMPLE_CSV_URL);
       if (!res.ok) throw new Error("Sample file not found");
       const csvText = await res.text();
-      startImportSession(csvText, "people-import-test.csv");
+      persistCsvSession(csvText, "people-import-test.csv");
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load sample CSV");
-      setAnalyzing(false);
     }
+  }
+
+  function runFilteredImport() {
+    if (!savedSession) {
+      setError("Upload a CSV first — we save it here so you can import in batches.");
+      return;
+    }
+    setError(null);
+    startImportSession(savedSession.csvText, savedSession.fileName, companyFilter);
+  }
+
+  function handleCompanyFilterChange(value: string) {
+    setCompanyFilter(value);
+    updateImportCsvCompanyFilter(value);
+  }
+
+  function handleClearSavedCsv() {
+    clearImportCsvSession();
+    setSavedSession(null);
+    setFileName(null);
+    setCompanyFilter("");
+    setPreviews([]);
+    setParseMeta(null);
+    setChunkPlan(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function patchRow(rowKey: string, patch: Partial<ParsedImportContactRow>) {
@@ -293,12 +373,17 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
         setPreviews([]);
         setParseMeta(null);
         setActiveSection("review");
-        await analyzeCsvText(chunkPlan.chunks[nextIndex]!, chunkPlan.fileName, {
-          chunks: chunkPlan.chunks,
-          chunkIndex: nextIndex,
-          totalDataRows: chunkPlan.totalDataRows,
-          fileName: chunkPlan.fileName,
-        });
+        await analyzeCsvText(
+          chunkPlan.chunks[nextIndex]!,
+          chunkPlan.fileName,
+          {
+            chunks: chunkPlan.chunks,
+            chunkIndex: nextIndex,
+            totalDataRows: chunkPlan.totalDataRows,
+            fileName: chunkPlan.fileName,
+          },
+          companyFilter,
+        );
         if (failures.length > 0) {
           console.warn("[import-clients] partial failures in batch", failures);
         }
@@ -338,7 +423,7 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
               from CSV.
             </>
           }
-          body={`Large lists are split into batches of ${IMPORT_ROW_LIMIT} automatically. Review and import each batch in order — no need to split your CSV.`}
+          body={`Upload your master CSV once. Name the companies you want, pull matches anytime, and edit client/vendor codes to match your catalog.`}
           nav={
             <ModalSectionNavList
               sections={visibleSections}
@@ -363,6 +448,7 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
         onSubmit={(e) => {
           e.preventDefault();
           if (activeSection === "review") void handleImport();
+          else if (savedSession) runFilteredImport();
           else if (previews.length > 0) setActiveSection("review");
         }}
       >
@@ -427,27 +513,73 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                 {" "}
                 (12 rows: clients, vendors, team)
               </p>
-              {fileName && !analyzing ? (
-                <p className="mt-3 text-xs text-slate-600">
-                  Last file: <span className="font-medium">{fileName}</span>
-                </p>
-              ) : null}
             </div>
+
+            {savedSession ? (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-left">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-950">Saved CSV</p>
+                    <p className="mt-1 text-xs text-emerald-900">
+                      <span className="font-medium">{savedSession.fileName}</span>
+                      {" · "}
+                      {importBatchHint(savedSession.totalDataRows)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-emerald-800/80">
+                      Stays on this device — change company names below and pull again without
+                      re-uploading.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-red-700 hover:underline"
+                    onClick={handleClearSavedCsv}
+                  >
+                    Clear saved file
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <label className="block rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <span className={reviewLabelClass}>
+                Which companies should we pull from your CSV?
+              </span>
+              <textarea
+                className={`${reviewTextareaClass} !min-h-[5.5rem]`}
+                value={companyFilter}
+                onChange={(e) => handleCompanyFilterChange(e.target.value)}
+                placeholder={'Glo Gang, LNQ, Millworks Collective\n(one per line or comma-separated)'}
+                disabled={!savedSession}
+              />
+              <p className="mt-2 text-xs text-slate-500">
+                {savedSession
+                  ? companyFilterNames.length > 0
+                    ? `We'll search your saved CSV for ${companyFilterNames.join(", ")} and everyone at those companies.`
+                    : "Leave blank to pull every row from your saved CSV."
+                  : "Upload a CSV first, then list the company names you want to import."}
+              </p>
+            </label>
+
             <div className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3 text-left text-xs text-violet-950">
-              <p className="font-semibold">Large lists</p>
+              <p className="font-semibold">How it works</p>
               <p className="mt-1 text-violet-900/90">
-                Upload one CSV — we split it into batches of {IMPORT_ROW_LIMIT} contacts. You
-                review and import batch 1, then batch 2, and so on until the file is done.
+                1. Upload your master list once. 2. Type company names above. 3. Pull matches and
+                review — client/vendor codes auto-match your catalog (edit on Review if needed).
               </p>
             </div>
             <ul className="list-inside list-disc space-y-1 text-xs text-slate-500">
               <li>Include name, email, and a Type/Segment column when you have one.</li>
               <li>Unlabeled rows stay on Review until you pick Team, Client, or Vendor.</li>
               <li>
-                Client codes must be unique — the master client list reserves codes like GG, VS, MC
-                (edit Code on Review or use the sample file).
+                Client and vendor codes are editable on Review — clients auto-suggest master-list
+                codes like GG, LNQ, MC.
               </li>
               <li>Duplicate emails already in People are skipped on Review.</li>
+              <li>
+                Location columns (location 1, location 2, billing, shipping, etc.) import as unlimited
+                sites — edit or add more on Review.
+              </li>
             </ul>
           </div>
 
@@ -457,6 +589,17 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                 {batchNotice}
               </p>
             ) : null}
+            {companyFilterNames.length > 0 ? (
+              <p className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs font-medium text-violet-950">
+                Pulled from saved CSV for: {companyFilterNames.join(", ")}
+              </p>
+            ) : savedSession ? (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+                Showing all matches from saved file{" "}
+                <span className="font-medium">{savedSession.fileName}</span>
+              </p>
+            ) : null}
+
             {parseMeta ? (
               <div className="space-y-2">
                 {isMultiBatch && rowRange ? (
@@ -602,19 +745,26 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                                 />
                               </label>
                             ) : null}
-                            <label className={reviewLabelClass}>
-                              Code
-                              <input
-                                className={reviewFieldClass}
-                                value={row.company_code ?? ""}
-                                maxLength={3}
-                                onChange={(e) =>
-                                  patchRow(row.rowKey, {
-                                    company_code: e.target.value.toUpperCase(),
-                                  })
-                                }
-                              />
-                            </label>
+                            {(row.segment === "client" || row.segment === "vendor") ? (
+                              <label className={reviewLabelClass}>
+                                Company code
+                                {row.segment === "client" && clientCodeByName(row.name) ? (
+                                  <span className="ml-1 font-normal normal-case text-violet-700">
+                                    · master list {resolveClientCode(row.name)}
+                                  </span>
+                                ) : null}
+                                <input
+                                  className={reviewFieldClass}
+                                  value={row.company_code ?? ""}
+                                  maxLength={3}
+                                  onChange={(e) =>
+                                    patchRow(row.rowKey, {
+                                      company_code: e.target.value.toUpperCase(),
+                                    })
+                                  }
+                                />
+                              </label>
+                            ) : null}
                             <label className={reviewLabelClass}>
                               Phone
                               <input
@@ -623,12 +773,138 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                                 onChange={(e) => patchRow(row.rowKey, { phone: e.target.value })}
                               />
                             </label>
+                            <label className={`${reviewLabelClass} sm:col-span-2 lg:col-span-3`}>
+                              Notes
+                              <textarea
+                                className={reviewTextareaClass}
+                                value={row.notes ?? ""}
+                                placeholder="Notes from CSV or add your own"
+                                onChange={(e) => patchRow(row.rowKey, { notes: e.target.value })}
+                              />
+                            </label>
                           </div>
-                          {row.notes ? (
-                            <p className="text-xs text-slate-500">
-                              <span className="font-semibold text-slate-600">Notes:</span> {row.notes}
-                            </p>
-                          ) : null}
+                          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                Locations
+                                {(row.locations?.length ?? 0) > 0
+                                  ? ` (${row.locations!.length})`
+                                  : ""}
+                              </p>
+                              <button
+                                type="button"
+                                className="text-xs font-semibold text-[#7c3aed] hover:underline"
+                                onClick={() =>
+                                  patchRow(row.rowKey, {
+                                    locations: [...(row.locations ?? []), { label: "" }],
+                                  })
+                                }
+                              >
+                                + Add location
+                              </button>
+                            </div>
+                            {(row.locations?.length ?? 0) === 0 ? (
+                              <p className="text-xs text-slate-500">
+                                No locations yet — add warehouses, offices, billing, or shipping sites.
+                              </p>
+                            ) : (
+                              <ul className="space-y-2">
+                                {row.locations!.map((loc, locIndex) => (
+                                  <li
+                                    key={`${row.rowKey}-loc-${locIndex}`}
+                                    className="rounded-lg border border-slate-200 bg-white p-3"
+                                  >
+                                    <div className="mb-2 flex items-center justify-between gap-2">
+                                      <label className={`${reviewLabelClass} flex-1`}>
+                                        Label
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.label ?? ""}
+                                          placeholder={`Location ${locIndex + 1}`}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                label: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <button
+                                        type="button"
+                                        className="mt-4 shrink-0 text-xs font-semibold text-red-600 hover:underline"
+                                        onClick={() =>
+                                          patchRow(row.rowKey, {
+                                            locations: row.locations!.filter((_, i) => i !== locIndex),
+                                          })
+                                        }
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                      <label className={`${reviewLabelClass} sm:col-span-2 lg:col-span-3`}>
+                                        Street
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.line1 ?? ""}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                line1: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className={reviewLabelClass}>
+                                        City
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.city ?? ""}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                city: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className={reviewLabelClass}>
+                                        State
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.state ?? ""}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                state: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className={reviewLabelClass}>
+                                        Postal
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.postal_code ?? ""}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                postal_code: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
                           <p
                             className={`text-xs font-medium ${
                               row.status === "ready"
@@ -661,23 +937,29 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
           primaryLabel={
             importing
               ? "Importing…"
-              : activeSection === "review"
-                ? selectedReady.length === 0
-                  ? "Import"
-                  : isMultiBatch && !isLastBatch
-                    ? `Import ${selectedReady.length} & next batch`
-                    : isMultiBatch
-                      ? `Import ${selectedReady.length} & finish`
-                      : `Import ${selectedReady.length} contact${selectedReady.length === 1 ? "" : "s"}`
-                : "Continue"
+              : analyzing
+                ? "Finding matches…"
+                : activeSection === "review"
+                  ? selectedReady.length === 0
+                    ? "Import"
+                    : isMultiBatch && !isLastBatch
+                      ? `Import ${selectedReady.length} & next batch`
+                      : isMultiBatch
+                        ? `Import ${selectedReady.length} & finish`
+                        : `Import ${selectedReady.length} contact${selectedReady.length === 1 ? "" : "s"}`
+                  : companyFilterNames.length > 0
+                    ? `Find ${companyFilterNames.slice(0, 2).join(", ")}${companyFilterNames.length > 2 ? "…" : ""}`
+                    : savedSession
+                      ? "Pull all rows"
+                      : "Upload CSV first"
           }
-          primaryIcon={importing || activeSection !== "review" ? undefined : <CheckMini />}
+          primaryIcon={importing || analyzing || activeSection !== "review" ? undefined : <CheckMini />}
           primaryDisabled={
             analyzing ||
             importing ||
             (activeSection === "review"
               ? selectedReady.length === 0
-              : previews.length === 0)
+              : !savedSession)
           }
         />
       </form>

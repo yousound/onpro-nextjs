@@ -1,5 +1,5 @@
 import type { PeopleSegment } from "@/lib/mock/people";
-import type { Address, ContactKind, TeamRole } from "@/lib/types/contact";
+import type { Address, ContactKind, ContactLocation, TeamRole } from "@/lib/types/contact";
 
 /** One People row extracted from a CSV (before persisting). */
 export type ParsedImportContactRow = {
@@ -14,6 +14,7 @@ export type ParsedImportContactRow = {
   other_emails?: string[];
   billing_address?: Address;
   shipping_address?: Address;
+  locations?: ContactLocation[];
   notes?: string;
   team_role?: TeamRole;
   business_structure?: string;

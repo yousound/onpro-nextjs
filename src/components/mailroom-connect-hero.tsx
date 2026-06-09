@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 type Props = {
@@ -11,6 +12,8 @@ type Props = {
   connected?: boolean;
   connectedEmail?: string | null;
   onOpenInbox?: () => void;
+  /** OnPro account email (helps debug per-user Gmail connections). */
+  signedInEmail?: string | null;
 };
 
 export function MailroomConnectHero({
@@ -21,6 +24,7 @@ export function MailroomConnectHero({
   connected = false,
   connectedEmail,
   onOpenInbox,
+  signedInEmail,
 }: Props) {
   const isMock = mode === "mock";
 
@@ -109,8 +113,24 @@ export function MailroomConnectHero({
           </p>
         ) : null}
 
+        {!isMock && signedInEmail ? (
+          <p className="mt-4 text-xs text-slate-400">
+            Signed in to OnPro as{" "}
+            <span className="font-medium text-slate-600">{signedInEmail}</span>
+            {" — "}
+            Gmail connects to this account only.
+          </p>
+        ) : !isMock ? (
+          <p className="mt-4 max-w-md text-sm text-slate-600">
+            <Link href="/login?next=/mailroom" className="font-semibold text-[#7c3aed] hover:underline">
+              Sign in to OnPro
+            </Link>{" "}
+            first, then connect your Gmail.
+          </p>
+        ) : null}
+
         {!isMock && !connected && statusMessage && oauthConfigured ? (
-          <p className="mt-4 max-w-md text-sm text-slate-500">{statusMessage}</p>
+          <p className="mt-3 max-w-md text-sm text-slate-500">{statusMessage}</p>
         ) : null}
 
         <p

@@ -1,5 +1,6 @@
 import { expandParsedImportRows } from "@/lib/csv/expand-import-rows";
 import { IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
+import { parseImportLocationsFromRow } from "@/lib/csv/parse-import-locations";
 import { parseCsvTable } from "@/lib/csv/parse-csv-lines";
 import { normalizeImportSegment } from "@/lib/csv/normalize-import-segment";
 import type { ParsedImportContactRow } from "@/lib/types/contact-import";
@@ -81,6 +82,8 @@ export function parseContactsCsvFallback(csvText: string): ParsedImportContactRo
 
     const displayName = name || email.split("@")[0] || "Unknown";
 
+    const locations = parseImportLocationsFromRow(headers, row);
+
     out.push({
       segment,
       kind: parsedKind,
@@ -89,6 +92,7 @@ export function parseContactsCsvFallback(csvText: string): ParsedImportContactRo
       email: email || "",
       phone: cell(row, phoneIdx) || undefined,
       company_code: codeRaw(cell(row, codeIdx), displayName),
+      locations: locations.length ? locations : undefined,
       notes: cell(row, notesIdx) || undefined,
       team_role: segment === "team" ? "staff" : undefined,
       warnings: warnings.length ? warnings : undefined,

@@ -32,6 +32,8 @@ export type MailroomThreadsResponse = {
   nextPageToken?: string | null;
   hasMore?: boolean;
   pageSize?: number;
+  resultSizeEstimate?: number | null;
+  searchQuery?: string | null;
   source: "live" | "mock";
   connected?: boolean;
   email?: string | null;
@@ -67,10 +69,13 @@ export async function fetchGmailStatusViaApi(): Promise<GmailStatusResponse> {
 export async function fetchMailroomThreadsViaApi(opts?: {
   pageToken?: string;
   maxResults?: number;
+  /** Gmail search query (same syntax as Gmail search bar). */
+  q?: string;
 }): Promise<MailroomThreadsResponse> {
   const params = new URLSearchParams();
   if (opts?.pageToken) params.set("pageToken", opts.pageToken);
   if (opts?.maxResults != null) params.set("maxResults", String(opts.maxResults));
+  if (opts?.q?.trim()) params.set("q", opts.q.trim());
   const qs = params.toString();
   const res = await fetch(`/api/mailroom/threads${qs ? `?${qs}` : ""}`, { cache: "no-store" });
   if (!res.ok) {

@@ -15,6 +15,11 @@ export interface Address {
   country?: string;
 }
 
+/** Named site / warehouse / office address — contacts can have unlimited locations. */
+export interface ContactLocation extends Address {
+  label?: string;
+}
+
 export interface FileRef {
   id: string;
   name: string;
@@ -37,6 +42,7 @@ export interface Contact {
   phone?: string;
   billing_address?: Address;
   shipping_address?: Address;
+  locations?: ContactLocation[];
   sell_permits?: FileRef[];
   sell_certificate?: FileRef[];
   avatar_url?: string | null;

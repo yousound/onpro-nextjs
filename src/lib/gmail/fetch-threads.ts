@@ -251,6 +251,8 @@ const GMAIL_THREAD_FETCH_CONCURRENCY = 6;
 export type GmailInboxPage = {
   threads: EmailThread[];
   nextPageToken: string | null;
+  /** Gmail estimate for matching threads (inbox list). */
+  resultSizeEstimate: number | null;
 };
 
 function sortThreadsByLatest(threads: EmailThread[]): EmailThread[] {
@@ -290,7 +292,7 @@ async function fetchGmailThreadsByIds(
 /** One page of INBOX threads (default 40) with optional Gmail `pageToken`. */
 export async function fetchGmailInboxThreadPage(
   accessToken: string,
-  opts?: { maxResults?: number; pageToken?: string },
+  opts?: { maxResults?: number; pageToken?: string; q?: string },
 ): Promise<GmailInboxPage> {
   const maxResults = Math.min(
     GMAIL_INBOX_PAGE_SIZE,
@@ -301,6 +303,8 @@ export async function fetchGmailInboxThreadPage(
     labelIds: "INBOX",
   });
   if (opts?.pageToken) params.set("pageToken", opts.pageToken);
+  const q = opts?.q?.trim();
+  if (q) params.set("q", q);
 
   const listRes = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/threads?${params}`,
@@ -314,6 +318,7 @@ export async function fetchGmailInboxThreadPage(
   const listJson = (await listRes.json()) as {
     threads?: Array<{ id: string }>;
     nextPageToken?: string;
+    resultSizeEstimate?: number;
   };
   const ids = (listJson.threads ?? []).map((t) => t.id);
   const threads = await fetchGmailThreadsByIds(accessToken, ids);
@@ -321,6 +326,10 @@ export async function fetchGmailInboxThreadPage(
   return {
     threads,
     nextPageToken: listJson.nextPageToken ?? null,
+    resultSizeEstimate:
+      typeof listJson.resultSizeEstimate === "number"
+        ? listJson.resultSizeEstimate
+        : null,
   };
 }
 

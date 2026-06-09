@@ -55,11 +55,12 @@ export async function GET(request: Request) {
   const maxResults = Number.isFinite(maxResultsRaw)
     ? Math.min(GMAIL_INBOX_PAGE_SIZE, Math.max(1, maxResultsRaw))
     : GMAIL_INBOX_PAGE_SIZE;
+  const q = url.searchParams.get("q")?.trim() || undefined;
 
   try {
     const { accessToken } = await getValidGmailAccessToken(connection);
     const [page, profile] = await Promise.all([
-      fetchGmailInboxThreadPage(accessToken, { pageToken, maxResults }),
+      fetchGmailInboxThreadPage(accessToken, { pageToken, maxResults, q }),
       fetchGoogleUserProfile(accessToken).catch(() => null),
     ]);
     const enriched = profile
@@ -69,7 +70,9 @@ export async function GET(request: Request) {
       threads: enriched,
       nextPageToken: page.nextPageToken,
       hasMore: Boolean(page.nextPageToken),
+      resultSizeEstimate: page.resultSizeEstimate,
       pageSize: maxResults,
+      searchQuery: q ?? null,
       source: "live",
       connected: true,
       email: connection.email,

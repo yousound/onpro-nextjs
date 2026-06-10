@@ -21,12 +21,10 @@ import { calendarEventReactKey } from "@/lib/calendar-google";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { clientInitials, formatShortDate } from "@/lib/format";
 import {
-  deleteLocalCalendarEvent,
   filterDeletedCalendarEvents,
   readExtraCalendarEvents,
-  tombstoneCalendarEvent,
+  removeCalendarEvent,
 } from "@/lib/calendar-events-store";
-import { deleteCalendarEventViaApi } from "@/lib/data/calendar-api";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 
 const VIEW_START_HOUR = 7;
@@ -119,16 +117,11 @@ export function CalendarDayView({
     setDeleting(true);
     setDeleteError(null);
     try {
-      if (selected.external_id?.trim() && isClientLiveBackend()) {
-        await deleteCalendarEventViaApi(selected);
-        tombstoneCalendarEvent(selected);
-        onRefreshGoogle?.();
-      } else {
-        deleteLocalCalendarEvent(selected);
-        const nextExtras = readExtraCalendarEvents();
-        setExtraEvents(nextExtras);
-        writeMockLs(MOCK_LS.calendarEvents, nextExtras);
-      }
+      await removeCalendarEvent(selected, {
+        live: isClientLiveBackend(),
+        onRefreshGoogle,
+      });
+      setExtraEvents(readExtraCalendarEvents());
       setSelectedId(null);
       setAssistantEvent(null);
       setDeleteConfirm(false);
@@ -765,6 +758,13 @@ export function CalendarDayView({
           seedIds={seedEventIds}
           onClose={() => setAssistantEvent(null)}
           onEventUpdated={handleAssistantEventUpdated}
+          onRefreshGoogle={onRefreshGoogle}
+          onEventDeleted={() => {
+            setAssistantEvent(null);
+            setSelectedId(null);
+            setExtraEvents(readExtraCalendarEvents());
+            setHiddenTick((t) => t + 1);
+          }}
         />
       ) : null}
     </div>

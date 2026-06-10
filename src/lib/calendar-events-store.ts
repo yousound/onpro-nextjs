@@ -186,6 +186,21 @@ export function parseCalendarSourceId(sourceId: string): number | null {
   return Number.isFinite(id) ? id : null;
 }
 
+/** Delete locally or on Google Calendar (Live). */
+export async function removeCalendarEvent(
+  ev: CalendarEvent,
+  opts: { live: boolean; onRefreshGoogle?: () => void },
+): Promise<void> {
+  if (ev.external_id?.trim() && opts.live) {
+    const { deleteCalendarEventViaApi } = await import("@/lib/data/calendar-api");
+    await deleteCalendarEventViaApi(ev);
+    tombstoneCalendarEvent(ev);
+    opts.onRefreshGoogle?.();
+    return;
+  }
+  deleteLocalCalendarEvent(ev);
+}
+
 /** Remove from browser extras or tombstone seed/Google-overlay events. */
 export function deleteLocalCalendarEvent(ev: CalendarEvent): void {
   const extras = readExtraCalendarEvents();

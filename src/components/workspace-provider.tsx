@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { joinWorkspaceMatch } from "@/lib/workspace-join-client";
 import { writeActiveWorkspaceSession } from "@/lib/workspace-context";
 import type { WorkspaceView } from "@/lib/workspace-context";
 import type { WorkspaceMatch } from "@/lib/types/workspace";
@@ -19,10 +20,13 @@ type WorkspaceContextValue = {
   loading: boolean;
   active: WorkspaceView;
   teams: WorkspaceMatch[];
+  joinedTeams: WorkspaceMatch[];
+  pendingTeams: WorkspaceMatch[];
   authUserId: string | null;
   isTeamView: boolean;
   canSwitch: boolean;
   switchWorkspace: (operatorUserId: string | null) => Promise<void>;
+  joinTeam: (match: WorkspaceMatch) => Promise<void>;
   refresh: () => Promise<void>;
 };
 
@@ -39,7 +43,10 @@ const WorkspaceCtx = createContext<WorkspaceContextValue>({
   authUserId: null,
   isTeamView: false,
   canSwitch: false,
+  joinedTeams: [],
+  pendingTeams: [],
   switchWorkspace: async () => {},
+  joinTeam: async () => {},
   refresh: async () => {},
 });
 
@@ -53,12 +60,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(live);
   const [active, setActive] = useState<WorkspaceView>(defaultActive);
   const [teams, setTeams] = useState<WorkspaceMatch[]>([]);
+  const [joinedTeams, setJoinedTeams] = useState<WorkspaceMatch[]>([]);
+  const [pendingTeams, setPendingTeams] = useState<WorkspaceMatch[]>([]);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!live) {
       setLoading(false);
       setTeams([]);
+      setJoinedTeams([]);
+      setPendingTeams([]);
       setActive(defaultActive);
       setAuthUserId(null);
       return;
@@ -70,13 +81,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const data = (await res.json()) as {
         active?: WorkspaceView;
         teams?: WorkspaceMatch[];
+        joined?: WorkspaceMatch[];
+        pending?: WorkspaceMatch[];
         authUserId?: string;
       };
+      const all = data.teams ?? [];
       setActive(data.active ?? defaultActive);
-      setTeams(data.teams ?? []);
+      setTeams(all);
+      setJoinedTeams(data.joined ?? all.filter((t) => t.alreadyJoined));
+      setPendingTeams(data.pending ?? all.filter((t) => !t.alreadyJoined));
       setAuthUserId(data.authUserId ?? null);
     } catch {
       setTeams([]);
+      setJoinedTeams([]);
+      setPendingTeams([]);
       setActive(defaultActive);
     } finally {
       setLoading(false);
@@ -86,6 +104,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!live) return;
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [live, load]);
+
+  const joinTeam = useCallback(
+    async (match: WorkspaceMatch) => {
+      if (!live) return;
+      await joinWorkspaceMatch(match);
+      writeActiveWorkspaceSession(match.operatorUserId);
+      await fetch("/api/workspace/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_user_id: match.operatorUserId }),
+      });
+      await load();
+      router.refresh();
+      window.dispatchEvent(new Event("onpro-workspace-changed"));
+    },
+    [live, load, router],
+  );
 
   const switchWorkspace = useCallback(
     async (operatorUserId: string | null) => {
@@ -111,13 +153,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       loading,
       active,
       teams,
+      joinedTeams,
+      pendingTeams,
       authUserId,
       isTeamView: active.mode === "team",
-      canSwitch: teams.length > 0,
+      canSwitch: joinedTeams.length > 0 || pendingTeams.length > 0,
       switchWorkspace,
+      joinTeam,
       refresh: load,
     }),
-    [loading, active, teams, authUserId, switchWorkspace, load],
+    [loading, active, teams, joinedTeams, pendingTeams, authUserId, switchWorkspace, joinTeam, load],
   );
 
   return <WorkspaceCtx.Provider value={value}>{children}</WorkspaceCtx.Provider>;

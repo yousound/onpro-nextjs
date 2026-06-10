@@ -1,5 +1,8 @@
 -- Fix infinite recursion (42P17): RLS policies must not JOIN contacts from within contacts/projects policies.
 -- SECURITY DEFINER helpers read contacts without re-entering RLS.
+--
+-- Supabase may warn about "destructive operations" — that is expected here.
+-- This only DROP + recreates RLS policies and helper functions. No tables or rows are deleted.
 -- Safe to re-run.
 
 -- ---------------------------------------------------------------------------

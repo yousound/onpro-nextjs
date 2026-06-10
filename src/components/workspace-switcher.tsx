@@ -14,8 +14,17 @@ type Props = {
 
 export function WorkspaceSwitcher({ collapsed = false }: Props) {
   const { user: profileUser, loading: profileLoading } = useCurrentUser();
-  const { active, teams, canSwitch, switchWorkspace, loading: wsLoading } = useWorkspace();
+  const {
+    active,
+    joinedTeams,
+    pendingTeams,
+    canSwitch,
+    switchWorkspace,
+    joinTeam,
+    loading: wsLoading,
+  } = useWorkspace();
   const [open, setOpen] = useState(false);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const sidebarUser = profileUser
@@ -122,12 +131,38 @@ export function WorkspaceSwitcher({ collapsed = false }: Props) {
           >
             My workspace
           </button>
-          {teams.map((team) => {
+          {pendingTeams.map((team) => {
+            const key = `${team.operatorUserId}:${team.contactId}`;
+            return (
+              <button
+                key={`pending-${key}`}
+                type="button"
+                role="menuitem"
+                disabled={joiningId === key}
+                className="block w-full px-3 py-2 text-left text-sm transition hover:bg-amber-50 disabled:opacity-60"
+                onClick={() => {
+                  setJoiningId(key);
+                  void joinTeam(team)
+                    .then(() => setOpen(false))
+                    .finally(() => setJoiningId(null));
+                }}
+              >
+                <span className="block truncate font-medium text-text-primary">
+                  {team.workspaceName}
+                </span>
+                <span className="block truncate text-xs font-semibold text-amber-800">
+                  {joiningId === key ? "Joining…" : "Tap to join team"}
+                </span>
+              </button>
+            );
+          })}
+          {joinedTeams.map((team) => {
+            const key = `${team.operatorUserId}:${team.contactId}`;
             const selected =
               active.mode === "team" && active.operatorUserId === team.operatorUserId;
             return (
               <button
-                key={`${team.operatorUserId}:${team.contactId}`}
+                key={key}
                 type="button"
                 role="menuitem"
                 className={`block w-full px-3 py-2 text-left text-sm transition hover:bg-surface-body ${

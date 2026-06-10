@@ -8,6 +8,7 @@ import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { dispatchOpenOnProAi } from "@/lib/onpro-events";
 import { getNotificationRows } from "@/lib/notifications";
 import { writeActiveWorkspaceSession } from "@/lib/workspace-context";
+import type { WorkspaceMatch } from "@/lib/types/workspace";
 
 function BellGlyph({ className }: { className?: string }) {
   return (
@@ -33,7 +34,7 @@ export function NotificationsPopover({
 }: NotificationsPopoverProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { switchWorkspace } = useWorkspace();
+  const { switchWorkspace, joinTeam, refresh: refreshWorkspace } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [memberEvents, setMemberEvents] = useState<
     { id: string; eventId: number; title: string; subtitle: string; href: string }[]
@@ -48,12 +49,21 @@ export function NotificationsPopover({
       operatorUserId: string;
     }[]
   >([]);
+  const [pendingTeamInvites, setPendingTeamInvites] = useState<
+    {
+      id: string;
+      title: string;
+      subtitle: string;
+      href: string;
+      match: WorkspaceMatch;
+    }[]
+  >([]);
   const rootRef = useRef<HTMLDivElement>(null);
   const todayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const baseRows = useMemo(() => getNotificationRows(todayYmd), [todayYmd, pathname]);
   const rows = useMemo(
-    () => [...inboxEvents, ...memberEvents, ...baseRows],
-    [inboxEvents, memberEvents, baseRows],
+    () => [...pendingTeamInvites, ...inboxEvents, ...memberEvents, ...baseRows],
+    [pendingTeamInvites, inboxEvents, memberEvents, baseRows],
   );
   const count = rows.length;
   const live = isClientLiveBackend();
@@ -112,6 +122,22 @@ export function NotificationsPopover({
         },
       )
       .catch(() => setInboxEvents([]));
+
+    void fetch("/api/workspace/joined-teams", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { pending: [] }))
+      .then(
+        (data: { pending?: WorkspaceMatch[] }) => {
+          const mapped = (data.pending ?? []).map((team) => ({
+            id: `pending-team-${team.operatorUserId}:${team.contactId}`,
+            title: `You've been invited to ${team.workspaceName}`,
+            subtitle: `Tap to join · ${team.contactDisplayName}`,
+            href: "/people?segment=team",
+            match: team,
+          }));
+          setPendingTeamInvites(mapped);
+        },
+      )
+      .catch(() => setPendingTeamInvites([]));
   }, [live, pathname]);
 
   useEffect(() => {
@@ -180,8 +206,18 @@ export function NotificationsPopover({
                   <Link
                     href={r.href}
                     className="block px-3 py-2.5 transition hover:bg-surface-body"
-                    onClick={() => {
-                      const inboxRow = inboxEvents.find((e) => e.id === r.id);
+                    onClick={(e) => {
+                      const pendingRow = pendingTeamInvites.find((row) => row.id === r.id);
+                      if (pendingRow && live) {
+                        e.preventDefault();
+                        setPendingTeamInvites((prev) => prev.filter((row) => row.id !== r.id));
+                        setOpen(false);
+                        void joinTeam(pendingRow.match)
+                          .then(() => refreshWorkspace())
+                          .then(() => router.push("/projects"));
+                        return;
+                      }
+                      const inboxRow = inboxEvents.find((ev) => ev.id === r.id);
                       if (inboxRow && live) {
                         void fetch("/api/workspace/member-inbox", {
                           method: "POST",

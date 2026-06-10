@@ -16,6 +16,7 @@ type MatchRow = {
   contact_display_name: string;
   project_count: number;
   already_joined: boolean;
+  segment?: string | null;
 };
 
 export async function findWorkspacesForEmail(
@@ -37,7 +38,39 @@ export async function findWorkspacesForEmail(
     contactDisplayName: row.contact_display_name,
     projectCount: Number(row.project_count),
     alreadyJoined: Boolean(row.already_joined),
+    segment: segmentFromContactRole(row.segment ?? undefined),
   }));
+}
+
+function matchKey(m: Pick<WorkspaceMatch, "operatorUserId" | "contactId">): string {
+  return `${m.operatorUserId}:${m.contactId}`;
+}
+
+function mergeWorkspaceMatches(
+  emailMatches: WorkspaceMatch[],
+  joinedMatches: WorkspaceMatch[],
+): WorkspaceMatch[] {
+  const byKey = new Map<string, WorkspaceMatch>();
+  for (const m of emailMatches) {
+    byKey.set(matchKey(m), m);
+  }
+  for (const j of joinedMatches) {
+    const key = matchKey(j);
+    const existing = byKey.get(key);
+    if (existing) {
+      byKey.set(key, {
+        ...existing,
+        alreadyJoined: true,
+        projectCount: Math.max(existing.projectCount, j.projectCount),
+        segment: existing.segment ?? j.segment,
+        workspaceName: existing.workspaceName || j.workspaceName,
+        contactDisplayName: existing.contactDisplayName || j.contactDisplayName,
+      });
+    } else {
+      byKey.set(key, j);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.workspaceName.localeCompare(b.workspaceName));
 }
 
 export async function joinWorkspace(
@@ -220,6 +253,22 @@ export async function fetchUnreadMemberEvents(
     readAt: (row.read_at as string | null) ?? null,
     createdAt: row.created_at as string,
   }));
+}
+
+/** Joined + pending workspace matches for the signed-in user (email-based RPC). */
+export async function fetchMemberWorkspaceTeams(
+  supabase: SupabaseClient,
+  memberUserId: string,
+  email: string,
+): Promise<WorkspaceMatch[]> {
+  let emailMatches: WorkspaceMatch[] = [];
+  try {
+    emailMatches = await findWorkspacesForEmail(supabase, email, memberUserId);
+  } catch {
+    /* RPC missing or blocked — still return active memberships below */
+  }
+  const joinedMatches = await fetchJoinedTeamsForMember(supabase, memberUserId);
+  return mergeWorkspaceMatches(emailMatches, joinedMatches);
 }
 
 /** Active workspace memberships for the signed-in member (direct DB lookup). */

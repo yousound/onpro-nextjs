@@ -9,6 +9,8 @@ import { buildCalendarEventContext } from "@/lib/calendar-event-snapshot";
 import { calendarChatFallbackReply } from "@/lib/calendar-chat-intent";
 import { loadProjectJobs } from "@/lib/project-wip-edits";
 import { formatTimeRange } from "@/lib/calendar-utils";
+import { removeCalendarEvent } from "@/lib/calendar-events-store";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { sendCalendarChatViaApi } from "@/lib/data/calendar-api";
 import { listResolvableProjects } from "@/lib/agent-suggestion-resolve";
 import type { CalendarChatProposal } from "@/lib/openai/calendar-chat-reply";
@@ -33,6 +35,8 @@ type Props = {
   seedIds: ReadonlySet<number>;
   onClose: () => void;
   onEventUpdated: (event: CalendarEvent) => void;
+  onEventDeleted?: () => void;
+  onRefreshGoogle?: () => void;
 };
 
 export function CalendarEventAssistantModal({
@@ -40,6 +44,8 @@ export function CalendarEventAssistantModal({
   seedIds,
   onClose,
   onEventUpdated,
+  onEventDeleted,
+  onRefreshGoogle,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [chat, setChat] = useState<ChatLine[]>(() => [
@@ -53,6 +59,9 @@ export function CalendarEventAssistantModal({
   const [replying, setReplying] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [linkedProject, setLinkedProject] = useState<Project | null>(null);
   const [linkReason, setLinkReason] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -85,6 +94,26 @@ export function CalendarEventAssistantModal({
         .map((m) => m.proposal!.title),
     [chat],
   );
+
+  const handleDelete = useCallback(async () => {
+    if (deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await removeCalendarEvent(event, {
+        live: isClientLiveBackend(),
+        onRefreshGoogle,
+      });
+      setDeleteConfirm(false);
+      onEventDeleted?.();
+      onClose();
+      window.dispatchEvent(new Event("onpro-calendar-changed"));
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete event");
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting, event, onClose, onEventDeleted, onRefreshGoogle]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -219,15 +248,57 @@ export function CalendarEventAssistantModal({
                 <p className="mt-2 text-xs text-amber-800/90">No project matched — mention a PO or project name in chat.</p>
               )}
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="shrink-0 rounded-lg p-2 text-text-secondary hover:bg-slate-100"
-              aria-label="Close"
-            >
-              ×
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              {deleteConfirm ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => void handleDelete()}
+                    className="rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    {deleting ? "Deleting…" : "Confirm"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setDeleteConfirm(false)}
+                    className="rounded-lg px-2 py-1.5 text-xs font-medium text-text-secondary hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirm(true)}
+                  className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                >
+                  Delete
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg p-2 text-text-secondary hover:bg-slate-100"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
           </div>
+          {deleteError ? (
+            <p className="mt-2 text-xs font-medium text-red-600" role="alert">
+              {deleteError}
+            </p>
+          ) : null}
+          {deleteConfirm && !deleteError ? (
+            <p className="mt-2 text-xs text-text-secondary">
+              {event.external_id
+                ? `Removes from Google Calendar (${event.calendar_owner_name ?? event.calendar_owner_email ?? "connected account"}).`
+                : "Removes this event from your calendar in this browser."}
+            </p>
+          ) : null}
         </header>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">

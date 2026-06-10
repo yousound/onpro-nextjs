@@ -20,8 +20,12 @@ import { commitContactPermissions, commitSingleContact } from "@/lib/data/commit
 import {
   convertContactToSegment,
   validateSegmentConversion,
+  clientToVendorMoveError,
+  vendorToClientMoveAdvisory,
+  segmentMoveRecommendation,
   type ConvertibleSegment,
 } from "@/lib/contact-segment-convert";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import { isTeamMemberPending } from "@/lib/contact-invite-status";
 import { useCurrentUser } from "@/components/profile-provider";
 import { useDeleteContact } from "@/lib/use-delete-contact";
@@ -458,6 +462,7 @@ export function PeopleView({
         <PersonDetailModal
           person={detailPerson}
           contacts={contacts}
+          projects={resolveClientProjectList(initialProjects ?? getLiveCachedProjects())}
           onClose={() => setDetailPerson(null)}
           onContactsUpdated={refreshContacts}
           onDeleted={refreshContacts}
@@ -823,6 +828,7 @@ function PersonRow({
 function PersonDetailModal({
   person: p,
   contacts,
+  projects,
   onClose,
   onEditClient,
   onEditTeam,
@@ -832,6 +838,7 @@ function PersonDetailModal({
 }: {
   person: ReturnType<typeof contactToDirectoryRow>;
   contacts: Contact[];
+  projects: Project[];
   onClose: () => void;
   onEditClient: (contact: Contact) => void;
   onEditTeam: (contact: Contact) => void;
@@ -916,12 +923,19 @@ function PersonDetailModal({
     !p.isCompanyMember && (p.segment === "vendor" || p.segment === "client");
   const moveSegmentTarget: ConvertibleSegment | null =
     p.segment === "vendor" ? "client" : p.segment === "client" ? "vendor" : null;
+  const clientToVendorBlock =
+    moveSegmentTarget === "vendor" ? clientToVendorMoveError(projects, contact.id) : null;
+  const vendorToClientNote =
+    moveSegmentTarget === "client" ? vendorToClientMoveAdvisory(projects, contact) : null;
+  const moveRecommendation =
+    moveSegmentTarget != null ? segmentMoveRecommendation(contact, moveSegmentTarget) : "";
+  const moveSegmentBlocked = clientToVendorBlock != null;
 
   async function handleMoveSegment(target: ConvertibleSegment) {
     setConvertingSegment(true);
     setSegmentError(null);
     try {
-      const err = validateSegmentConversion(contacts, contact, target);
+      const err = validateSegmentConversion(contacts, contact, target, { projects });
       if (err) {
         setSegmentError(err);
         return;
@@ -1244,12 +1258,29 @@ function PersonDetailModal({
                   {canMoveSegment && moveSegmentTarget ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
                       <p className="text-sm font-semibold text-amber-950">Move to another directory tab</p>
-                      <p className="mt-1 text-xs text-amber-900/90">
-                        Re-file this contact from{" "}
+                      {moveRecommendation ? (
+                        <p className="mt-2 rounded-lg border border-violet-200 bg-violet-50/90 px-3 py-2.5 text-xs leading-relaxed text-violet-950">
+                          <span className="font-semibold">Recommended: </span>
+                          {moveRecommendation}
+                        </p>
+                      ) : null}
+                      <p className="mt-2 text-xs text-amber-900/90">
+                        <span className="font-medium">Move</span> re-files this contact from{" "}
                         <span className="font-semibold">{segmentLabel(p.segment)}</span> to{" "}
-                        <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span>. Email
-                        and details are kept.
+                        <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span> in
+                        Contacts only — it does not update projects or jobs. Use this for simple
+                        mis-files with no work tied to the contact.
                       </p>
+                      {clientToVendorBlock ? (
+                        <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">
+                          {clientToVendorBlock}
+                        </p>
+                      ) : null}
+                      {vendorToClientNote ? (
+                        <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+                          {vendorToClientNote}
+                        </p>
+                      ) : null}
                       {segmentError ? (
                         <p className="mt-2 text-xs font-medium text-red-600" role="alert">
                           {segmentError}
@@ -1257,7 +1288,7 @@ function PersonDetailModal({
                       ) : null}
                       <button
                         type="button"
-                        disabled={convertingSegment}
+                        disabled={convertingSegment || moveSegmentBlocked}
                         onClick={() => void handleMoveSegment(moveSegmentTarget)}
                         className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-accent shadow-sm ring-1 ring-amber-200 hover:bg-amber-50 disabled:opacity-50"
                       >

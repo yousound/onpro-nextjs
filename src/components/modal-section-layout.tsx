@@ -58,7 +58,7 @@ export function ModalSectionNavList({
   );
 }
 
-function ModalSectionMobileNav({
+export function ModalSectionMobileNav({
   sections,
   activeSection,
   onSectionChange,

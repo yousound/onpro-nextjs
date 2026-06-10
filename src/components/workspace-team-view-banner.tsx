@@ -10,8 +10,7 @@ export function WorkspaceTeamViewBanner() {
 
   return (
     <div className="shrink-0 border-b border-violet-200/80 bg-violet-50/90 px-4 py-2 text-center text-sm text-violet-950">
-      Viewing{" "}
-      <span className="font-semibold">{active.workspaceName}</span>
+      Viewing &ldquo;<span className="font-semibold">{active.workspaceName}</span>&rdquo; Workspace
       {" · "}
       <button
         type="button"

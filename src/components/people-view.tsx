@@ -16,7 +16,13 @@ import {
 import type { Contact } from "@/lib/types/contact";
 import { loadContacts, clientListContacts, searchContacts } from "@/lib/contacts-store";
 import { mergeSeedLiveContacts } from "@/lib/data/live-cache";
-import { commitContactPermissions } from "@/lib/data/commit-contacts";
+import { commitContactPermissions, commitSingleContact } from "@/lib/data/commit-contacts";
+import {
+  convertContactToSegment,
+  validateSegmentConversion,
+  type ConvertibleSegment,
+} from "@/lib/contact-segment-convert";
+import { useWorkspace } from "@/components/workspace-provider";
 import { useDeleteContact } from "@/lib/use-delete-contact";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { effectiveContactPermissions, permissionsLabel } from "@/lib/contact-permissions";
@@ -32,6 +38,11 @@ import { defaultPermissionsForSegment, type ProjectPermissionFlags } from "@/lib
 import { InviteSentToast, type InviteToastPayload } from "@/components/invite-sent-toast";
 import { PendingInviteDetailModal } from "@/components/pending-invite-detail-modal";
 import { PermissionsEditor } from "@/components/permissions-editor";
+import {
+  ModalSectionMobileNav,
+  ModalSectionNavList,
+  type ModalSectionItem,
+} from "@/components/modal-section-layout";
 import { DirectoryAvatar } from "@/components/directory-avatar";
 import { addInternalTeamMemberToProject } from "@/lib/internal-team-roster";
 import { resolveClientProjectList } from "@/lib/mock/project-session";
@@ -783,6 +794,7 @@ function PersonDetailModal({
   onContactsUpdated: () => void;
   onDeleted: () => void;
 }) {
+  const { isTeamView, active } = useWorkspace();
   const access = projectsForPerson(p.id);
   const contact = p.contact;
   const effective = effectiveContactPermissions(contacts, contact);
@@ -790,6 +802,8 @@ function PersonDetailModal({
   const [permSaved, setPermSaved] = useState(false);
   const [membershipId, setMembershipId] = useState<number | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [convertingSegment, setConvertingSegment] = useState(false);
+  const [segmentError, setSegmentError] = useState<string | null>(null);
   const { deleting, deleteError, clearDeleteError, handleDelete } = useDeleteContact({
     onSuccess: () => {
       onDeleted();
@@ -852,6 +866,36 @@ function PersonDetailModal({
   }
 
   const canEditPermissions = !p.isCompanyMember;
+  const canMoveSegment =
+    !p.isCompanyMember && (p.segment === "vendor" || p.segment === "client");
+  const moveSegmentTarget: ConvertibleSegment | null =
+    p.segment === "vendor" ? "client" : p.segment === "client" ? "vendor" : null;
+
+  async function handleMoveSegment(target: ConvertibleSegment) {
+    if (isClientLiveBackend() && isTeamView) {
+      setSegmentError(
+        `Switch to My workspace before moving contacts (you're viewing ${active.workspaceName}).`,
+      );
+      return;
+    }
+    const err = validateSegmentConversion(contacts, contact, target);
+    if (err) {
+      setSegmentError(err);
+      return;
+    }
+    setConvertingSegment(true);
+    setSegmentError(null);
+    try {
+      const converted = convertContactToSegment(contact, target);
+      await commitSingleContact(converted);
+      onContactsUpdated();
+      onClose();
+    } catch (e) {
+      setSegmentError(e instanceof Error ? e.message : "Could not move contact");
+    } finally {
+      setConvertingSegment(false);
+    }
+  }
 
   function openEdit() {
     if (p.segment === "client") {
@@ -894,6 +938,36 @@ function PersonDetailModal({
         ? "Delete teammate"
         : "Delete vendor";
 
+  const [activeSection, setActiveSection] = useState("overview");
+
+  const detailSections = useMemo(() => {
+    const items: ModalSectionItem[] = [
+      { id: "overview", label: "Overview" },
+      { id: "permissions", label: "Permissions" },
+      { id: "projects", label: "Projects" },
+    ];
+    if (canMoveSegment || membershipId != null) {
+      items.push({ id: "workspace", label: "Workspace" });
+    }
+    return items;
+  }, [canMoveSegment, membershipId]);
+
+  useEffect(() => {
+    if (!detailSections.some((s) => s.id === activeSection)) {
+      setActiveSection("overview");
+    }
+  }, [detailSections, activeSection]);
+
+  const sectionTitle =
+    detailSections.find((s) => s.id === activeSection)?.label ?? "Overview";
+
+  const sectionSubtitle: Record<string, string> = {
+    overview: "Profile, contact details, and company members.",
+    permissions: p.isCompany ? "Company-wide access defaults." : "Workspace access for this contact.",
+    projects: "Project roles and permission summaries.",
+    workspace: "Directory segment and linked app account.",
+  };
+
   return (
     <div className="fixed inset-0 z-[220] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center">
       <button type="button" className="absolute inset-0 cursor-default" aria-label="Close" onClick={onClose} />
@@ -901,205 +975,311 @@ function PersonDetailModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="people-detail-title"
-        className="relative z-10 flex max-h-[min(720px,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-border-light sm:max-w-xl"
+        className="relative z-10 flex max-h-[min(720px,92vh)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-border-light"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
-          <div className="flex min-w-0 gap-3">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-100 to-violet-200 text-sm font-bold text-violet-900">
-              {initials(p.name)}
-            </span>
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Workspace segment</p>
-              <span
-                className={`mt-1 inline-flex w-fit rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(p.segment)}`}
-              >
-                {segmentLabel(p.segment)}
-              </span>
-              <h2 id="people-detail-title" className="truncate text-lg font-bold text-text-primary">
-                {p.clientCompanyName ?? p.name}
-              </h2>
-              {p.clientCompanyCode ? (
-                <p className="truncate text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  {p.clientCompanyCode}
-                </p>
-              ) : null}
-              <p className="truncate text-sm text-text-secondary">{p.email}</p>
-              {!p.isCompany && p.company ? (
-                <p className="truncate text-xs text-text-secondary">{p.company}</p>
-              ) : null}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-lg p-2 text-text-secondary hover:bg-surface-body hover:text-text-primary"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {membershipId != null && isClientLiveBackend() ? (
-            <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50/90 px-4 py-3">
-              <p className="text-sm font-semibold text-emerald-900">App account linked</p>
-              <p className="mt-1 text-xs text-emerald-800">
-                This contact joined your workspace with the email above. Revoke if the wrong person claimed the profile.
-              </p>
-              <button
-                type="button"
-                disabled={revoking}
-                onClick={() => void revokeLinkedAccess()}
-                className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-              >
-                {revoking ? "Revoking…" : "Revoke access"}
-              </button>
-            </div>
-          ) : null}
-          {companyMembers.length > 0 ? (
-            <div className="mb-6">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Company members</h3>
-              <ul className="mt-2 space-y-1.5">
-                {companyMembers.map((m) => (
-                  <li key={m.id} className="text-sm text-text-primary">
-                    {m.contact_name ?? m.name}
-                    <span className="text-text-secondary"> · {m.email}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <div className="mb-6">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-              {p.isCompany ? "Company permissions" : "Workspace permissions"}
-            </h3>
-            <p className="mt-1 text-xs text-text-secondary">
-              {permissionsLabel(effective.source, effective.company)}
-              {p.isCompanyMember ? " — edit the company to change these for all members." : ""}
-            </p>
-            <div className="mt-3 max-h-[min(240px,34vh)] overflow-y-auto rounded-xl border border-border-light bg-surface-body/40 p-3">
-              <PermissionsEditor
-                dense
-                readOnly={!canEditPermissions}
-                segment={contact.segment}
-                flags={permDraft}
-                onChange={setPermDraft}
-              />
-            </div>
-            {canEditPermissions ? (
-              <button
-                type="button"
-                onClick={savePermissions}
-                className="mt-3 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white hover:opacity-95"
-              >
-                {permSaved ? "Saved" : "Save permissions"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={openEdit}
-                className="mt-3 text-xs font-semibold text-accent hover:underline"
-              >
-                Edit company permissions →
-              </button>
-            )}
-          </div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Projects &amp; permissions</h3>
-          {access.length === 0 ? (
-            <p className="mt-3 text-sm text-text-secondary">No project access in mock data for this person.</p>
-          ) : (
-            <ul className="mt-4 space-y-4">
-              {access.map((row) => {
-                const roleSeg = segmentFromRoleLabel(row.role_on_project);
-                return (
-                  <li key={`${p.id}-${row.project_id}`} className="rounded-xl border border-border-light bg-surface-card p-4 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <Link
-                        href={`/projects/${row.project_id}`}
-                        className="font-semibold text-accent hover:underline"
-                        onClick={onClose}
-                      >
-                        {row.project_name}
-                      </Link>
-                      <p className="mt-1 text-xs text-text-secondary">Role on project</p>
-                      {roleSeg ? (
-                        <span
-                          className={`mt-1 inline-flex w-fit rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(roleSeg)}`}
-                        >
-                          {row.role_on_project}
-                        </span>
-                      ) : (
-                        <p className="mt-1 text-sm font-medium text-text-primary">{row.role_on_project}</p>
-                      )}
-                    </div>
-                    <Link
-                      href={`/projects/${row.project_id}`}
-                      className="shrink-0 text-xs font-semibold text-accent hover:underline"
-                      onClick={onClose}
-                    >
-                      Open project →
-                    </Link>
-                  </div>
-                  <div className="mt-4 space-y-3 border-t border-border-light pt-3">
-                    {row.permission_groups.map((g) => (
-                      <div key={g.title}>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">{g.title}</p>
-                        <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-text-primary">
-                          {g.lines.map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                  <Link
-                    href={`/projects/${row.project_id}?module=people_access`}
-                    className="mt-3 inline-flex text-xs font-semibold text-accent hover:underline"
-                    onClick={onClose}
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          {/* Left: identity + section nav */}
+          <aside className="flex shrink-0 flex-col border-b border-violet-200/60 bg-gradient-to-b from-violet-100/90 to-violet-50/80 sm:w-[min(100%,15rem)] sm:border-b-0 sm:border-r">
+            <div className="px-4 pb-3 pt-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/90 text-sm font-bold text-violet-900 shadow-sm ring-1 ring-violet-200/80">
+                  {initials(p.name)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(p.segment)}`}
                   >
-                    People &amp; access — edit role defaults on this project
-                  </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+                    {segmentLabel(p.segment)}
+                  </span>
+                  <h2 id="people-detail-title" className="mt-1.5 truncate text-base font-bold text-violet-950">
+                    {p.clientCompanyName ?? p.name}
+                  </h2>
+                  {p.clientCompanyCode ? (
+                    <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-violet-800/80">
+                      {p.clientCompanyCode}
+                    </p>
+                  ) : null}
+                  <p className="mt-0.5 truncate text-xs text-violet-900/75">{p.email}</p>
+                </div>
+              </div>
+            </div>
+            <nav className="hidden flex-1 overflow-y-auto px-3 pb-4 sm:block" aria-label="Contact sections">
+              <ModalSectionNavList
+                sections={detailSections}
+                activeSection={activeSection}
+                onSectionChange={setActiveSection}
+                navLabel="Contact sections"
+                variant="polished"
+                tone="aside"
+              />
+            </nav>
+          </aside>
 
-        {deleteError ? (
-          <p className="shrink-0 border-t border-border-light px-5 py-2 text-sm font-semibold text-red-600">
-            {deleteError}
-          </p>
-        ) : null}
-        <div className="shrink-0 flex items-center justify-between gap-3 border-t border-border-light px-5 py-3">
-          <button
-            type="button"
-            disabled={deleting}
-            onClick={() => {
-              clearDeleteError();
-              void handleDelete(contact);
-            }}
-            className="rounded-xl px-2 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-          >
-            {deleting ? "Deleting…" : deleteLabel}
-          </button>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              onClick={openEdit}
-              className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-95"
-            >
-              {editLabel}
-            </button>
+          {/* Right: section content */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border-light px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-violet-600">Contact</p>
+                <h3 className="text-lg font-semibold text-text-primary">{sectionTitle}</h3>
+                <p className="mt-0.5 text-sm text-text-secondary">
+                  {sectionSubtitle[activeSection] ?? ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="shrink-0 rounded-lg p-2 text-text-secondary hover:bg-surface-body hover:text-text-primary"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
+              <div className="sm:hidden">
+                <ModalSectionMobileNav
+                  sections={detailSections}
+                  activeSection={activeSection}
+                  onSectionChange={setActiveSection}
+                  navLabel="Contact sections"
+                  variant="polished"
+                />
+              </div>
+              {activeSection === "overview" ? (
+                <div className="space-y-5">
+                  <dl className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5">
+                      <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Email</dt>
+                      <dd className="mt-0.5 text-sm font-medium text-text-primary">{p.email}</dd>
+                    </div>
+                    <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5">
+                      <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Phone</dt>
+                      <dd className="mt-0.5 text-sm font-medium text-text-primary">{p.phone?.trim() || "—"}</dd>
+                    </div>
+                    {p.clientCompanyCode ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Code</dt>
+                        <dd className="mt-0.5 text-sm font-medium uppercase text-text-primary">{p.clientCompanyCode}</dd>
+                      </div>
+                    ) : null}
+                    {!p.isCompany && p.company ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Company</dt>
+                        <dd className="mt-0.5 text-sm font-medium text-text-primary">{p.company}</dd>
+                      </div>
+                    ) : null}
+                    {p.subtitle ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5 sm:col-span-2">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Contact name</dt>
+                        <dd className="mt-0.5 text-sm font-medium text-text-primary">{p.subtitle}</dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  {companyMembers.length > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Company members</h4>
+                      <ul className="mt-2 space-y-1.5 rounded-xl border border-border-light bg-white p-3">
+                        {companyMembers.map((m) => (
+                          <li key={m.id} className="text-sm text-text-primary">
+                            {m.contact_name ?? m.name}
+                            <span className="text-text-secondary"> · {m.email}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {activeSection === "permissions" ? (
+                <div>
+                  <p className="text-xs text-text-secondary">
+                    {permissionsLabel(effective.source, effective.company)}
+                    {p.isCompanyMember ? " — edit the company to change these for all members." : ""}
+                  </p>
+                  <div className="mt-3 rounded-xl border border-border-light bg-surface-body/40 p-3">
+                    <PermissionsEditor
+                      dense
+                      readOnly={!canEditPermissions}
+                      segment={contact.segment}
+                      flags={permDraft}
+                      onChange={setPermDraft}
+                    />
+                  </div>
+                  {canEditPermissions ? (
+                    <button
+                      type="button"
+                      onClick={() => void savePermissions()}
+                      className="mt-3 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white hover:opacity-95"
+                    >
+                      {permSaved ? "Saved" : "Save permissions"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={openEdit}
+                      className="mt-3 text-xs font-semibold text-accent hover:underline"
+                    >
+                      Edit company permissions →
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
+              {activeSection === "projects" ? (
+                access.length === 0 ? (
+                  <p className="text-sm text-text-secondary">No project access listed for this contact yet.</p>
+                ) : (
+                  <ul className="space-y-4">
+                    {access.map((row) => {
+                      const roleSeg = segmentFromRoleLabel(row.role_on_project);
+                      return (
+                        <li
+                          key={`${p.id}-${row.project_id}`}
+                          className="rounded-xl border border-border-light bg-surface-card p-4 shadow-sm"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <Link
+                                href={`/projects/${row.project_id}`}
+                                className="font-semibold text-accent hover:underline"
+                                onClick={onClose}
+                              >
+                                {row.project_name}
+                              </Link>
+                              <p className="mt-1 text-xs text-text-secondary">Role on project</p>
+                              {roleSeg ? (
+                                <span
+                                  className={`mt-1 inline-flex w-fit rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(roleSeg)}`}
+                                >
+                                  {row.role_on_project}
+                                </span>
+                              ) : (
+                                <p className="mt-1 text-sm font-medium text-text-primary">{row.role_on_project}</p>
+                              )}
+                            </div>
+                            <Link
+                              href={`/projects/${row.project_id}`}
+                              className="shrink-0 text-xs font-semibold text-accent hover:underline"
+                              onClick={onClose}
+                            >
+                              Open project →
+                            </Link>
+                          </div>
+                          <div className="mt-4 space-y-3 border-t border-border-light pt-3">
+                            {row.permission_groups.map((g) => (
+                              <div key={g.title}>
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                                  {g.title}
+                                </p>
+                                <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-text-primary">
+                                  {g.lines.map((line) => (
+                                    <li key={line}>{line}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                          <Link
+                            href={`/projects/${row.project_id}?module=people_access`}
+                            className="mt-3 inline-flex text-xs font-semibold text-accent hover:underline"
+                            onClick={onClose}
+                          >
+                            People &amp; access — edit role defaults on this project
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )
+              ) : null}
+
+              {activeSection === "workspace" ? (
+                <div className="space-y-4">
+                  {canMoveSegment && moveSegmentTarget ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+                      <p className="text-sm font-semibold text-amber-950">Wrong directory tab?</p>
+                      <p className="mt-1 text-xs text-amber-900/90">
+                        Move from{" "}
+                        <span className="font-semibold">{segmentLabel(p.segment)}</span> to{" "}
+                        <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span> — email and details
+                        are kept.
+                      </p>
+                      {segmentError ? (
+                        <p className="mt-2 text-xs font-medium text-red-600" role="alert">
+                          {segmentError}
+                        </p>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={convertingSegment}
+                        onClick={() => void handleMoveSegment(moveSegmentTarget)}
+                        className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-accent shadow-sm ring-1 ring-amber-200 hover:bg-amber-50 disabled:opacity-50"
+                      >
+                        {convertingSegment
+                          ? "Moving…"
+                          : moveSegmentTarget === "client"
+                            ? "Move to Clients"
+                            : "Move to Vendors"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {membershipId != null && isClientLiveBackend() ? (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/90 px-4 py-3">
+                      <p className="text-sm font-semibold text-emerald-900">App account linked</p>
+                      <p className="mt-1 text-xs text-emerald-800">
+                        This contact joined your workspace with the email above. Revoke if the wrong person claimed
+                        the profile.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={revoking}
+                        onClick={() => void revokeLinkedAccess()}
+                        className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {revoking ? "Revoking…" : "Revoke access"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            {deleteError ? (
+              <p className="shrink-0 border-t border-border-light px-5 py-2 text-sm font-semibold text-red-600">
+                {deleteError}
+              </p>
+            ) : null}
+            <div className="shrink-0 flex items-center justify-between gap-3 border-t border-border-light px-5 py-3">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => {
+                  clearDeleteError();
+                  void handleDelete(contact);
+                }}
+                className="rounded-xl px-2 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+              >
+                {deleting ? "Deleting…" : deleteLabel}
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-xl border border-border-light bg-white px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={openEdit}
+                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:opacity-95"
+                >
+                  {editLabel}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

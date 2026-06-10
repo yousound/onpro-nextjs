@@ -6,19 +6,11 @@ import {
 import { CLIENT_CODES } from "@/lib/reference/client-codes";
 import type { Contact, ContactKind } from "@/lib/types/contact";
 
-function findCompanyCodeOwner(
-  contacts: readonly Contact[],
-  code: string,
-  excludeContactId?: string,
-): string | undefined {
-  const c = code.trim().toUpperCase();
-  const fromContact = contacts.find(
-    (x) => x.id !== excludeContactId && x.company_code.toUpperCase() === c,
-  );
-  if (fromContact) return contactDisplayName(fromContact);
-  const fromCatalog = CLIENT_CODES.find((entry) => entry.code === c);
-  if (fromCatalog) return fromCatalog.name;
-  return undefined;
+function namesAllowCodeOverride(companyName: string, catalogName: string): boolean {
+  const cn = companyName.trim().toLowerCase();
+  const catalog = catalogName.trim().toLowerCase();
+  if (!cn || !catalog) return false;
+  return cn === catalog || cn.includes(catalog) || catalog.includes(cn);
 }
 
 export type ClientContactFieldMessages = {
@@ -41,23 +33,37 @@ export function validateClientCompanyCode(
   contacts: readonly Contact[],
   code: string,
   excludeContactId?: string,
-  opts?: { /** CSV/import row name — allow code when it matches the master-list brand */ importName?: string },
+  opts?: {
+    /** CSV/import or form company name — allow master-list code when names match */
+    importName?: string;
+    companyName?: string;
+  },
 ): string | undefined {
   const c = code.trim().toUpperCase();
   if (!c) return undefined;
   if (c.length < 2 || c.length > 3) {
     return "Client code must be 2–3 letters.";
   }
-  const owner = findCompanyCodeOwner(contacts, c, excludeContactId);
-  if (owner) {
-    const importName = opts?.importName?.trim().toLowerCase();
-    const ownerNorm = owner.trim().toLowerCase();
-    if (importName && (importName === ownerNorm || importName.includes(ownerNorm) || ownerNorm.includes(importName))) {
-      return undefined;
-    }
-    return `Code ${c} is already used by ${owner} (master list or People).`;
+
+  const otherContact = contacts.find(
+    (x) => x.id !== excludeContactId && x.company_code.toUpperCase() === c,
+  );
+  if (otherContact) {
+    return `Code ${c} is already used by ${contactDisplayName(otherContact)} in People.`;
   }
-  return undefined;
+
+  const catalog = CLIENT_CODES.find((entry) => entry.code === c);
+  if (!catalog) return undefined;
+
+  // Editing an existing client: only block duplicate codes in People, not master list.
+  if (excludeContactId) return undefined;
+
+  const label = opts?.companyName?.trim() || opts?.importName?.trim();
+  if (label && namesAllowCodeOverride(label, catalog.name)) {
+    return undefined;
+  }
+
+  return `Code ${c} is reserved for ${catalog.name} on the master list. Pick another code or use a matching company name.`;
 }
 
 export function validateClientEmail(
@@ -93,7 +99,10 @@ export function validateClientContactFields(
     contacts,
     input.companyCode,
     excludeId,
-    input.importName ? { importName: input.importName } : undefined,
+    {
+      importName: input.importName,
+      companyName: input.name,
+    },
   );
   const email = validateClientEmail(contacts, input.email, input.excludeContactId);
 

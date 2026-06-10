@@ -13,6 +13,26 @@ import { clientCodeByName, resolveClientCode } from "@/lib/reference/client-code
 const now = () => new Date().toISOString();
 
 function directoryToContact(p: (typeof MOCK_DIRECTORY_PEOPLE)[0]): Contact {
+  if (p.segment === "team") {
+    return {
+      id: p.id,
+      segment: "team",
+      kind: "individual",
+      company_code: "",
+      name: p.name,
+      contact_name: p.name,
+      company_name: p.company ?? undefined,
+      email: p.email,
+      phone: p.phone,
+      notes: p.notes,
+      avatar_url: null,
+      member_contact_ids: [],
+      permissions: defaultPermissionsForSegment("team"),
+      created_at: now(),
+      updated_at: now(),
+    };
+  }
+
   const kind = p.company && p.company !== p.name ? "company" : "individual";
   const code = resolveClientCode(p.company ?? p.name);
   const contact: Contact = {

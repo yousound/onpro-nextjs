@@ -80,7 +80,8 @@ export function buildCurrentUserDisplay(
     email,
     fullName,
     firstName,
-    companyName: profile?.company_name?.trim() ?? "",
+    companyName:
+      profile?.company_name?.trim() || profile?.workspace_name?.trim() || "",
     phone: profile?.phone?.trim() ?? "",
     businessAddress: profile?.business_address?.trim() ?? "",
     businessPhone: profile?.business_phone?.trim() ?? "",

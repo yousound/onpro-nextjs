@@ -110,7 +110,7 @@ export interface Project {
   name: string;
   description: string | null;
   project_number: string | null;
-  /** Auto-generated PO: ClientCode-Year-Month-Seq (e.g. GG-2026-05-001) */
+  /** PO / job number: ClientCode+YYMM+Seq (e.g. GG260601). Mirrors project_number in Live. */
   po_number?: string | null;
   /** Connect Dots WIP: project hand off date. */
   project_hand_off_date: ISODate;

@@ -24,7 +24,7 @@ import {
 export type EditProjectDraft = {
   name: string;
   status: ProjectStatus;
-  project_number: string;
+  po_number: string;
   hand_off: string;
   due_date: string;
   status_update: string;
@@ -35,7 +35,6 @@ type Props = {
   open: boolean;
   titleId?: string;
   clientName: string;
-  poNumber: string | null;
   draft: EditProjectDraft;
   onDraftChange: (patch: Partial<EditProjectDraft>) => void;
   statusOptions: readonly ProjectStatus[];
@@ -49,7 +48,6 @@ export function EditProjectModal({
   open,
   titleId = "edit-project-title",
   clientName,
-  poNumber,
   draft,
   onDraftChange,
   statusOptions,
@@ -117,13 +115,18 @@ export function EditProjectModal({
             />
           </ProjectModalField>
 
-          {poNumber ? (
-            <p className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
-              <span className="mr-1 inline-block text-slate-400">ⓘ</span>
-              PO <span className="font-semibold text-slate-700">{poNumber}</span> stays linked to this
-              project.
+          <ProjectModalField label="PO number" icon={<HashIcon />}>
+            <input
+              className={projectModalFieldClass}
+              value={draft.po_number}
+              onChange={(e) => onDraftChange({ po_number: e.target.value.toUpperCase() })}
+              placeholder="e.g. DW260607"
+              autoComplete="off"
+            />
+            <p className="mt-1.5 text-xs font-normal normal-case text-slate-400">
+              ClientCode+YYMM+Seq with no dashes. A new number is suggested when the month changes.
             </p>
-          ) : null}
+          </ProjectModalField>
 
           <ProjectModalField label="Status" icon={<StatusDot />}>
             <select
@@ -137,16 +140,6 @@ export function EditProjectModal({
                 </option>
               ))}
             </select>
-          </ProjectModalField>
-
-          <ProjectModalField label="Project #" icon={<HashIcon />}>
-            <input
-              className={projectModalFieldClass}
-              value={draft.project_number}
-              onChange={(e) => onDraftChange({ project_number: e.target.value })}
-              placeholder="Internal reference"
-              autoComplete="off"
-            />
           </ProjectModalField>
 
           <div className="grid gap-4 sm:grid-cols-2">

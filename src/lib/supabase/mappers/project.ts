@@ -41,7 +41,7 @@ export function projectFromRow(row: ProjectRowDb): Project {
     name: row.name,
     description: row.description,
     project_number: row.project_number,
-    po_number: null,
+    po_number: row.project_number,
     project_hand_off_date: null,
     due_date: iso(row.due_date),
     client,

@@ -635,13 +635,12 @@ export function PeopleView({
                       </th>
                       <th className="hidden px-4 py-3 md:table-cell">Email</th>
                       <th className="hidden px-4 py-3 lg:table-cell">Phone</th>
-                      <th className="px-4 py-3 text-right">Projects</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-light bg-white">
                     {filtered.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center text-text-secondary">
+                        <td colSpan={4} className="px-4 py-10 text-center text-text-secondary">
                           No people match your search in this segment (mock).
                         </td>
                       </tr>
@@ -685,7 +684,6 @@ function PersonRow({
   clientTable?: boolean;
   onOpen: () => void;
 }) {
-  const n = projectsForPerson(p.id).length;
   const avatarUrl = p.contact.avatar_url ?? null;
   const companyLabel = p.clientCompanyName ?? (p.clientCompanyCode ? p.clientCompanyCode : "Individual");
   const avatarText = clientTable ? initials(companyLabel) : initials(p.name);
@@ -752,9 +750,6 @@ function PersonRow({
       </td>
       <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{p.email}</td>
       <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{p.phone ?? "—"}</td>
-      <td className="px-4 py-3 text-right text-xs font-medium text-text-secondary">
-        {n === 0 ? "—" : `${n} project${n === 1 ? "" : "s"}`}
-      </td>
     </tr>
   );
 }

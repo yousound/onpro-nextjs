@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { isSupabaseConfigured } from "@/lib/config/backend";
+import { syncMemberProfileToLinkedContacts } from "@/lib/supabase/onboarding";
+import { fetchProfile } from "@/lib/supabase/profile";
 import { joinWorkspace } from "@/lib/supabase/workspace-memberships";
 import { acceptPendingInvite } from "@/lib/supabase/pending-invites";
 import { createClient } from "@/lib/supabase/server";
@@ -24,6 +26,20 @@ export async function POST(request: Request) {
     invite_token?: string;
   };
 
+  const memberUserId = user.id;
+
+  async function syncMemberContacts() {
+    const profile = await fetchProfile(supabase, memberUserId);
+    const fullName = profile?.full_name?.trim();
+    if (!fullName) return;
+    await syncMemberProfileToLinkedContacts(supabase, memberUserId, {
+      full_name: fullName,
+      phone: profile?.phone ?? undefined,
+      avatar_url: profile?.avatar_url,
+      company_name: profile?.company_name ?? undefined,
+    });
+  }
+
   try {
     if (body.invite_token?.trim()) {
       await acceptPendingInvite(
@@ -33,6 +49,7 @@ export async function POST(request: Request) {
         user.email,
         user.user_metadata?.full_name as string | undefined,
       );
+      await syncMemberContacts();
       return NextResponse.json({ ok: true, source: "invite" });
     }
 
@@ -50,6 +67,8 @@ export async function POST(request: Request) {
       memberEmail: user.email,
       memberName: (user.user_metadata?.full_name as string | undefined) ?? undefined,
     });
+
+    await syncMemberContacts();
 
     return NextResponse.json({ ok: true, membership });
   } catch (e) {

@@ -1,5 +1,7 @@
 import { defaultPermissionsForSegment } from "@/lib/project-permissions";
+import { contactFromRow } from "@/lib/supabase/mappers/contact";
 import { upsertContactForUser } from "@/lib/supabase/contacts-write";
+import type { ContactRowDb } from "@/lib/supabase/types-db";
 import { buildInviteLoginUrl, createPendingInvite } from "@/lib/supabase/pending-invites";
 import { fetchProfile, updateProfileFields, upsertProfile } from "@/lib/supabase/profile";
 import type { OnboardingStatus, TeamInviteDraft } from "@/lib/types/onboarding";
@@ -101,6 +103,69 @@ export async function ensureSelfTeamContact(
   }
 
   return contactId;
+}
+
+/** Push member signup profile onto each operator workspace contact row (name, phone, company). */
+export async function syncMemberProfileToLinkedContacts(
+  supabase: SupabaseClient,
+  memberUserId: string,
+  patch: {
+    full_name: string;
+    phone?: string;
+    avatar_url?: string | null;
+    company_name?: string;
+  },
+): Promise<void> {
+  const { data: memberships, error } = await supabase
+    .from("workspace_memberships")
+    .select("operator_user_id, contact_id")
+    .eq("member_user_id", memberUserId)
+    .in("status", ["active", "pending"]);
+
+  if (error) {
+    if (error.message.includes("workspace_memberships")) return;
+    throw error;
+  }
+
+  const name = patch.full_name.trim();
+  if (!name) return;
+
+  for (const row of memberships ?? []) {
+    const operatorUserId = row.operator_user_id as string;
+    const contactId = row.contact_id as number;
+
+    const { data: operatorProfile } = await supabase
+      .from("profiles")
+      .select("company_name, workspace_name")
+      .eq("id", operatorUserId)
+      .maybeSingle();
+
+    const workspaceCompany =
+      (operatorProfile?.company_name as string | null)?.trim() ||
+      (operatorProfile?.workspace_name as string | null)?.trim() ||
+      patch.company_name?.trim() ||
+      undefined;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("id", contactId)
+      .eq("user_id", operatorUserId)
+      .maybeSingle();
+
+    if (fetchErr || !existing) continue;
+
+    const contact = contactFromRow(existing as ContactRowDb);
+    await upsertContactForUser(supabase, operatorUserId, {
+      ...contact,
+      name,
+      contact_name: name,
+      phone: patch.phone?.trim() || contact.phone,
+      avatar_url: patch.avatar_url ?? contact.avatar_url,
+      company_name: workspaceCompany ?? contact.company_name,
+      updated_at: new Date().toISOString(),
+    });
+  }
 }
 
 function teamInviteContactDraft(
@@ -299,6 +364,13 @@ export async function saveMemberProfileFields(
     fields.redirect_after_onboarding = patch.redirect_after.trim();
   }
   await updateProfileFields(supabase, userId, email, fields);
+
+  await syncMemberProfileToLinkedContacts(supabase, userId, {
+    full_name: patch.full_name,
+    phone: patch.phone,
+    avatar_url: patch.avatar_url,
+    company_name: patch.company_name,
+  });
 }
 
 export async function completeMemberOnboarding(
@@ -329,6 +401,13 @@ export async function completeMemberOnboarding(
     onboarding_completed_at: now,
     onboarding_step: 3,
     account_kind: "member",
+  });
+
+  await syncMemberProfileToLinkedContacts(supabase, userId, {
+    full_name: patch.full_name,
+    phone: patch.phone,
+    avatar_url: patch.avatar_url,
+    company_name: patch.company_name,
   });
 
   return { redirect };

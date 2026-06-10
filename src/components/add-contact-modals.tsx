@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useCurrentUser } from "@/components/profile-provider";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import {
   commitClientWithMembers,
@@ -563,6 +564,8 @@ const TEAM_MODAL_SECTIONS: ModalSectionItem[] = [
 
 export function AddTeamMemberModal({ onClose, onSaved, existing, onInviteSent }: TeamModalProps) {
   const router = useRouter();
+  const { user: currentUser } = useCurrentUser();
+  const operatorCompany = currentUser?.companyName?.trim() || undefined;
   const [saving, setSaving] = useState(false);
   const { deleting, deleteError, clearDeleteError, handleDelete } = useDeleteContact({
     onSuccess: () => {
@@ -631,6 +634,7 @@ export function AddTeamMemberModal({ onClose, onSaved, existing, onInviteSent }:
       phone: phone.trim() || undefined,
       team_role: teamRole,
       team_role_custom: teamRole === "custom" ? teamRoleCustom.trim() || undefined : undefined,
+      company_name: existing?.company_name ?? operatorCompany,
       avatar_url: avatarUrl,
       permissions,
       member_contact_ids: [],
@@ -1186,9 +1190,11 @@ export function contactToDirectoryRow(c: Contact, contacts: Contact[] = []) {
   const memberCount = c.member_contact_ids?.length ?? 0;
   const companyLabel = isClientCompany || isClientIndividual
     ? null
-    : c.kind === "company"
-      ? `${c.company_code}${memberCount > 0 ? ` · ${memberCount} members` : ""}`
-      : (parentCompany?.name ?? null);
+    : c.segment === "team"
+      ? (c.company_name?.trim() || null)
+      : c.kind === "company"
+        ? `${c.company_code}${memberCount > 0 ? ` · ${memberCount} members` : ""}`
+        : (c.company_name?.trim() || parentCompany?.name || null);
 
   return {
     id: c.id,

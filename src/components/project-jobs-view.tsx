@@ -32,6 +32,8 @@ import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import type { UserProfile } from "@/lib/types/profile";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { clientCodeByName } from "@/lib/reference/client-codes";
+import { collectAllAppPoNumbers } from "@/lib/po-context";
+import { projectPoNumber, rollPoNumberIfNewMonth } from "@/lib/po-number";
 import { normalizeJob } from "@/lib/job-defaults";
 import { createNewJobSeed } from "@/lib/project-job-create";
 import type { ProjectModuleId } from "@/lib/project-modules";
@@ -97,7 +99,7 @@ export function ProjectJobsView({
   const [draftProject, setDraftProject] = useState({
     name: "",
     status: "IN-PROGRESS" as ProjectStatus,
-    project_number: "",
+    po_number: "",
     hand_off: "",
     due_date: "",
     status_overview: "",
@@ -272,10 +274,17 @@ export function ProjectJobsView({
 
   useEffect(() => {
     if (editModal?.kind !== "project") return;
+    const clientCode = clientCodeByName(merged.client.name) ?? "XX";
+    const currentPo = projectPoNumber(merged);
+    const rolledPo = rollPoNumberIfNewMonth(
+      currentPo,
+      clientCode,
+      collectAllAppPoNumbers().filter((po) => po !== currentPo),
+    );
     setDraftProject({
       name: merged.name,
       status: merged.status,
-      project_number: merged.project_number ?? "",
+      po_number: rolledPo,
       hand_off: isoToDateInput(merged.project_hand_off_date),
       due_date: isoToDateInput(merged.due_date),
       status_overview: merged.status_overview ?? "",
@@ -324,10 +333,12 @@ export function ProjectJobsView({
 
   async function saveProjectModal(e: FormEvent) {
     e.preventDefault();
+    const po = draftProject.po_number.trim() || null;
     const modalPatch = {
       name: draftProject.name.trim() || merged.name,
       status: draftProject.status,
-      project_number: draftProject.project_number.trim() || null,
+      project_number: po,
+      po_number: po,
       project_hand_off_date: dateInputToIso(draftProject.hand_off),
       due_date: dateInputToIso(draftProject.due_date),
       status_overview: draftProject.status_overview.trim() || null,
@@ -433,9 +444,9 @@ export function ProjectJobsView({
         <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 pt-4 pb-2">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">{merged.name}</h1>
-            {merged.po_number ? (
+            {projectPoNumber(merged) ? (
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-text-secondary">
-                PO {merged.po_number}
+                PO {projectPoNumber(merged)}
               </span>
             ) : null}
             <span
@@ -512,7 +523,6 @@ export function ProjectJobsView({
         <EditProjectModal
           open
           clientName={merged.client.name}
-          poNumber={merged.po_number ?? null}
           draft={draftProject}
           onDraftChange={(patch) => setDraftProject((d) => ({ ...d, ...patch }))}
           statusOptions={PROJECT_STATUS_OPTIONS}

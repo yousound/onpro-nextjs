@@ -36,6 +36,7 @@ export function MemberOnboarding({ initial }: { initial: OnboardingStatus }) {
   const [fullName, setFullName] = useState(initial.profile.fullName ?? "");
   const [email] = useState(initial.profile.email ?? "");
   const [companyName, setCompanyName] = useState(initial.profile.companyName ?? "");
+  const [companyLocked, setCompanyLocked] = useState(false);
   const [phone, setPhone] = useState(initial.profile.phone ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(initial.profile.avatarUrl ?? null);
   const [saving, setSaving] = useState(false);
@@ -65,6 +66,19 @@ export function MemberOnboarding({ initial }: { initial: OnboardingStatus }) {
   useEffect(() => {
     if (step === 2) void loadMatches();
   }, [step, loadMatches]);
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    void fetch(`/api/invites/resolve?token=${encodeURIComponent(inviteToken)}`)
+      .then((r) => r.json())
+      .then((data: { valid?: boolean; workspaceName?: string }) => {
+        if (data.valid && data.workspaceName?.trim()) {
+          setCompanyName(data.workspaceName.trim());
+          setCompanyLocked(true);
+        }
+      })
+      .catch(() => {});
+  }, [inviteToken]);
 
   async function handleProfileSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -250,13 +264,22 @@ export function MemberOnboarding({ initial }: { initial: OnboardingStatus }) {
                 />
               </label>
               <label className="block">
-                <span className={onboardingLabelClass}>Company (optional)</span>
+                <span className={onboardingLabelClass}>
+                  {companyLocked ? "Workspace company" : "Company (optional)"}
+                </span>
                 <input
-                  className={onboardingFieldClass}
+                  className={`${onboardingFieldClass}${companyLocked ? " bg-slate-50 text-slate-600" : ""}`}
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="e.g. Void Star Manufacturing"
+                  placeholder="Filled from your workspace invite"
+                  readOnly={companyLocked}
+                  aria-readonly={companyLocked}
                 />
+                {companyLocked ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    From your invite — no need to re-enter on the team list.
+                  </p>
+                ) : null}
               </label>
               <label className="block">
                 <span className={onboardingLabelClass}>Phone (optional)</span>

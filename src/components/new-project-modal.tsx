@@ -40,7 +40,8 @@ type Props = {
   clientSelect: string;
   onClientSelectChange: (v: string) => void;
   clientsSorted: readonly (readonly [string, string, string])[];
-  poPreview: string | null;
+  poNumber: string;
+  onPoNumberChange: (v: string) => void;
   status: string;
   onStatusChange: (v: string) => void;
   statusOptions: readonly string[];
@@ -63,7 +64,8 @@ export function NewProjectModal({
   clientSelect,
   onClientSelectChange,
   clientsSorted,
-  poPreview,
+  poNumber,
+  onPoNumberChange,
   status,
   onStatusChange,
   statusOptions,
@@ -257,15 +259,15 @@ export function NewProjectModal({
                     </Field>
                     <Field label="PO number" icon={<HashIcon />}>
                       <input
-                        className={`${fieldClass} bg-slate-50 font-semibold text-slate-800`}
-                        value={poPreview ?? ""}
-                        readOnly
-                        tabIndex={-1}
-                        aria-readonly
+                        className={`${fieldClass} font-semibold text-slate-800`}
+                        value={poNumber}
+                        onChange={(e) => onPoNumberChange(e.target.value.toUpperCase())}
                         placeholder="Select a client to preview PO"
+                        autoComplete="off"
                       />
                       <p className="mt-1.5 text-xs font-normal normal-case text-slate-400">
-                        Assigned automatically on create (ClientCode-Year-Month-Seq).
+                        Auto-filled as ClientCode+YYMM+Seq (e.g. DW260601). Edit anytime — a new
+                        number is assigned when the month changes.
                       </p>
                     </Field>
                     <Field label="Status" icon={<StatusDot />}>
@@ -401,7 +403,7 @@ export function NewProjectModal({
                       />
                       <InlineFieldMessage message={clientFieldMessages.companyCode} />
                       <p className="mt-1 text-xs font-normal normal-case text-slate-400">
-                        Used in PO numbers (e.g. AD-2026-06-001).
+                        Used in PO numbers (e.g. AD260601).
                       </p>
                     </Field>
                     <Field label="Email">

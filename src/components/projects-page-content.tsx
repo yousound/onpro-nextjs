@@ -219,6 +219,8 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   const [status, setStatus] = useState<ProjectStatus>("PENDING");
   const [dueDate, setDueDate] = useState("");
   const [description, setDescription] = useState("");
+  const [poNumber, setPoNumber] = useState("");
+  const [poTouched, setPoTouched] = useState(false);
 
   const contactsDirectory = useMemo(() => loadContacts(), [contactsTick]);
   const directoryClients = useMemo(() => clientListContacts(contactsDirectory), [contactsDirectory]);
@@ -250,10 +252,19 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
 
   const projectPoPreview = useMemo(() => {
     const row = clientsSorted.find(([id]) => id === clientSelect);
-    if (!row) return null;
+    if (!row) return "";
     const clientCode = row[2] || clientCodeByName(row[1]) || "XX";
     return generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
   }, [clientSelect, clientsSorted, projects]);
+
+  useEffect(() => {
+    if (poTouched) return;
+    setPoNumber(projectPoPreview);
+  }, [projectPoPreview, poTouched]);
+
+  useEffect(() => {
+    setPoTouched(false);
+  }, [clientSelect]);
 
   const resetForm = useCallback(() => {
     const firstId = clientsSorted[0]?.[0];
@@ -262,6 +273,8 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     setStatus("PENDING");
     setDueDate("");
     setDescription("");
+    setPoNumber("");
+    setPoTouched(false);
   }, [clientsSorted]);
 
   async function saveNewClient(draft: NewClientDraft): Promise<SavedNewClient | { error: string }> {
@@ -362,7 +375,9 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
 
     const client: Client = { id: clientId, name: row[1], avatar_url: null };
     const clientCode = row[2] || clientCodeByName(row[1]) || "XX";
-    const po = generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
+    const po =
+      poNumber.trim() ||
+      generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
     const dueIso = dueDate ? dateInputToIso(dueDate) : null;
     const creatorName = user?.fullName?.trim() || null;
 
@@ -450,7 +465,11 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
         clientSelect={clientSelect}
         onClientSelectChange={setClientSelect}
         clientsSorted={clientsSorted}
-        poPreview={projectPoPreview}
+        poNumber={poNumber}
+        onPoNumberChange={(v) => {
+          setPoTouched(true);
+          setPoNumber(v);
+        }}
         onSaveNewClient={saveNewClient}
         status={status}
         onStatusChange={(v) => setStatus(v as ProjectStatus)}

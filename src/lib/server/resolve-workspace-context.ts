@@ -6,6 +6,7 @@ import {
 } from "@/lib/workspace-context";
 import { fetchJoinedTeamsForMember } from "@/lib/supabase/workspace-memberships";
 import { fetchProfile } from "@/lib/supabase/profile";
+import { workspaceDisplayName } from "@/lib/workspace-display-name";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** Operator `user_id` whose workspace data should load (self or joined team). */
@@ -37,11 +38,12 @@ export async function resolveWorkspaceView(
 
   if (ownerId === authUserId) {
     const profile = await fetchProfile(supabase, authUserId);
-    const workspaceName =
-      profile?.workspace_name?.trim() ||
-      profile?.company_name?.trim() ||
-      profile?.full_name?.trim() ||
-      "My workspace";
+    const workspaceName = workspaceDisplayName({
+      workspaceName: profile?.workspace_name,
+      companyName: profile?.company_name,
+      fullName: profile?.full_name,
+      fallback: "My workspace",
+    });
     return { mode: "self", operatorUserId: authUserId, workspaceName };
   }
 
@@ -58,16 +60,18 @@ export async function resolveWorkspaceView(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("workspace_name, company_name")
+    .select("workspace_name, company_name, full_name")
     .eq("id", ownerId)
     .maybeSingle();
 
   return {
     mode: "team",
     operatorUserId: ownerId,
-    workspaceName:
-      (profile?.workspace_name as string | null)?.trim() ||
-      (profile?.company_name as string | null)?.trim() ||
-      "Team workspace",
+    workspaceName: workspaceDisplayName({
+      workspaceName: profile?.workspace_name as string | null,
+      companyName: profile?.company_name as string | null,
+      fullName: profile?.full_name as string | null,
+      fallback: "Team workspace",
+    }),
   };
 }

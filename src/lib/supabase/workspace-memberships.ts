@@ -1,5 +1,6 @@
 import type { PeopleSegment } from "@/lib/types/contact";
 import type { WorkspaceMatch, WorkspaceMemberEvent, WorkspaceMembership } from "@/lib/types/workspace";
+import { workspaceDisplayName } from "@/lib/workspace-display-name";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 function segmentFromContactRole(role: string | null | undefined): PeopleSegment {
@@ -185,15 +186,18 @@ export async function fetchUnreadMemberInboxEvents(
   const operatorIds = [...new Set(rows.map((r) => r.operator_user_id as string))];
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, workspace_name, company_name")
+    .select("id, workspace_name, company_name, full_name")
     .in("id", operatorIds);
 
   const nameByOperator = new Map(
     (profiles ?? []).map((p) => [
       p.id as string,
-      ((p.workspace_name as string | null)?.trim() ||
-        (p.company_name as string | null)?.trim() ||
-        "Workspace") as string,
+      workspaceDisplayName({
+        workspaceName: p.workspace_name as string | null,
+        companyName: p.company_name as string | null,
+        fullName: p.full_name as string | null,
+        fallback: "Team workspace",
+      }),
     ]),
   );
 
@@ -207,7 +211,7 @@ export async function fetchUnreadMemberInboxEvents(
     memberName: (row.member_name as string | null) ?? null,
     readAt: (row.read_at as string | null) ?? null,
     createdAt: row.created_at as string,
-    workspaceName: nameByOperator.get(row.operator_user_id as string) ?? "Workspace",
+    workspaceName: nameByOperator.get(row.operator_user_id as string) ?? "Team workspace",
   }));
 }
 
@@ -299,7 +303,7 @@ export async function fetchJoinedTeamsForMember(
     const [{ data: profile }, { data: contact }, projectQuery] = await Promise.all([
       supabase
         .from("profiles")
-        .select("workspace_name, company_name")
+        .select("workspace_name, company_name, full_name")
         .eq("id", operatorUserId)
         .maybeSingle(),
       supabase
@@ -316,10 +320,14 @@ export async function fetchJoinedTeamsForMember(
 
     const role = (contact?.role as string | undefined) ?? "Team";
     const segment = segmentFromContactRole(role);
-    const workspaceName =
-      (profile?.workspace_name as string | null)?.trim() ||
-      (profile?.company_name as string | null)?.trim() ||
-      "Workspace";
+    const workspaceName = workspaceDisplayName({
+      workspaceName: profile?.workspace_name as string | null,
+      companyName: profile?.company_name as string | null,
+      fullName: profile?.full_name as string | null,
+      contactCompanyName: contact?.company_name as string | null,
+      contactName: contact?.name as string | null,
+      fallback: "Team workspace",
+    });
     const contactDisplayName =
       (contact?.company_name as string | null)?.trim() ||
       (contact?.name as string | null)?.trim() ||

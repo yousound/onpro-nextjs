@@ -68,12 +68,14 @@ export type ProjectRowDb = {
 
 export type ContactRowDb = {
   id: number;
+  user_id?: string;
   name: string;
   email: string;
   phone: string | null;
   company_name: string | null;
   avatar_url: string | null;
   role: string;
+  linked_auth_user_id?: string | null;
   has_unread: boolean;
   website: string | null;
   address: string | null;

@@ -1,5 +1,5 @@
 import { decodeContactAddress } from "@/lib/supabase/contact-payload";
-import { normalizeStoredAvatarUrl } from "@/lib/supabase/resolve-profile-avatar";
+import { normalizeContactAvatarUrl } from "@/lib/contact-display-avatar";
 import type { Contact, ContactKind, PeopleSegment } from "@/lib/types/contact";
 import type { ContactRowDb } from "@/lib/supabase/types-db";
 
@@ -33,7 +33,8 @@ export function contactFromRow(row: ContactRowDb): Contact {
     name: row.name,
     email: row.email,
     phone: row.phone ?? undefined,
-    avatar_url: normalizeStoredAvatarUrl(row.avatar_url) ?? row.avatar_url,
+    avatar_url: normalizeContactAvatarUrl(row.avatar_url),
+    linked_auth_user_id: (row.linked_auth_user_id as string | null | undefined) ?? undefined,
     permissions: extra.permissions,
     team_role: extra.team_role,
     team_role_custom: extra.team_role_custom,

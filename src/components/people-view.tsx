@@ -22,6 +22,7 @@ import {
   validateSegmentConversion,
   type ConvertibleSegment,
 } from "@/lib/contact-segment-convert";
+import { workspaceDisplayName } from "@/lib/workspace-display-name";
 import { useWorkspace } from "@/components/workspace-provider";
 import { useDeleteContact } from "@/lib/use-delete-contact";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
@@ -707,7 +708,7 @@ function PersonRow({
 }) {
   const avatarUrl = p.contact.avatar_url ?? null;
   const companyLabel = p.clientCompanyName ?? (p.clientCompanyCode ? p.clientCompanyCode : "Individual");
-  const avatarText = clientTable ? initials(companyLabel) : initials(p.name);
+  const displayName = clientTable ? (p.clientCompanyName ?? "Individual client") : p.name;
 
   return (
     <tr
@@ -724,33 +725,30 @@ function PersonRow({
       aria-label={`Open ${clientTable ? companyLabel : p.name} — projects and permissions`}
     >
       <td className="px-4 py-3">
-        {clientTable ? (
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 text-xs font-bold text-slate-700">
-              {avatarText}
-            </span>
-            <div className="min-w-0">
-              <p className="font-medium text-accent underline-offset-2 hover:underline">
-                {p.clientCompanyName ?? "Individual client"}
-              </p>
-              {p.clientCompanyCode ? (
-                <p className="mt-0.5 text-xs text-text-secondary">{p.clientCompanyCode}</p>
-              ) : null}
-              <p className="mt-0.5 text-xs text-text-secondary sm:hidden">
-                {p.clientPeople.length > 0 ? p.clientPeople.join(", ") : p.email}
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <DirectoryAvatar name={displayName} avatarUrl={avatarUrl} size="sm" />
+          <div className="min-w-0">
+            {clientTable ? (
+              <>
+                <p className="font-medium text-accent underline-offset-2 hover:underline">
+                  {p.clientCompanyName ?? "Individual client"}
+                </p>
+                {p.clientCompanyCode ? (
+                  <p className="mt-0.5 text-xs text-text-secondary">{p.clientCompanyCode}</p>
+                ) : null}
+                <p className="mt-0.5 text-xs text-text-secondary sm:hidden">
+                  {p.clientPeople.length > 0 ? p.clientPeople.join(", ") : p.email}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-accent underline-offset-2 hover:underline">{p.name}</p>
+                {p.subtitle ? <p className="mt-0.5 text-xs text-text-secondary">{p.subtitle}</p> : null}
+                <p className="mt-0.5 text-xs text-text-secondary sm:hidden">{p.email}</p>
+              </>
+            )}
           </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <DirectoryAvatar name={p.name} avatarUrl={avatarUrl} size="sm" />
-            <div className="min-w-0">
-              <p className="font-medium text-accent underline-offset-2 hover:underline">{p.name}</p>
-              {p.subtitle ? <p className="mt-0.5 text-xs text-text-secondary">{p.subtitle}</p> : null}
-              <p className="mt-0.5 text-xs text-text-secondary sm:hidden">{p.email}</p>
-            </div>
-          </div>
-        )}
+        </div>
       </td>
       <td className="hidden px-4 py-3 text-text-secondary sm:table-cell">
         {clientTable ? (
@@ -791,10 +789,10 @@ function PersonDetailModal({
   onEditClient: (contact: Contact) => void;
   onEditTeam: (contact: Contact) => void;
   onEditVendor: (contact: Contact) => void;
-  onContactsUpdated: () => void;
+  onContactsUpdated: () => void | Promise<void>;
   onDeleted: () => void;
 }) {
-  const { isTeamView, active } = useWorkspace();
+  const { isTeamView, active, switchWorkspace, refresh: refreshWorkspace, joinedTeams } = useWorkspace();
   const access = projectsForPerson(p.id);
   const contact = p.contact;
   const effective = effectiveContactPermissions(contacts, contact);
@@ -871,24 +869,53 @@ function PersonDetailModal({
   const moveSegmentTarget: ConvertibleSegment | null =
     p.segment === "vendor" ? "client" : p.segment === "client" ? "vendor" : null;
 
+  const viewedWorkspaceName = useMemo(() => {
+    if (!isTeamView) return active.workspaceName;
+    const team = joinedTeams.find((t) => t.operatorUserId === active.operatorUserId);
+    return workspaceDisplayName({
+      workspaceName: team?.workspaceName ?? active.workspaceName,
+      contactCompanyName: team?.contactDisplayName,
+      fallback: active.workspaceName,
+    });
+  }, [isTeamView, active, joinedTeams]);
+
   async function handleMoveSegment(target: ConvertibleSegment) {
-    if (isClientLiveBackend() && isTeamView) {
-      setSegmentError(
-        `Switch to My workspace before moving contacts (you're viewing ${active.workspaceName}).`,
-      );
-      return;
-    }
-    const err = validateSegmentConversion(contacts, contact, target);
-    if (err) {
-      setSegmentError(err);
-      return;
-    }
     setConvertingSegment(true);
     setSegmentError(null);
+    let switchedFromTeam = false;
     try {
-      const converted = convertContactToSegment(contact, target);
+      if (isClientLiveBackend() && isTeamView) {
+        switchedFromTeam = true;
+        await switchWorkspace(null);
+        await refreshWorkspace();
+        await Promise.resolve(onContactsUpdated());
+      }
+
+      const list = loadContacts();
+      const targetContact =
+        list.find((c) => c.id === contact.id) ??
+        list.find(
+          (c) => c.email.trim().toLowerCase() === contact.email.trim().toLowerCase(),
+        );
+
+      if (!targetContact) {
+        setSegmentError(
+          switchedFromTeam
+            ? "Switched to your workspace. This contact isn’t in your directory yet — add them under Clients or Vendors, or they may only exist on the other team’s workspace."
+            : "Contact not found in your directory. Try refreshing the page.",
+        );
+        return;
+      }
+
+      const err = validateSegmentConversion(list, targetContact, target);
+      if (err) {
+        setSegmentError(err);
+        return;
+      }
+
+      const converted = convertContactToSegment(targetContact, target);
       await commitSingleContact(converted);
-      onContactsUpdated();
+      await Promise.resolve(onContactsUpdated());
       onClose();
     } catch (e) {
       setSegmentError(e instanceof Error ? e.message : "Could not move contact");
@@ -947,7 +974,7 @@ function PersonDetailModal({
       { id: "projects", label: "Projects" },
     ];
     if (canMoveSegment || membershipId != null) {
-      items.push({ id: "workspace", label: "Workspace" });
+      items.push({ id: "workspace", label: "Directory" });
     }
     return items;
   }, [canMoveSegment, membershipId]);
@@ -983,9 +1010,7 @@ function PersonDetailModal({
           <aside className="flex shrink-0 flex-col border-b border-violet-200/60 bg-gradient-to-b from-violet-100/90 to-violet-50/80 sm:w-[min(100%,15rem)] sm:border-b-0 sm:border-r">
             <div className="px-4 pb-3 pt-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/90 text-sm font-bold text-violet-900 shadow-sm ring-1 ring-violet-200/80">
-                  {initials(p.name)}
-                </span>
+                <DirectoryAvatar name={p.clientCompanyName ?? p.name} avatarUrl={contact.avatar_url} size="md" />
                 <div className="min-w-0 flex-1">
                   <span
                     className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${segmentBadgeSoftClass(p.segment)}`}
@@ -1200,12 +1225,20 @@ function PersonDetailModal({
                   {canMoveSegment && moveSegmentTarget ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
                       <p className="text-sm font-semibold text-amber-950">Wrong directory tab?</p>
-                      <p className="mt-1 text-xs text-amber-900/90">
-                        Move from{" "}
-                        <span className="font-semibold">{segmentLabel(p.segment)}</span> to{" "}
-                        <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span> — email and details
-                        are kept.
-                      </p>
+                      {isTeamView ? (
+                        <p className="mt-1 text-xs text-amber-900/90">
+                          You&apos;re viewing{" "}
+                          <span className="font-semibold">{viewedWorkspaceName}</span>. This will
+                          switch to your workspace and move the matching contact by email.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs text-amber-900/90">
+                          Move from{" "}
+                          <span className="font-semibold">{segmentLabel(p.segment)}</span> to{" "}
+                          <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span>{" "}
+                          — email and details are kept.
+                        </p>
+                      )}
                       {segmentError ? (
                         <p className="mt-2 text-xs font-medium text-red-600" role="alert">
                           {segmentError}
@@ -1219,9 +1252,11 @@ function PersonDetailModal({
                       >
                         {convertingSegment
                           ? "Moving…"
-                          : moveSegmentTarget === "client"
-                            ? "Move to Clients"
-                            : "Move to Vendors"}
+                          : isTeamView
+                            ? `Switch to my workspace & move to ${segmentLabel(moveSegmentTarget)}`
+                            : moveSegmentTarget === "client"
+                              ? "Move to Clients"
+                              : "Move to Vendors"}
                       </button>
                     </div>
                   ) : null}

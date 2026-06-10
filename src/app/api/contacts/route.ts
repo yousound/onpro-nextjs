@@ -5,6 +5,7 @@ import {
   upsertContactForUser,
   updateContactPermissions,
 } from "@/lib/supabase/contacts-write";
+import { enrichContactsWithLinkedAvatars } from "@/lib/supabase/enrich-contact-avatars";
 import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
 import { fetchContactsFromSupabase } from "@/lib/supabase/contacts";
 import { createClient } from "@/lib/supabase/server";
@@ -67,7 +68,8 @@ export async function POST(request: Request) {
 
     if (body.action === "upsert" && body.contact) {
       const saved = await upsertContactForUser(supabase, user.id, body.contact);
-      return NextResponse.json({ ok: true, contact: saved });
+      const [enriched] = await enrichContactsWithLinkedAvatars(supabase, [saved]);
+      return NextResponse.json({ ok: true, contact: enriched ?? saved });
     }
 
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });

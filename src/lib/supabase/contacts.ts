@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { contactFromRow } from "@/lib/supabase/mappers/contact";
+import { enrichContactsWithLinkedAvatars } from "@/lib/supabase/enrich-contact-avatars";
 import type { ContactRowDb } from "@/lib/supabase/types-db";
 import type { Contact } from "@/lib/types/contact";
 
@@ -26,5 +27,6 @@ export async function fetchContactsFromSupabase(workspaceOwnerId?: string): Prom
     throw error;
   }
 
-  return (data as ContactRowDb[]).map(contactFromRow);
+  const contacts = (data as ContactRowDb[]).map(contactFromRow);
+  return enrichContactsWithLinkedAvatars(supabase, contacts);
 }

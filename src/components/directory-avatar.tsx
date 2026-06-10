@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { clientInitials } from "@/lib/format";
+import { normalizeContactAvatarUrl } from "@/lib/contact-display-avatar";
 import { isRemoteAvatarUrl } from "@/lib/supabase/upload-avatar";
 
 type Size = "xs" | "sm" | "md" | "list" | "lg";
@@ -26,16 +27,17 @@ export function DirectoryAvatar({
   const { box, text } = sizeClass[size];
   const initials = clientInitials(name);
   const [imgFailed, setImgFailed] = useState(false);
+  const resolvedUrl = normalizeContactAvatarUrl(avatarUrl);
   useEffect(() => {
     setImgFailed(false);
-  }, [avatarUrl]);
-  const showImg = isRemoteAvatarUrl(avatarUrl) && !imgFailed;
+  }, [resolvedUrl]);
+  const showImg = isRemoteAvatarUrl(resolvedUrl) && !imgFailed;
 
   if (showImg) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={avatarUrl}
+        src={resolvedUrl}
         alt=""
         referrerPolicy="no-referrer"
         className={`${box} shrink-0 rounded-full object-cover ring-2 ring-white shadow-md ring-slate-200/80`}

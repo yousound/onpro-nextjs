@@ -46,6 +46,8 @@ export interface Contact {
   sell_permits?: FileRef[];
   sell_certificate?: FileRef[];
   avatar_url?: string | null;
+  /** Auth user who claimed this contact via invite or email match. */
+  linked_auth_user_id?: string | null;
   member_contact_ids?: string[];
   /** Individual linked to a company client (searchable in People + pickers). */
   parent_company_id?: string;

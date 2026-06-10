@@ -161,7 +161,6 @@ export async function syncMemberProfileToLinkedContacts(
       name,
       contact_name: name,
       phone: patch.phone?.trim() || contact.phone,
-      avatar_url: patch.avatar_url ?? contact.avatar_url,
       company_name: workspaceCompany ?? contact.company_name,
       updated_at: new Date().toISOString(),
     });

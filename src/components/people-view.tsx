@@ -23,8 +23,6 @@ import {
   type ConvertibleSegment,
 } from "@/lib/contact-segment-convert";
 import { isTeamMemberPending } from "@/lib/contact-invite-status";
-import { workspaceDisplayName } from "@/lib/workspace-display-name";
-import { useWorkspace } from "@/components/workspace-provider";
 import { useCurrentUser } from "@/components/profile-provider";
 import { useDeleteContact } from "@/lib/use-delete-contact";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
@@ -841,7 +839,6 @@ function PersonDetailModal({
   onContactsUpdated: () => void | Promise<void>;
   onDeleted: () => void;
 }) {
-  const { isTeamView, active, switchWorkspace, refresh: refreshWorkspace, joinedTeams } = useWorkspace();
   const { user } = useCurrentUser();
   const access = projectsForPerson(p.id);
   const contact = p.contact;
@@ -920,51 +917,17 @@ function PersonDetailModal({
   const moveSegmentTarget: ConvertibleSegment | null =
     p.segment === "vendor" ? "client" : p.segment === "client" ? "vendor" : null;
 
-  const viewedWorkspaceName = useMemo(() => {
-    if (!isTeamView) return active.workspaceName;
-    const team = joinedTeams.find((t) => t.operatorUserId === active.operatorUserId);
-    return workspaceDisplayName({
-      workspaceName: team?.workspaceName ?? active.workspaceName,
-      contactCompanyName: team?.contactDisplayName,
-      fallback: active.workspaceName,
-    });
-  }, [isTeamView, active, joinedTeams]);
-
   async function handleMoveSegment(target: ConvertibleSegment) {
     setConvertingSegment(true);
     setSegmentError(null);
-    let switchedFromTeam = false;
     try {
-      if (isClientLiveBackend() && isTeamView) {
-        switchedFromTeam = true;
-        await switchWorkspace(null);
-        await refreshWorkspace();
-        await Promise.resolve(onContactsUpdated());
-      }
-
-      const list = loadContacts();
-      const targetContact =
-        list.find((c) => c.id === contact.id) ??
-        list.find(
-          (c) => c.email.trim().toLowerCase() === contact.email.trim().toLowerCase(),
-        );
-
-      if (!targetContact) {
-        setSegmentError(
-          switchedFromTeam
-            ? "Switched to your workspace. This contact isn’t in your directory yet — add them under Clients or Vendors, or they may only exist on the other team’s workspace."
-            : "Contact not found in your directory. Try refreshing the page.",
-        );
-        return;
-      }
-
-      const err = validateSegmentConversion(list, targetContact, target);
+      const err = validateSegmentConversion(contacts, contact, target);
       if (err) {
         setSegmentError(err);
         return;
       }
 
-      const converted = convertContactToSegment(targetContact, target);
+      const converted = convertContactToSegment(contact, target);
       await commitSingleContact(converted);
       await Promise.resolve(onContactsUpdated());
       onClose();
@@ -1280,21 +1243,13 @@ function PersonDetailModal({
                 <div className="space-y-4">
                   {canMoveSegment && moveSegmentTarget ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
-                      <p className="text-sm font-semibold text-amber-950">Wrong directory tab?</p>
-                      {isTeamView ? (
-                        <p className="mt-1 text-xs text-amber-900/90">
-                          You&apos;re viewing{" "}
-                          <span className="font-semibold">{viewedWorkspaceName}</span>. This will
-                          switch to your workspace and move the matching contact by email.
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-xs text-amber-900/90">
-                          Move from{" "}
-                          <span className="font-semibold">{segmentLabel(p.segment)}</span> to{" "}
-                          <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span>{" "}
-                          — email and details are kept.
-                        </p>
-                      )}
+                      <p className="text-sm font-semibold text-amber-950">Move to another directory tab</p>
+                      <p className="mt-1 text-xs text-amber-900/90">
+                        Re-file this contact from{" "}
+                        <span className="font-semibold">{segmentLabel(p.segment)}</span> to{" "}
+                        <span className="font-semibold">{segmentLabel(moveSegmentTarget)}</span>. Email
+                        and details are kept.
+                      </p>
                       {segmentError ? (
                         <p className="mt-2 text-xs font-medium text-red-600" role="alert">
                           {segmentError}
@@ -1308,11 +1263,9 @@ function PersonDetailModal({
                       >
                         {convertingSegment
                           ? "Moving…"
-                          : isTeamView
-                            ? `Switch to my workspace & move to ${segmentLabel(moveSegmentTarget)}`
-                            : moveSegmentTarget === "client"
-                              ? "Move to Clients"
-                              : "Move to Vendors"}
+                          : moveSegmentTarget === "client"
+                            ? "Move to Clients"
+                            : "Move to Vendors"}
                       </button>
                     </div>
                   ) : null}

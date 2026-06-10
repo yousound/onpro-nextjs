@@ -51,23 +51,14 @@ export async function POST(request: Request) {
 
   try {
     const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
-    if (workspaceOwnerId !== user.id) {
-      return NextResponse.json(
-        {
-          error:
-            "You're viewing someone else's team workspace. Switch to My workspace in the sidebar before adding or editing your contacts.",
-        },
-        { status: 403 },
-      );
-    }
 
     if (body.action === "permissions") {
-      await updateContactPermissions(supabase, user.id, body.contactId, body.permissions);
+      await updateContactPermissions(supabase, workspaceOwnerId, body.contactId, body.permissions);
       return NextResponse.json({ ok: true });
     }
 
     if (body.action === "upsert" && body.contact) {
-      const saved = await upsertContactForUser(supabase, user.id, body.contact);
+      const saved = await upsertContactForUser(supabase, workspaceOwnerId, body.contact);
       const [enriched] = await enrichContactsWithLinkedAvatars(supabase, [saved]);
       return NextResponse.json({ ok: true, contact: enriched ?? saved });
     }

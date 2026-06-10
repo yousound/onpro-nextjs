@@ -9,18 +9,6 @@ import type {
 } from "@/lib/types/contact";
 import type { ProjectPermissionFlags } from "@/lib/project-permissions";
 
-function locationHasContent(loc: ContactLocation): boolean {
-  return Boolean(
-    loc.label?.trim() ||
-      loc.line1?.trim() ||
-      loc.line2?.trim() ||
-      loc.city?.trim() ||
-      loc.state?.trim() ||
-      loc.postal_code?.trim() ||
-      loc.country?.trim(),
-  );
-}
-
 export type ContactAddressPayload = {
   kind?: ContactKind;
   company_code?: string;
@@ -93,7 +81,6 @@ export function decodeContactAddress(address: string | null | undefined): Partia
         sell_permits: parsed.sell_permits,
         sell_certificate: parsed.sell_certificate,
         documents: parsed.documents,
-        locations: parsed.locations,
         notes: parsed.notes,
       };
     }

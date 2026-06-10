@@ -1,3 +1,4 @@
+import { isOptimisticContactId } from "@/lib/contact-invite-status";
 import { withoutDemoSeedJobs } from "@/lib/mock/demo-seed-jobs";
 import { dedupeProjectsById } from "@/lib/dedupe-projects";
 import type { Contact } from "@/lib/types/contact";
@@ -13,11 +14,12 @@ function contactEmailKey(c: Contact): string {
   return c.email.trim().toLowerCase();
 }
 
-/** Replace cache with server list, keeping session rows the server has not returned yet. */
+/** Replace cache with server list, keeping unsaved session-only rows the server has not returned yet. */
 export function mergeSeedLiveContacts(server: Contact[]): void {
   const byEmail = new Map(server.map((c) => [contactEmailKey(c), c]));
   const merged = [...server];
   for (const cached of contacts) {
+    if (!isOptimisticContactId(cached.id)) continue;
     if (byEmail.has(contactEmailKey(cached))) continue;
     if (merged.some((c) => c.id === cached.id)) continue;
     merged.push(cached);
@@ -30,9 +32,7 @@ export function seedLiveContacts(next: Contact[]): void {
 }
 
 export function seedLiveProjects(next: Project[]): void {
-  const nextIds = new Set(next.map((p) => p.id));
-  const cachedOnly = projects.filter((p) => !nextIds.has(p.id));
-  projects = dedupeProjectsById([...next, ...cachedOnly]);
+  projects = dedupeProjectsById(next);
 }
 
 export function seedLiveJobsForProject(projectId: number, jobs: ProjectJob[]): void {

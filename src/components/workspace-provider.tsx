@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { clearLiveCache } from "@/lib/data/live-cache";
 import { joinWorkspaceMatch } from "@/lib/workspace-join-client";
 import { writeActiveWorkspaceSession } from "@/lib/workspace-context";
 import type { WorkspaceView } from "@/lib/workspace-context";
@@ -122,6 +123,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operator_user_id: match.operatorUserId }),
       });
+      if (isClientLiveBackend()) clearLiveCache();
       await load();
       router.refresh();
       window.dispatchEvent(new Event("onpro-workspace-changed"));
@@ -141,6 +143,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ operator_user_id: target }),
       });
       if (!res.ok) return;
+      if (isClientLiveBackend()) clearLiveCache();
       await load();
       router.refresh();
       window.dispatchEvent(new Event("onpro-workspace-changed"));

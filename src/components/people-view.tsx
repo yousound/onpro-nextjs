@@ -22,8 +22,10 @@ import {
   validateSegmentConversion,
   type ConvertibleSegment,
 } from "@/lib/contact-segment-convert";
+import { isTeamMemberPending } from "@/lib/contact-invite-status";
 import { workspaceDisplayName } from "@/lib/workspace-display-name";
 import { useWorkspace } from "@/components/workspace-provider";
+import { useCurrentUser } from "@/components/profile-provider";
 import { useDeleteContact } from "@/lib/use-delete-contact";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { effectiveContactPermissions, permissionsLabel } from "@/lib/contact-permissions";
@@ -319,6 +321,24 @@ export function PeopleView({
     }
     window.addEventListener("onpro-contacts-changed", onContactsChanged);
     return () => window.removeEventListener("onpro-contacts-changed", onContactsChanged);
+  }, []);
+
+  useEffect(() => {
+    if (!isClientLiveBackend()) return;
+    function onWorkspaceChanged() {
+      setDetailPerson(null);
+      setPendingInviteDetail(null);
+      setClientModalOpen(false);
+      setVendorModalOpen(false);
+      setTeamModalOpen(false);
+      setEditClientContact(null);
+      setEditVendorContact(null);
+      setEditTeamContact(null);
+      setContacts(loadContacts());
+      setContactsVersion((v) => v + 1);
+    }
+    window.addEventListener("onpro-workspace-changed", onWorkspaceChanged);
+    return () => window.removeEventListener("onpro-workspace-changed", onWorkspaceChanged);
   }, []);
 
   useEffect(() => {
@@ -654,12 +674,18 @@ export function PeopleView({
                       </th>
                       <th className="hidden px-4 py-3 md:table-cell">Email</th>
                       <th className="hidden px-4 py-3 lg:table-cell">Phone</th>
+                      {segment === "team" ? (
+                        <th className="hidden px-4 py-3 xl:table-cell">Status</th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-light bg-white">
                     {filtered.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-4 py-10 text-center text-text-secondary">
+                        <td
+                          colSpan={segment === "team" ? 5 : 4}
+                          className="px-4 py-10 text-center text-text-secondary"
+                        >
                           No people match your search in this segment (mock).
                         </td>
                       </tr>
@@ -669,6 +695,7 @@ export function PeopleView({
                           key={p.id}
                           person={p}
                           clientTable={clientTable}
+                          showTeamStatus={segment === "team"}
                           onOpen={() => {
                             setPendingInviteDetail(null);
                             setDetailPerson(p);
@@ -700,12 +727,16 @@ export function PeopleView({
 function PersonRow({
   person: p,
   clientTable,
+  showTeamStatus,
   onOpen,
 }: {
   person: ReturnType<typeof contactToDirectoryRow>;
   clientTable?: boolean;
+  showTeamStatus?: boolean;
   onOpen: () => void;
 }) {
+  const { user } = useCurrentUser();
+  const pending = showTeamStatus && isTeamMemberPending(p.contact, user?.selfContactId);
   const avatarUrl = p.contact.avatar_url ?? null;
   const companyLabel = p.clientCompanyName ?? (p.clientCompanyCode ? p.clientCompanyCode : "Individual");
   const displayName = clientTable ? (p.clientCompanyName ?? "Individual client") : p.name;
@@ -742,7 +773,14 @@ function PersonRow({
               </>
             ) : (
               <>
-                <p className="font-medium text-accent underline-offset-2 hover:underline">{p.name}</p>
+                <p className="font-medium text-accent underline-offset-2 hover:underline">
+                  {p.name}
+                  {pending ? (
+                    <span className="ml-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900">
+                      Pending
+                    </span>
+                  ) : null}
+                </p>
                 {p.subtitle ? <p className="mt-0.5 text-xs text-text-secondary">{p.subtitle}</p> : null}
                 <p className="mt-0.5 text-xs text-text-secondary sm:hidden">{p.email}</p>
               </>
@@ -769,6 +807,17 @@ function PersonRow({
       </td>
       <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{p.email}</td>
       <td className="hidden px-4 py-3 text-text-secondary lg:table-cell">{p.phone ?? "—"}</td>
+      {showTeamStatus ? (
+        <td className="hidden px-4 py-3 xl:table-cell">
+          {pending ? (
+            <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-900">
+              Pending
+            </span>
+          ) : (
+            <span className="text-text-secondary">Active</span>
+          )}
+        </td>
+      ) : null}
     </tr>
   );
 }
@@ -793,8 +842,10 @@ function PersonDetailModal({
   onDeleted: () => void;
 }) {
   const { isTeamView, active, switchWorkspace, refresh: refreshWorkspace, joinedTeams } = useWorkspace();
+  const { user } = useCurrentUser();
   const access = projectsForPerson(p.id);
   const contact = p.contact;
+  const teamPending = isTeamMemberPending(contact, user?.selfContactId);
   const effective = effectiveContactPermissions(contacts, contact);
   const [permDraft, setPermDraft] = useState<ProjectPermissionFlags>(effective.flags);
   const [permSaved, setPermSaved] = useState(false);
@@ -1017,6 +1068,11 @@ function PersonDetailModal({
                   >
                     {segmentLabel(p.segment)}
                   </span>
+                  {teamPending ? (
+                    <span className="ml-1.5 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-900">
+                      Pending
+                    </span>
+                  ) : null}
                   <h2 id="people-detail-title" className="mt-1.5 truncate text-base font-bold text-violet-950">
                     {p.clientCompanyName ?? p.name}
                   </h2>

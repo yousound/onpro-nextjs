@@ -35,6 +35,12 @@ export function contactFromRow(row: ContactRowDb): Contact {
     phone: row.phone ?? undefined,
     avatar_url: normalizeContactAvatarUrl(row.avatar_url),
     linked_auth_user_id: (row.linked_auth_user_id as string | null | undefined) ?? undefined,
+    invite_status:
+      row.invite_status === "invited" || row.invite_status === "joined"
+        ? row.invite_status
+        : row.invite_status === "uninvited"
+          ? "uninvited"
+          : undefined,
     permissions: extra.permissions,
     team_role: extra.team_role,
     team_role_custom: extra.team_role_custom,

@@ -76,6 +76,7 @@ export type ContactRowDb = {
   avatar_url: string | null;
   role: string;
   linked_auth_user_id?: string | null;
+  invite_status?: string | null;
   has_unread: boolean;
   website: string | null;
   address: string | null;

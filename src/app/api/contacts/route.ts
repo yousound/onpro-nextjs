@@ -5,6 +5,7 @@ import {
   upsertContactForUser,
   updateContactPermissions,
 } from "@/lib/supabase/contacts-write";
+import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
 import { fetchContactsFromSupabase } from "@/lib/supabase/contacts";
 import { createClient } from "@/lib/supabase/server";
 import type { Contact } from "@/lib/types/contact";
@@ -48,6 +49,17 @@ export async function POST(request: Request) {
   const body = (await request.json()) as Body;
 
   try {
+    const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
+    if (workspaceOwnerId !== user.id) {
+      return NextResponse.json(
+        {
+          error:
+            "You're viewing someone else's team workspace. Switch to My workspace in the sidebar before adding or editing your contacts.",
+        },
+        { status: 403 },
+      );
+    }
+
     if (body.action === "permissions") {
       await updateContactPermissions(supabase, user.id, body.contactId, body.permissions);
       return NextResponse.json({ ok: true });

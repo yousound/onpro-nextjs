@@ -3,6 +3,7 @@ import type {
   Contact,
   ContactKind,
   ContactLocation,
+  FileRef,
   PeopleSegment,
   TeamRole,
 } from "@/lib/types/contact";
@@ -35,6 +36,9 @@ export type ContactAddressPayload = {
   locations?: ContactLocation[];
   other_emails?: string[];
   business_structure?: string;
+  sell_permits?: FileRef[];
+  sell_certificate?: FileRef[];
+  documents?: FileRef[];
   /** Legacy plain-text notes when not JSON. */
   notes?: string;
 };
@@ -57,6 +61,10 @@ export function encodeContactAddress(contact: Partial<Contact>): string | null {
   }
   if (contact.other_emails?.length) payload.other_emails = contact.other_emails;
   if (contact.business_structure) payload.business_structure = contact.business_structure;
+  if (contact.sell_permits?.length) payload.sell_permits = contact.sell_permits;
+  if (contact.sell_certificate?.length) payload.sell_certificate = contact.sell_certificate;
+  if (contact.documents?.length) payload.documents = contact.documents;
+  if (contact.locations?.length) payload.locations = contact.locations;
   if (contact.notes?.trim()) payload.notes = contact.notes.trim();
 
   if (Object.keys(payload).length === 0) return null;
@@ -82,6 +90,10 @@ export function decodeContactAddress(address: string | null | undefined): Partia
         locations: parsed.locations,
         other_emails: parsed.other_emails,
         business_structure: parsed.business_structure,
+        sell_permits: parsed.sell_permits,
+        sell_certificate: parsed.sell_certificate,
+        documents: parsed.documents,
+        locations: parsed.locations,
         notes: parsed.notes,
       };
     }

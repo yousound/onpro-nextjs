@@ -54,34 +54,48 @@ export async function commitClientWithMembers(
   contacts: Contact[],
   company: Contact,
   members: CompanyMemberDraft[],
-): Promise<void> {
+): Promise<Contact> {
   const next = persistCompanyWithMembers(contacts, company, members);
+  const companyRow = next.find((c) => c.id === company.id) ?? company;
 
   if (!isClientLiveBackend()) {
     saveContacts(next);
-    return;
+    notifyContactsChanged();
+    return companyRow;
   }
 
-  const companyRow = next.find((c) => c.id === company.id) ?? company;
   const savedCompany = await persistContactToDb(companyRow);
   const companyId = savedCompany?.id ?? companyRow.id;
 
   const memberRows = next.filter(
-    (c) => c.segment === "client" && c.parent_company_id === company.id,
+    (c) =>
+      c.segment === "client" &&
+      (c.parent_company_id === company.id || c.parent_company_id === companyId),
   );
   const memberIds: string[] = [];
+  const savedMembers: Contact[] = [];
   for (const m of memberRows) {
     const saved = await persistContactToDb({ ...m, parent_company_id: companyId });
-    memberIds.push(saved?.id ?? m.id);
+    const row = saved ?? { ...m, parent_company_id: companyId };
+    savedMembers.push(row);
+    memberIds.push(row.id);
   }
 
+  let finalCompany: Contact = savedCompany ?? { ...companyRow, id: companyId };
   if (company.kind === "company") {
-    await persistContactToDb({
-      ...(savedCompany ?? companyRow),
+    const savedFinal = await persistContactToDb({
+      ...companyRow,
+      ...(savedCompany ?? {}),
       id: companyId,
       member_contact_ids: memberIds,
     });
+    finalCompany = savedFinal ?? { ...companyRow, id: companyId, member_contact_ids: memberIds };
   }
+
+  upsertLiveContact(finalCompany);
+  for (const m of savedMembers) upsertLiveContact(m);
+  notifyContactsChanged();
+  return finalCompany;
 }
 
 export type DeleteContactResult = { ok: true } | { ok: false; error: string };
@@ -141,4 +155,9 @@ export async function commitContactPermissions(
     return;
   }
   await persistContactPermissionsToDb(contactId, permissions);
+  const updated = loadContacts().find((c) => c.id === contactId);
+  if (updated) {
+    upsertLiveContact({ ...updated, permissions });
+  }
+  notifyContactsChanged();
 }

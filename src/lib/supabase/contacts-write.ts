@@ -24,8 +24,11 @@ export async function upsertContactForUser(
       .eq("id", numericId)
       .eq("user_id", userId)
       .select("*")
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) {
+      throw new Error("Contact not found or you do not have permission to update it.");
+    }
     return contactFromRow(data as ContactRowDb);
   }
 

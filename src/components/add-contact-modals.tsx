@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useCurrentUser } from "@/components/profile-provider";
+import { useWorkspace } from "@/components/workspace-provider";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import {
   commitClientWithMembers,
@@ -305,25 +306,15 @@ export function AddClientModal({ onClose, onSaved, existing, onInviteSent }: Cli
     setSaving(true);
     setError(null);
     try {
-      let resolvedContactId = companyIdFinal;
+      let savedContact: Contact;
       if (kind === "company") {
-        await commitClientWithMembers(contacts, companyPayload, members);
-        const nextContacts = loadContacts();
-        const savedRow =
-          nextContacts.find((c) => c.id === companyIdFinal) ??
-          nextContacts.find(
-            (c) =>
-              c.segment === "client" &&
-              c.email.trim().toLowerCase() === email.trim().toLowerCase(),
-          );
-        resolvedContactId = savedRow?.id ?? companyIdFinal;
+        savedContact = await commitClientWithMembers(contacts, companyPayload, members);
       } else {
-        const saved = await commitSingleContact(companyPayload);
-        resolvedContactId = saved.id;
+        savedContact = await commitSingleContact(companyPayload);
       }
       if (sendInvite && email.trim() && onInviteSent) {
         const { invite, loginUrl } = await dispatchWorkspaceInvite({
-          contactId: resolvedContactId,
+          contactId: savedContact.id,
           email: email.trim(),
           segment: "client",
           note: inviteNote,
@@ -332,7 +323,7 @@ export function AddClientModal({ onClose, onSaved, existing, onInviteSent }: Cli
         });
         onInviteSent(invite, loginUrl);
       }
-      onSaved();
+      await Promise.resolve(onSaved(savedContact));
       if (isClientLiveBackend()) router.refresh();
       onClose();
     } catch (err) {
@@ -565,6 +556,7 @@ const TEAM_MODAL_SECTIONS: ModalSectionItem[] = [
 export function AddTeamMemberModal({ onClose, onSaved, existing, onInviteSent }: TeamModalProps) {
   const router = useRouter();
   const { user: currentUser } = useCurrentUser();
+  const { isTeamView, active } = useWorkspace();
   const operatorCompany = currentUser?.companyName?.trim() || undefined;
   const [saving, setSaving] = useState(false);
   const { deleting, deleteError, clearDeleteError, handleDelete } = useDeleteContact({
@@ -601,6 +593,12 @@ export function AddTeamMemberModal({ onClose, onSaved, existing, onInviteSent }:
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isClientLiveBackend() && isTeamView) {
+      setError(
+        `You're viewing ${active.workspaceName}. Switch to My workspace in the sidebar to add or edit teammates on your team.`,
+      );
+      return;
+    }
     const contacts = loadContacts();
     const emailNorm = email.trim().toLowerCase();
     const otherSegment = contacts.find(

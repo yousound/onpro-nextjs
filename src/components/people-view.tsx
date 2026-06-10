@@ -15,8 +15,8 @@ import {
 } from "@/lib/mock/people";
 import type { Contact } from "@/lib/types/contact";
 import { loadContacts, clientListContacts, searchContacts } from "@/lib/contacts-store";
-import { commitContactPermissions } from "@/lib/data/commit-contacts";
 import { mergeSeedLiveContacts } from "@/lib/data/live-cache";
+import { commitContactPermissions } from "@/lib/data/commit-contacts";
 import { useDeleteContact } from "@/lib/use-delete-contact";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { effectiveContactPermissions, permissionsLabel } from "@/lib/contact-permissions";
@@ -243,7 +243,13 @@ export function PeopleView({
   }
 
   useEffect(() => {
-    if (initialContacts) setContacts(initialContacts);
+    if (initialContacts == null) return;
+    if (isClientLiveBackend()) {
+      mergeSeedLiveContacts(initialContacts);
+      setContacts(loadContacts());
+      return;
+    }
+    setContacts(initialContacts);
   }, [initialContacts]);
 
   useEffect(() => {

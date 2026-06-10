@@ -1,5 +1,13 @@
+import type { PeopleSegment } from "@/lib/types/contact";
 import type { WorkspaceMatch, WorkspaceMemberEvent, WorkspaceMembership } from "@/lib/types/workspace";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+function segmentFromContactRole(role: string | null | undefined): PeopleSegment {
+  const r = (role ?? "").trim().toLowerCase();
+  if (r === "vendor") return "vendor";
+  if (r === "team") return "team";
+  return "client";
+}
 
 type MatchRow = {
   operator_user_id: string;
@@ -117,6 +125,73 @@ export async function fetchMembershipForContact(
   };
 }
 
+export type MemberInboxEvent = WorkspaceMemberEvent & {
+  workspaceName: string;
+};
+
+export async function fetchUnreadMemberInboxEvents(
+  supabase: SupabaseClient,
+  memberUserId: string,
+): Promise<MemberInboxEvent[]> {
+  const { data, error } = await supabase
+    .from("workspace_member_events")
+    .select("*")
+    .eq("member_user_id", memberUserId)
+    .is("read_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    if (error.message.includes("workspace_member_events")) return [];
+    throw error;
+  }
+
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  const operatorIds = [...new Set(rows.map((r) => r.operator_user_id as string))];
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, workspace_name, company_name")
+    .in("id", operatorIds);
+
+  const nameByOperator = new Map(
+    (profiles ?? []).map((p) => [
+      p.id as string,
+      ((p.workspace_name as string | null)?.trim() ||
+        (p.company_name as string | null)?.trim() ||
+        "Workspace") as string,
+    ]),
+  );
+
+  return rows.map((row) => ({
+    id: row.id as number,
+    operatorUserId: row.operator_user_id as string,
+    memberUserId: (row.member_user_id as string | null) ?? null,
+    contactId: (row.contact_id as number | null) ?? null,
+    eventType: row.event_type as WorkspaceMemberEvent["eventType"],
+    memberEmail: (row.member_email as string | null) ?? null,
+    memberName: (row.member_name as string | null) ?? null,
+    readAt: (row.read_at as string | null) ?? null,
+    createdAt: row.created_at as string,
+    workspaceName: nameByOperator.get(row.operator_user_id as string) ?? "Workspace",
+  }));
+}
+
+export async function markMemberInboxEventsRead(
+  supabase: SupabaseClient,
+  memberUserId: string,
+  eventIds: number[],
+): Promise<void> {
+  if (eventIds.length === 0) return;
+  const { error } = await supabase
+    .from("workspace_member_events")
+    .update({ read_at: new Date().toISOString() })
+    .eq("member_user_id", memberUserId)
+    .in("id", eventIds);
+  if (error) throw error;
+}
+
 export async function fetchUnreadMemberEvents(
   supabase: SupabaseClient,
   operatorUserId: string,
@@ -145,6 +220,74 @@ export async function fetchUnreadMemberEvents(
     readAt: (row.read_at as string | null) ?? null,
     createdAt: row.created_at as string,
   }));
+}
+
+/** Active workspace memberships for the signed-in member (direct DB lookup). */
+export async function fetchJoinedTeamsForMember(
+  supabase: SupabaseClient,
+  memberUserId: string,
+): Promise<WorkspaceMatch[]> {
+  const { data: memberships, error } = await supabase
+    .from("workspace_memberships")
+    .select("operator_user_id, contact_id")
+    .eq("member_user_id", memberUserId)
+    .eq("status", "active");
+
+  if (error) {
+    if (error.message.includes("workspace_memberships")) return [];
+    throw error;
+  }
+
+  const rows = memberships ?? [];
+  if (rows.length === 0) return [];
+
+  const results: WorkspaceMatch[] = [];
+
+  for (const row of rows) {
+    const operatorUserId = row.operator_user_id as string;
+    const contactId = row.contact_id as number;
+
+    const [{ data: profile }, { data: contact }, projectQuery] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("workspace_name, company_name")
+        .eq("id", operatorUserId)
+        .maybeSingle(),
+      supabase
+        .from("contacts")
+        .select("name, company_name, role")
+        .eq("id", contactId)
+        .eq("user_id", operatorUserId)
+        .maybeSingle(),
+      supabase
+        .from("projects")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", operatorUserId),
+    ]);
+
+    const role = (contact?.role as string | undefined) ?? "Team";
+    const segment = segmentFromContactRole(role);
+    const workspaceName =
+      (profile?.workspace_name as string | null)?.trim() ||
+      (profile?.company_name as string | null)?.trim() ||
+      "Workspace";
+    const contactDisplayName =
+      (contact?.company_name as string | null)?.trim() ||
+      (contact?.name as string | null)?.trim() ||
+      workspaceName;
+
+    results.push({
+      operatorUserId,
+      contactId,
+      workspaceName,
+      contactDisplayName,
+      projectCount: projectQuery.count ?? 0,
+      alreadyJoined: true,
+      segment,
+    });
+  }
+
+  return results.sort((a, b) => a.workspaceName.localeCompare(b.workspaceName));
 }
 
 export async function markMemberEventsRead(

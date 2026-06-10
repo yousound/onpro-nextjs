@@ -8,6 +8,8 @@ export type WorkspaceMatch = {
   contactDisplayName: string;
   projectCount: number;
   alreadyJoined: boolean;
+  /** Team, Vendor, or Client — how you appear on that workspace. */
+  segment?: PeopleSegment;
 };
 
 export type WorkspaceMembership = {

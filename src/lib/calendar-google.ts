@@ -27,6 +27,14 @@ export function calendarEventReactKey(ev: CalendarEvent, index: number): string 
   return `${ev.calendar_owner_email ?? ""}-${ev.external_id ?? ev.id}-${ev.start_time}-${index}`;
 }
 
+/** Stable key for hiding deleted events in browser storage. */
+export function calendarEventTombstoneKey(ev: CalendarEvent): string {
+  if (ev.external_id?.trim()) {
+    return `g:${ev.calendar_owner_email ?? ""}:${ev.external_id.trim()}`;
+  }
+  return `l:${ev.id}`;
+}
+
 /** Events on a given local day (ymd), sorted by start. */
 export function calendarEventsForDay(events: CalendarEvent[], ymd: string): CalendarEvent[] {
   return events

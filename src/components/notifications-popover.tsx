@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useWorkspace } from "@/components/workspace-provider";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { dispatchOpenOnProAi } from "@/lib/onpro-events";
 import { getNotificationRows } from "@/lib/notifications";
+import { writeActiveWorkspaceSession } from "@/lib/workspace-context";
 
 function BellGlyph({ className }: { className?: string }) {
   return (
@@ -30,14 +32,29 @@ export function NotificationsPopover({
   panelAlign = "right",
 }: NotificationsPopoverProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { switchWorkspace } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [memberEvents, setMemberEvents] = useState<
     { id: string; eventId: number; title: string; subtitle: string; href: string }[]
   >([]);
+  const [inboxEvents, setInboxEvents] = useState<
+    {
+      id: string;
+      eventId: number;
+      title: string;
+      subtitle: string;
+      href: string;
+      operatorUserId: string;
+    }[]
+  >([]);
   const rootRef = useRef<HTMLDivElement>(null);
   const todayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const baseRows = useMemo(() => getNotificationRows(todayYmd), [todayYmd, pathname]);
-  const rows = useMemo(() => [...memberEvents, ...baseRows], [memberEvents, baseRows]);
+  const rows = useMemo(
+    () => [...inboxEvents, ...memberEvents, ...baseRows],
+    [inboxEvents, memberEvents, baseRows],
+  );
   const count = rows.length;
   const live = isClientLiveBackend();
 
@@ -68,6 +85,33 @@ export function NotificationsPopover({
         },
       )
       .catch(() => setMemberEvents([]));
+
+    void fetch("/api/workspace/member-inbox")
+      .then((r) => r.json())
+      .then(
+        (data: {
+          events?: {
+            id: number;
+            eventType: string;
+            workspaceName: string;
+            operatorUserId: string;
+          }[];
+        }) => {
+          const mapped = (data.events ?? []).map((ev) => ({
+            id: `inbox-${ev.id}`,
+            eventId: ev.id,
+            title:
+              ev.eventType === "joined"
+                ? `You were added to ${ev.workspaceName}`
+                : `Access removed from ${ev.workspaceName}`,
+            subtitle: "Open this team workspace",
+            href: "/projects",
+            operatorUserId: ev.operatorUserId,
+          }));
+          setInboxEvents(mapped);
+        },
+      )
+      .catch(() => setInboxEvents([]));
   }, [live, pathname]);
 
   useEffect(() => {
@@ -137,6 +181,21 @@ export function NotificationsPopover({
                     href={r.href}
                     className="block px-3 py-2.5 transition hover:bg-surface-body"
                     onClick={() => {
+                      const inboxRow = inboxEvents.find((e) => e.id === r.id);
+                      if (inboxRow && live) {
+                        void fetch("/api/workspace/member-inbox", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ event_ids: [inboxRow.eventId] }),
+                        });
+                        setInboxEvents((prev) => prev.filter((e) => e.id !== r.id));
+                        writeActiveWorkspaceSession(inboxRow.operatorUserId);
+                        void switchWorkspace(inboxRow.operatorUserId).then(() => {
+                          router.push(inboxRow.href);
+                        });
+                        setOpen(false);
+                        return;
+                      }
                       const memberRow = memberEvents.find((e) => e.id === r.id);
                       if (memberRow && live) {
                         void fetch("/api/workspace/member-events", {

@@ -17,7 +17,7 @@ const BRIEFING_SCHEMA = `Return JSON:
   ]
 }
 Write 2-5 bullet blocks using ONLY data from Context. Never invent people, clients, or storylines.
-You have access to everything listed in Context.coverage.sections (projects, jobs, contacts, in-app messages, email threads, documents, calendar). Never claim you lack access.
+You have access to everything listed in Context.coverage.sections (projects, jobs, contacts, in-app messages, email threads, documents, calendar). Context.joinedTeams lists operator workspaces the user has joined — mention these when relevant. Never claim you lack access.
 Do NOT use "while you were away" or fictional names.
 Use link parts with action.kind (projects, jobs, mailroom, messages, calendar, people, production, documents). For emailThreads use mailroom + threadId — never messages for Gmail/Mailroom. Never put URLs or markdown in text.
 Formatting: put a space after colons before a link or name (e.g. "in progress: " then link). For each project: link for the name, then a separate text part for status like " (PENDING)". Separate multiple projects with a text part ", " between them — never run names together.

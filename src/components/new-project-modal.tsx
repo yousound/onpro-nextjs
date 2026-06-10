@@ -249,9 +249,9 @@ export function NewProjectModal({
                         <option value="" disabled>
                           Select a client
                         </option>
-                        {clientsSorted.map(([id, clientName]) => (
+                        {clientsSorted.map(([id, label]) => (
                           <option key={id} value={id}>
-                            {clientName}
+                            {label}
                           </option>
                         ))}
                         <option value="__new__">+ Add new client</option>

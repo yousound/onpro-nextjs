@@ -67,7 +67,31 @@ export function mapGoogleEvent(
     department: null,
     notes: raw.location?.trim() ? `Location: ${raw.location.trim()}` : "Google Calendar",
     receiving_options: null,
+    external_id: id,
+    calendar_owner_email: owner?.email ?? null,
+    calendar_owner_name: owner?.name ?? null,
+    calendar_owner_user_id: owner?.userId ?? null,
   };
+}
+
+/** Delete a Google Calendar event (requires calendar.events scope). */
+export async function deleteGoogleCalendarEvent(
+  accessToken: string,
+  googleEventId: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(googleEventId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  );
+
+  if (res.status === 404 || res.status === 410) return;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Google Calendar delete failed (${res.status}): ${text.slice(0, 200)}`);
+  }
 }
 
 /** Primary calendar events for a Google account (requires calendar.readonly scope). */

@@ -46,4 +46,5 @@ export interface CalendarEvent {
   /** Team member / account that owns this synced event. */
   calendar_owner_email?: string | null;
   calendar_owner_name?: string | null;
+  calendar_owner_user_id?: string | null;
 }

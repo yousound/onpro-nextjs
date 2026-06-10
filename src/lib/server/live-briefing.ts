@@ -142,6 +142,24 @@ export function buildBriefingFromSnapshot(snapshot: AssistantOpsSnapshot): Brief
     }
   }
 
+  const { joinedTeams } = snapshot;
+  if (joinedTeams.length > 0) {
+    blocks.push({
+      id: "joined-teams",
+      parts: [
+        text(
+          `You're on ${joinedTeams.length} workspace team${joinedTeams.length === 1 ? "" : "s"}: `,
+        ),
+        ...joinedTeams.slice(0, 4).flatMap((t, i) => [
+          ...(i > 0 ? [text(", ")] : []),
+          { type: "text" as const, value: t.workspaceName },
+        ]),
+        text(". "),
+        { type: "link", action: { kind: "people", label: "See teams in Contacts" } },
+      ],
+    });
+  }
+
   return blocks.map((block) => ({
     ...block,
     parts: withBriefingPartSpacing(block.parts),
@@ -151,7 +169,35 @@ export function buildBriefingFromSnapshot(snapshot: AssistantOpsSnapshot): Brief
 /** Simple live-mode chat fallback when OpenAI is unavailable. */
 export function liveAssistantReply(message: string, snapshot: AssistantOpsSnapshot): AssistantReply {
   const q = message.toLowerCase();
-  const { projects, jobs, contacts, context } = snapshot;
+  const { projects, jobs, contacts, context, joinedTeams } = snapshot;
+
+  if (
+    q.includes("workspace") ||
+    q.includes("which team") ||
+    q.includes("what team") ||
+    q.includes("part of") ||
+    (q.includes("team") && (q.includes("member") || q.includes("joined") || q.includes("on")))
+  ) {
+    if (joinedTeams.length === 0) {
+      return {
+        parts: withBriefingPartSpacing([
+          text("You're not linked to any operator workspaces yet. Accept a team invite or join from onboarding. "),
+          { type: "link", action: { kind: "people", label: "Open Contacts" } },
+        ]),
+      };
+    }
+    return {
+      parts: withBriefingPartSpacing([
+        text(`You're on ${joinedTeams.length} workspace${joinedTeams.length === 1 ? "" : "s"}: `),
+        ...joinedTeams.slice(0, 6).flatMap((t, i) => [
+          ...(i > 0 ? [text(", ")] : []),
+          { type: "text" as const, value: t.workspaceName },
+        ]),
+        text(". Open Contacts → Team to see the full list. "),
+        { type: "link", action: { kind: "people", label: "Open Contacts" } },
+      ]),
+    };
+  }
 
   if (
     q.includes("contact") ||

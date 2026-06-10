@@ -17,7 +17,7 @@ import { buildOverviewDigest, type OverviewFocusItem } from "@/lib/mock/overview
 import type { CalendarEvent } from "@/lib/types/calendar";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob } from "@/lib/types/wip";
-import type { WorkspaceMatch } from "@/lib/types/workspace";
+import { YourTeamsSection } from "@/components/your-teams-section";
 
 const MOCK_FIRST_NAME = "Jerry";
 
@@ -255,23 +255,6 @@ export function OverviewView({
       .slice(0, 3);
   }, [liveMode]);
 
-  const [joinedTeams, setJoinedTeams] = useState<WorkspaceMatch[]>([]);
-  const [teamsLoading, setTeamsLoading] = useState(false);
-
-  useEffect(() => {
-    if (!liveMode) return;
-    setTeamsLoading(true);
-    void fetch("/api/onboarding/workspace-matches", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { matches: [] }))
-      .then((data: { matches?: WorkspaceMatch[] }) => {
-        setJoinedTeams((data.matches ?? []).filter((m) => m.alreadyJoined));
-      })
-      .catch(() => setJoinedTeams([]))
-      .finally(() => setTeamsLoading(false));
-  }, [liveMode]);
-
-  const showYourTeams = liveMode && (teamsLoading || joinedTeams.length > 0);
-
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-white">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -409,46 +392,7 @@ export function OverviewView({
                 </ul>
               </section>
 
-              {showYourTeams ? (
-                <section>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-semibold text-text-primary">Your teams</h2>
-                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-                      {teamsLoading ? "…" : joinedTeams.length}
-                    </span>
-                  </div>
-                  <ul className="mt-4 space-y-3">
-                    {teamsLoading ? (
-                      <li className="rounded-2xl border border-dashed border-border-light bg-surface-body/30 px-4 py-6 text-center text-sm text-text-secondary">
-                        Loading workspaces…
-                      </li>
-                    ) : (
-                      joinedTeams.map((team) => {
-                        const key = `${team.operatorUserId}:${team.contactId}`;
-                        return (
-                          <li key={key}>
-                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-light bg-surface-card p-4 shadow-sm">
-                              <div className="min-w-0">
-                                <p className="font-semibold text-text-primary">{team.workspaceName}</p>
-                                <p className="mt-0.5 text-sm text-text-secondary">
-                                  {team.contactDisplayName} · {team.projectCount}{" "}
-                                  {team.projectCount === 1 ? "project" : "projects"}
-                                </p>
-                              </div>
-                              <Link
-                                href="/projects"
-                                className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95"
-                              >
-                                Open projects
-                              </Link>
-                            </div>
-                          </li>
-                        );
-                      })
-                    )}
-                  </ul>
-                </section>
-              ) : null}
+              {liveMode ? <YourTeamsSection variant="overview" /> : null}
             </div>
 
             <aside className="shrink-0 space-y-8 border-t border-border-light pt-8 lg:w-[min(100%,320px)] lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">

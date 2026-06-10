@@ -3,7 +3,7 @@ import { ensureSelfTeamContact } from "@/lib/supabase/onboarding";
 import { fetchProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 
-/** Ensures the signed-in operator appears on their own Team list in People (Live only). */
+/** Ensures the signed-in user appears on their own Team list in Contacts (Live only). */
 export async function ensureSelfTeamContactForSession(): Promise<void> {
   if (!(await isLiveBackendEnabled())) return;
 
@@ -15,7 +15,7 @@ export async function ensureSelfTeamContactForSession(): Promise<void> {
 
   const profile = await fetchProfile(supabase, user.id);
   if (!profile?.onboarding_completed_at) return;
-  if (profile.account_kind === "client" || profile.account_kind === "member") return;
+  if (profile.account_kind === "client") return;
 
   await ensureSelfTeamContact(supabase, user.id, profile);
 }

@@ -4,11 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { DirectoryAvatar } from "@/components/directory-avatar";
 import { OnProLogoIntroModal } from "@/components/onpro-logo-intro-modal";
-import { useCurrentUser } from "@/components/profile-provider";
-import { isSupabaseConfigured } from "@/lib/config/backend";
-import { displayAvatarUrl } from "@/lib/current-user-display";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 type NavItem = {
   href: string;
@@ -131,20 +128,6 @@ function NavIcon({ kind }: { kind: NavItem["icon"] }) {
 export function AppSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
-  const { user: profileUser, loading: profileLoading } = useCurrentUser();
-
-  const sidebarUser = profileUser
-    ? {
-        name: profileUser.fullName,
-        org: profileUser.companyName || "Add company in Settings",
-        avatarSrc: displayAvatarUrl(profileUser.avatarUrl, {
-          useMockPlaceholder: !isSupabaseConfigured(),
-        }),
-        initials: profileUser.initials,
-      }
-    : profileLoading
-      ? { name: "…", org: "", avatarSrc: null as string | null, initials: "…" }
-      : { name: "Sign in", org: "Settings → Account", avatarSrc: null as string | null, initials: "?" };
   const [introOpen, setIntroOpen] = useState(false);
 
   return (
@@ -213,30 +196,7 @@ export function AppSidebar() {
       </nav>
 
       <div className="border-t border-border-light p-2">
-        <Link
-          href="/settings"
-          title={collapsed ? `${sidebarUser.name} — ${sidebarUser.org}` : undefined}
-          className={`flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-200/90 ${
-            collapsed ? "justify-center" : ""
-          }`}
-        >
-          <DirectoryAvatar
-            name={sidebarUser.name}
-            avatarUrl={sidebarUser.avatarSrc}
-            size="sm"
-          />
-          {!collapsed ? (
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center justify-between gap-1">
-                <span className="truncate text-sm font-semibold text-text-primary">{sidebarUser.name}</span>
-                <ChevronDownGlyph className="shrink-0 text-text-secondary" />
-              </span>
-              {sidebarUser.org ? (
-                <span className="mt-0.5 block truncate text-xs text-text-secondary">{sidebarUser.org}</span>
-              ) : null}
-            </span>
-          ) : null}
-        </Link>
+        <WorkspaceSwitcher collapsed={collapsed} />
       </div>
 
       <div className="border-t border-border-light p-2">
@@ -254,10 +214,3 @@ export function AppSidebar() {
   );
 }
 
-function ChevronDownGlyph({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}

@@ -24,12 +24,23 @@ export type CreateProjectInput = {
   leadVendor: string | null;
 };
 
-export async function fetchProjectsFromSupabase(): Promise<Project[]> {
+export async function fetchProjectsFromSupabase(workspaceOwnerId?: string): Promise<Project[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("projects")
-    .select(PROJECT_SELECT)
-    .order("updated_at", { ascending: false });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  let ownerId = workspaceOwnerId;
+  if (!ownerId && user) {
+    const { resolveWorkspaceOwnerId } = await import("@/lib/server/resolve-workspace-context");
+    ownerId = await resolveWorkspaceOwnerId(supabase, user.id);
+  }
+
+  let query = supabase.from("projects").select(PROJECT_SELECT);
+  if (ownerId) {
+    query = query.eq("user_id", ownerId);
+  }
+  const { data, error } = await query.order("updated_at", { ascending: false });
 
   if (error) {
     console.error("[supabase] fetchProjects", error.message);

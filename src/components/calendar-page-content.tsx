@@ -10,7 +10,7 @@ import { dedupeCalendarEvents } from "@/lib/calendar-google";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { sectionCoverHref, shouldShowSectionCover } from "@/lib/section-cover";
 import { useStripSectionCoverWhenPopulated } from "@/lib/section-cover-hooks";
-import { readExtraCalendarEvents } from "@/lib/calendar-events-store";
+import { filterDeletedCalendarEvents, readExtraCalendarEvents } from "@/lib/calendar-events-store";
 import { MOCK_LS, readMockLs } from "@/lib/mock-local";
 import type { CalendarEvent } from "@/lib/types/calendar";
 
@@ -41,6 +41,7 @@ function CalendarPageInner({
 
   const [liveEvents, setLiveEvents] = useState(() => dedupeCalendarEvents(initialEvents));
   const [refreshing, setRefreshing] = useState(false);
+  const [hiddenTick, setHiddenTick] = useState(0);
 
   const mockExtras = useMemo(() => {
     const overlays = readExtraCalendarEvents();
@@ -49,9 +50,17 @@ function CalendarPageInner({
   }, [live]);
 
   const boardEvents = useMemo(
-    () => dedupeCalendarEvents([...liveEvents, ...mockExtras]),
-    [liveEvents, mockExtras],
+    () => filterDeletedCalendarEvents(dedupeCalendarEvents([...liveEvents, ...mockExtras])),
+    [liveEvents, mockExtras, hiddenTick],
   );
+
+  useEffect(() => {
+    function onCalendarChanged() {
+      setHiddenTick((t) => t + 1);
+    }
+    window.addEventListener("onpro-calendar-changed", onCalendarChanged);
+    return () => window.removeEventListener("onpro-calendar-changed", onCalendarChanged);
+  }, []);
 
   const eventCount = boardEvents.length;
   const effectiveCount = forceBoard ? Math.max(eventCount, 1) : eventCount;

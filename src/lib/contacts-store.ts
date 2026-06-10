@@ -260,6 +260,16 @@ export function contactDisplayName(c: Contact, contacts?: Contact[]): string {
   return c.name;
 }
 
+/** Client picker label — `Company • Name` so duplicate company names stay distinct. */
+export function clientPickerLabel(c: Contact): string {
+  const company = c.name.trim();
+  const person =
+    c.contact_name?.trim() ||
+    c.email?.trim() ||
+    (c.kind === "company" ? "Primary contact" : company);
+  return `${company} • ${person}`;
+}
+
 export function companyForContact(contacts: Contact[], c: Contact): Contact | undefined {
   if (!c.parent_company_id) return undefined;
   return contacts.find((x) => x.id === c.parent_company_id);

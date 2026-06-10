@@ -10,6 +10,8 @@ export const MOCK_LS = {
   /** Workspace contacts directory (clients, vendors, team). */
   contacts: "onpro.mock.v1.contacts",
   calendarEvents: "onpro.mock.v1.calendarEvents",
+  /** Tombstone keys for removed calendar events (mock seed + Google overlay). */
+  deletedCalendarEvents: "onpro.mock.v1.deletedCalendarEvents",
   documents: "onpro.mock.v1.documents",
   project: (id: number) => `onpro.mock.v1.project.${id}`,
   projectJobs: (id: number) => `onpro.mock.v1.projectJobs.${id}`,

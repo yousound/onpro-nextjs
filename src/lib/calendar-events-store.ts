@@ -1,8 +1,27 @@
+import { calendarEventTombstoneKey } from "@/lib/calendar-google";
 import { formatTimeRange, localDayAndTimeToIso } from "@/lib/calendar-utils";
 import type { AttachmentComposerDraft } from "@/lib/attachment-composer-draft";
 import { formatShortDate } from "@/lib/format";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import type { CalendarEvent, CalendarEventType } from "@/lib/types/calendar";
+
+export function readDeletedCalendarTombstones(): Set<string> {
+  const list = readMockLs<string[]>(MOCK_LS.deletedCalendarEvents) ?? [];
+  return new Set(list);
+}
+
+export function tombstoneCalendarEvent(ev: CalendarEvent): void {
+  const key = calendarEventTombstoneKey(ev);
+  const set = readDeletedCalendarTombstones();
+  set.add(key);
+  writeMockLs(MOCK_LS.deletedCalendarEvents, [...set]);
+}
+
+export function filterDeletedCalendarEvents(events: CalendarEvent[]): CalendarEvent[] {
+  const hidden = readDeletedCalendarTombstones();
+  if (hidden.size === 0) return events;
+  return events.filter((ev) => !hidden.has(calendarEventTombstoneKey(ev)));
+}
 
 export function readExtraCalendarEvents(): CalendarEvent[] {
   return readMockLs<CalendarEvent[]>(MOCK_LS.calendarEvents) ?? [];
@@ -165,4 +184,15 @@ export function parseCalendarSourceId(sourceId: string): number | null {
   if (!sourceId.startsWith("calendar:")) return null;
   const id = parseInt(sourceId.slice("calendar:".length), 10);
   return Number.isFinite(id) ? id : null;
+}
+
+/** Remove from browser extras or tombstone seed/Google-overlay events. */
+export function deleteLocalCalendarEvent(ev: CalendarEvent): void {
+  const extras = readExtraCalendarEvents();
+  const inExtras = extras.some((e) => e.id === ev.id);
+  if (inExtras) {
+    writeExtraCalendarEvents(extras.filter((e) => e.id !== ev.id));
+    return;
+  }
+  tombstoneCalendarEvent(ev);
 }

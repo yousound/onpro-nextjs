@@ -248,6 +248,7 @@ export function buildClientAssistantFallbackSnapshot(
     projects: [],
     jobs: [],
     contacts: contactSnapshots,
+    joinedTeams: [],
     emailThreadRefs: MOCK_EMAIL_THREADS.map((t) => ({ id: t.id, subject: t.subject })),
     promptContext: formatAssistantPrefsForPrompt(assistantPrefs),
   };

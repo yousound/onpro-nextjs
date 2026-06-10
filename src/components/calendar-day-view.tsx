@@ -20,7 +20,13 @@ import {
 import { calendarEventReactKey } from "@/lib/calendar-google";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { clientInitials, formatShortDate } from "@/lib/format";
-import { readExtraCalendarEvents } from "@/lib/calendar-events-store";
+import {
+  deleteLocalCalendarEvent,
+  filterDeletedCalendarEvents,
+  readExtraCalendarEvents,
+  tombstoneCalendarEvent,
+} from "@/lib/calendar-events-store";
+import { deleteCalendarEventViaApi } from "@/lib/data/calendar-api";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 
 const VIEW_START_HOUR = 7;
@@ -76,6 +82,10 @@ export function CalendarDayView({
   const [addPo, setAddPo] = useState("");
   const [addBlock, setAddBlock] = useState(false);
   const [slotHover, setSlotHover] = useState<{ x: number; y: number; label: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [hiddenTick, setHiddenTick] = useState(0);
 
   useEffect(() => {
     const saved = readExtraCalendarEvents();
@@ -86,7 +96,10 @@ export function CalendarDayView({
     if (openAddSignal > 0) setAddOpen(true);
   }, [openAddSignal]);
 
-  const allEvents = useMemo(() => [...initialEvents, ...extraEvents], [initialEvents, extraEvents]);
+  const allEvents = useMemo(
+    () => filterDeletedCalendarEvents([...initialEvents, ...extraEvents]),
+    [initialEvents, extraEvents, hiddenTick],
+  );
 
   const seedEventIds = useMemo(
     () => new Set(initialEvents.map((e) => e.id)),
@@ -97,6 +110,35 @@ export function CalendarDayView({
     setSelectedId(ev.id);
     setYmd(ev.date);
     setAssistantEvent(ev);
+    setDeleteConfirm(false);
+    setDeleteError(null);
+  }
+
+  async function handleDeleteSelected() {
+    if (!selected || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      if (selected.external_id?.trim() && isClientLiveBackend()) {
+        await deleteCalendarEventViaApi(selected);
+        tombstoneCalendarEvent(selected);
+        onRefreshGoogle?.();
+      } else {
+        deleteLocalCalendarEvent(selected);
+        const nextExtras = readExtraCalendarEvents();
+        setExtraEvents(nextExtras);
+        writeMockLs(MOCK_LS.calendarEvents, nextExtras);
+      }
+      setSelectedId(null);
+      setAssistantEvent(null);
+      setDeleteConfirm(false);
+      setHiddenTick((t) => t + 1);
+      window.dispatchEvent(new Event("onpro-calendar-changed"));
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Could not delete event");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function handleAssistantEventUpdated(updated: CalendarEvent) {
@@ -144,6 +186,11 @@ export function CalendarDayView({
       setSelectedId(null);
     }
   }, [dayEvents, selectedId]);
+
+  useEffect(() => {
+    setDeleteConfirm(false);
+    setDeleteError(null);
+  }, [selectedId]);
 
   const patchAddDraft = useCallback((patch: Partial<CalendarEventDraft>) => {
     if (patch.title !== undefined) setAddTitle(patch.title);
@@ -637,6 +684,51 @@ export function CalendarDayView({
                       {selected.notes}
                     </p>
                   ) : null}
+                  <div className="border-t border-border-light pt-4">
+                    {deleteError ? (
+                      <p className="mb-2 text-xs font-medium text-red-600" role="alert">
+                        {deleteError}
+                      </p>
+                    ) : null}
+                    {deleteConfirm ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs text-text-secondary">Delete this event?</p>
+                        <button
+                          type="button"
+                          disabled={deleting}
+                          onClick={() => void handleDeleteSelected()}
+                          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                        >
+                          {deleting ? "Deleting…" : "Confirm delete"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deleting}
+                          onClick={() => setDeleteConfirm(false)}
+                          className="rounded-lg border border-border-light px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm(true)}
+                        className="text-xs font-semibold text-red-600 hover:text-red-700"
+                      >
+                        Delete event
+                      </button>
+                    )}
+                    {selected.external_id ? (
+                      <p className="mt-2 text-[11px] text-text-secondary">
+                        Removes from Google Calendar for {selected.calendar_owner_name ?? selected.calendar_owner_email ?? "this account"}.
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-text-secondary">
+                        Removes this event from your calendar in this browser.
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-text-secondary">Select a block on the grid to see shipping, deadlines, and meeting context.</p>

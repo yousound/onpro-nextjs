@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { isSupabaseConfigured } from "@/lib/config/backend";
-import { syncMemberProfileToLinkedContacts } from "@/lib/supabase/onboarding";
+import {
+  ACTIVE_WORKSPACE_COOKIE,
+  activeWorkspaceCookieValue,
+} from "@/lib/workspace-context";
+import { ensureSelfTeamContact, syncMemberProfileToLinkedContacts } from "@/lib/supabase/onboarding";
 import { fetchProfile } from "@/lib/supabase/profile";
 import { joinWorkspace } from "@/lib/supabase/workspace-memberships";
 import { acceptPendingInvite } from "@/lib/supabase/pending-invites";
@@ -30,18 +34,34 @@ export async function POST(request: Request) {
 
   async function syncMemberContacts() {
     const profile = await fetchProfile(supabase, memberUserId);
-    const fullName = profile?.full_name?.trim();
-    if (!fullName) return;
-    await syncMemberProfileToLinkedContacts(supabase, memberUserId, {
-      full_name: fullName,
-      phone: profile?.phone ?? undefined,
-      avatar_url: profile?.avatar_url,
-      company_name: profile?.company_name ?? undefined,
-    });
+    if (!profile) return;
+    const fullName = profile.full_name?.trim();
+    if (fullName) {
+      await syncMemberProfileToLinkedContacts(supabase, memberUserId, {
+        full_name: fullName,
+        phone: profile.phone ?? undefined,
+        avatar_url: profile.avatar_url,
+        company_name: profile.company_name ?? undefined,
+      });
+    }
+    await ensureSelfTeamContact(supabase, memberUserId, profile);
+  }
+
+  function withTeamWorkspaceCookie(operatorUserId: string) {
+    const res = NextResponse.json({ ok: true, operatorUserId });
+    res.cookies.set(
+      ACTIVE_WORKSPACE_COOKIE,
+      activeWorkspaceCookieValue(operatorUserId),
+      { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax", httpOnly: false },
+    );
+    return res;
   }
 
   try {
     if (body.invite_token?.trim()) {
+      const resolved = await import("@/lib/supabase/pending-invites").then((m) =>
+        m.resolveInviteToken(supabase, body.invite_token!.trim()),
+      );
       await acceptPendingInvite(
         supabase,
         body.invite_token.trim(),
@@ -50,6 +70,9 @@ export async function POST(request: Request) {
         user.user_metadata?.full_name as string | undefined,
       );
       await syncMemberContacts();
+      if (resolved.operatorUserId) {
+        return withTeamWorkspaceCookie(resolved.operatorUserId);
+      }
       return NextResponse.json({ ok: true, source: "invite" });
     }
 
@@ -70,7 +93,13 @@ export async function POST(request: Request) {
 
     await syncMemberContacts();
 
-    return NextResponse.json({ ok: true, membership });
+    const res = NextResponse.json({ ok: true, membership, operatorUserId });
+    res.cookies.set(
+      ACTIVE_WORKSPACE_COOKIE,
+      activeWorkspaceCookieValue(operatorUserId),
+      { path: "/", maxAge: 60 * 60 * 24 * 365, sameSite: "lax", httpOnly: false },
+    );
+    return res;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Join failed";
     return NextResponse.json({ error: msg }, { status: 400 });

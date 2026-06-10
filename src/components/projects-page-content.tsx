@@ -39,6 +39,7 @@ import {
 } from "@/lib/data/live-cache";
 import {
   clientListContacts,
+  clientPickerLabel,
   contactDisplayName,
   findContactByEmail,
   loadContacts,
@@ -245,17 +246,24 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     const fromProjects = new Map<number, string>();
     for (const p of projects) fromProjects.set(p.client.id, p.client.name);
     if (directoryClients.length > 0) {
-      return directoryClients.map((c) => [c.id, contactDisplayName(c), c.company_code] as const);
+      return directoryClients.map(
+        (c) => [c.id, clientPickerLabel(c), c.company_code] as const,
+      );
     }
     return [...fromProjects.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => [String(id), name, ""] as const);
   }, [projects, directoryClients]);
 
+  const selectedClient = useMemo(
+    () => directoryClients.find((c) => String(c.id) === clientSelect),
+    [directoryClients, clientSelect],
+  );
+
   const projectPoPreview = useMemo(() => {
-    const row = clientsSorted.find(([id]) => id === clientSelect);
-    if (!row) return "";
-    const clientCode = row[2] || clientCodeByName(row[1]) || "XX";
+    if (!selectedClient) return "";
+    const clientCode =
+      selectedClient.company_code || clientCodeByName(selectedClient.name) || "XX";
     return generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
-  }, [clientSelect, clientsSorted, projects]);
+  }, [selectedClient, projects]);
 
   useEffect(() => {
     if (poTouched) return;
@@ -361,20 +369,24 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     const trimmedName = name.trim();
     if (!trimmedName) return;
 
-    const row = clientsSorted.find(([cid]) => cid === clientSelect);
-    if (!row) {
+    const contact = directoryClients.find((c) => String(c.id) === clientSelect);
+    if (!contact) {
       setCreateError("Select a client for this project.");
       return;
     }
 
-    const clientId = Number(row[0]);
+    const clientId = Number(contact.id);
     if (!Number.isFinite(clientId)) {
       setCreateError("Select a valid client for this project.");
       return;
     }
 
-    const client: Client = { id: clientId, name: row[1], avatar_url: null };
-    const clientCode = row[2] || clientCodeByName(row[1]) || "XX";
+    const client: Client = {
+      id: clientId,
+      name: contactDisplayName(contact, contactsDirectory),
+      avatar_url: null,
+    };
+    const clientCode = contact.company_code || clientCodeByName(contact.name) || "XX";
     const po =
       poNumber.trim() ||
       generatePoNumber(clientCode, collectAllAppPoNumbers(projects));

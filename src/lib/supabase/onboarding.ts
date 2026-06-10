@@ -410,5 +410,10 @@ export async function completeMemberOnboarding(
     company_name: patch.company_name,
   });
 
+  const updatedProfile = await fetchProfile(supabase, userId);
+  if (updatedProfile) {
+    await ensureSelfTeamContact(supabase, userId, updatedProfile);
+  }
+
   return { redirect };
 }

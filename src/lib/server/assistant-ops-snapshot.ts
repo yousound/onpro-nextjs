@@ -24,6 +24,9 @@ import { DEFAULT_ASSISTANT_PREFS } from "@/lib/types/assistant-prefs";
 import type { Contact, PeopleSegment } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob } from "@/lib/types/wip";
+import type { WorkspaceMatch } from "@/lib/types/workspace";
+import { createClient } from "@/lib/supabase/server";
+import { fetchJoinedTeamsForMember } from "@/lib/supabase/workspace-memberships";
 
 export type AssistantProjectSnapshot = {
   id: number;
@@ -77,6 +80,8 @@ export type AssistantOpsSnapshot = {
   projects: AssistantProjectSnapshot[];
   jobs: AssistantJobSnapshot[];
   contacts: AssistantContactSnapshot[];
+  /** Workspaces the user has joined as team/vendor/client member. */
+  joinedTeams: WorkspaceMatch[];
   /** Mailroom / Gmail threads available to link in assistant replies. */
   emailThreadRefs: AssistantEmailThreadRef[];
   promptContext: string;
@@ -476,6 +481,20 @@ export async function buildAssistantOpsSnapshot(
   const projectSnapshots = projects.map(toProjectSnapshot);
   const contactSnapshots = contacts.slice(0, PROMPT_CONTACT_LIMIT).map(toContactSnapshot);
 
+  let joinedTeams: WorkspaceMatch[] = [];
+  let workspaceViewLabel = "My workspace";
+  if (live && userId) {
+    try {
+      const supabase = await createClient();
+      const { resolveWorkspaceView } = await import("@/lib/server/resolve-workspace-context");
+      joinedTeams = await fetchJoinedTeamsForMember(supabase, userId);
+      const view = await resolveWorkspaceView(supabase, userId);
+      workspaceViewLabel = view.workspaceName;
+    } catch {
+      joinedTeams = [];
+    }
+  }
+
   const coverage = buildCoverage({
     live,
     projects: projectSnapshots.length,
@@ -514,6 +533,13 @@ export async function buildAssistantOpsSnapshot(
       documents,
       calendar,
       pendingInvites,
+      activeWorkspace: workspaceViewLabel,
+      joinedTeams: joinedTeams.map((t) => ({
+        workspaceName: t.workspaceName,
+        contactDisplayName: t.contactDisplayName,
+        segment: t.segment ?? "team",
+        projectCount: t.projectCount,
+      })),
       appRoutes: {
         messages: "/messages",
         mailroom: "/mailroom",
@@ -536,6 +562,7 @@ export async function buildAssistantOpsSnapshot(
     projects: projectSnapshots,
     jobs,
     contacts: contactSnapshots,
+    joinedTeams,
     emailThreadRefs: email.scannedThreads.map((t) => ({ id: t.id, subject: t.subject })),
     promptContext,
   };

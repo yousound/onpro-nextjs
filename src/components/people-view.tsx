@@ -36,6 +36,7 @@ import { DirectoryAvatar } from "@/components/directory-avatar";
 import { addInternalTeamMemberToProject } from "@/lib/internal-team-roster";
 import { resolveClientProjectList } from "@/lib/mock/project-session";
 import type { Project } from "@/lib/types/project";
+import { YourTeamsSection } from "@/components/your-teams-section";
 
 function inviteHasCustomPermissions(inv: PendingInvite): boolean {
   if (!inv.permissions) return false;
@@ -662,10 +663,13 @@ export function PeopleView({
               </div>
 
               {segment === "team" ? (
-                <AddTeamMemberToProjectRoster
-                  teamPeople={teamPeople}
-                  initialProjects={initialProjects}
-                />
+                <>
+                  <AddTeamMemberToProjectRoster
+                    teamPeople={teamPeople}
+                    initialProjects={initialProjects}
+                  />
+                  <YourTeamsSection variant="contacts" />
+                </>
               ) : null}
             </section>
           </div>

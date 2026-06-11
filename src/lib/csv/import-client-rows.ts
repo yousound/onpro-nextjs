@@ -3,6 +3,7 @@ import {
   validateClientContactFields,
   validateDirectoryCompanyCode,
 } from "@/lib/contact-field-validation";
+import { displayNameForImportRow } from "@/lib/csv/normalize-import-row";
 import { resolveClientCode } from "@/lib/reference/client-codes";
 import { findContactByEmail, newContactId } from "@/lib/contacts-store";
 import type { PeopleSegment } from "@/lib/mock/people";
@@ -75,7 +76,7 @@ export function validateImportRow(
   contacts: readonly Contact[],
 ): Pick<ImportContactRowPreview, "status" | "statusMessage" | "selected"> {
   const email = row.email.trim();
-  const name = row.name.trim();
+  const name = displayNameForImportRow(row);
 
   if (!name) {
     return { selected: false, status: "error", statusMessage: "Name is required." };
@@ -183,7 +184,7 @@ export function previewToContact(row: ImportContactRowPreview, existing?: Contac
   }
   const segment = row.segment;
   const now = new Date().toISOString();
-  const name = row.name.trim();
+  const name = displayNameForImportRow(row);
   const email = row.email.trim();
   const code = resolvedCode(row);
   const locations = row.locations?.filter(

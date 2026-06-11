@@ -1133,7 +1133,58 @@ function PersonDetailModal({
                         <dd className="mt-0.5 text-sm font-medium text-text-primary">{p.subtitle}</dd>
                       </div>
                     ) : null}
+                    {contact.other_emails?.length ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5 sm:col-span-2">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Other emails</dt>
+                        <dd className="mt-0.5 text-sm font-medium text-text-primary">{contact.other_emails.join(", ")}</dd>
+                      </div>
+                    ) : null}
+                    {contact.notes?.trim() ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5 sm:col-span-2">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Notes</dt>
+                        <dd className="mt-0.5 whitespace-pre-wrap text-sm font-medium text-text-primary">{contact.notes}</dd>
+                      </div>
+                    ) : null}
+                    {contact.team_role ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Team role</dt>
+                        <dd className="mt-0.5 text-sm font-medium capitalize text-text-primary">{contact.team_role}</dd>
+                      </div>
+                    ) : null}
+                    {contact.business_structure ? (
+                      <div className="rounded-xl border border-border-light bg-surface-body/40 px-3 py-2.5">
+                        <dt className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">Business structure</dt>
+                        <dd className="mt-0.5 text-sm font-medium text-text-primary">{contact.business_structure}</dd>
+                      </div>
+                    ) : null}
                   </dl>
+                  {contact.locations?.length ? (
+                    <div>
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Locations</h4>
+                      <ul className="mt-2 space-y-2">
+                        {contact.locations.map((loc, index) => {
+                          const parts = [
+                            loc.line1,
+                            loc.line2,
+                            [loc.city, loc.state].filter(Boolean).join(", "),
+                            loc.postal_code,
+                            loc.country,
+                          ].filter(Boolean);
+                          return (
+                            <li
+                              key={`${contact.id}-loc-${index}`}
+                              className="rounded-xl border border-border-light bg-white px-3 py-2.5 text-sm text-text-primary"
+                            >
+                              <p className="font-semibold">{loc.label?.trim() || `Location ${index + 1}`}</p>
+                              {parts.length ? (
+                                <p className="mt-0.5 text-text-secondary">{parts.join(" · ")}</p>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
                   {companyMembers.length > 0 ? (
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">Company members</h4>

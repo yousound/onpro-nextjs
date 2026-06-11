@@ -5,6 +5,7 @@ import {
 } from "@/lib/csv/filter-import-by-companies";
 import { mergeImportLocations } from "@/lib/csv/parse-import-locations";
 import { normalizeImportSegment } from "@/lib/csv/normalize-import-segment";
+import { normalizeParsedImportRows } from "@/lib/csv/normalize-import-row";
 import { IMPORT_AI_MAX_CHARS, IMPORT_ROW_LIMIT } from "@/lib/csv/import-limits";
 import { openAiChatJson } from "@/lib/openai/chat-completion";
 import type { PeopleSegment } from "@/lib/mock/people";
@@ -54,7 +55,7 @@ export async function parseContactsCsvWithOpenAi(
     companyFilters.length > 0
       ? `\n\nCOMPANY FILTER — return ONLY rows for these companies (include every person/contact at each company):
 ${companyFilters.map((name) => `- ${name}`).join("\n")}
-Match flexibly on company name (partial/case-insensitive). Skip all other companies.`
+Match flexibly on company name, contact name, notes, email domain, or any column text (partial/case-insensitive). Skip all other companies.`
       : "";
 
   const result = await openAiChatJson<AiPayload>(
@@ -67,6 +68,11 @@ Each row includes segment: "team" | "vendor" | "client" | null.
 - Use explicit Type/Segment/Role columns when present.
 - When you can infer confidently: internal operators → team; factories/suppliers → vendor; buyers/brands → client.
 - When segment is missing, blank, or ambiguous, set segment to null (do NOT guess client). Add a warning.
+
+CRITICAL — read every column:
+- Scan ALL columns in each CSV row, including numbered pairs (Contact 1 / Email 1 / Contact 2 / Email 2), first name + last name, and unnamed extra columns.
+- Do not skip a person because their name or email is in a non-standard column.
+- One person per row in output; wide rows with multiple people become multiple output rows.
 
 CRITICAL — one person per row:
 - Output exactly ONE row per distinct person/contact in the CSV.
@@ -95,9 +101,10 @@ Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.${filterInst
     { temperature: 0.2 },
   );
 
-  const normalized = (result.rows ?? [])
-    .filter((r) => r && (r.email?.trim() || r.name?.trim()))
-    .map((r) => {
+  const normalized = normalizeParsedImportRows(
+    (result.rows ?? [])
+      .filter((r) => r && (r.email?.trim() || r.name?.trim() || r.contact_name?.trim()))
+      .map((r) => {
       const segment = parseSegmentFromAi(r.segment);
       const locations = mergeImportLocations(
         r.locations,
@@ -116,10 +123,14 @@ Map flexible headers. Skip blank rows. Max ${IMPORT_ROW_LIMIT} rows.${filterInst
         billing_address: undefined,
         shipping_address: undefined,
       };
-    });
+    }),
+  );
 
   const expanded = expandParsedImportRows(normalized);
-  const filtered = filterImportRowsByCompanies(expanded, opts?.companyFilter);
+  const filtered = filterImportRowsByCompanies(
+    normalizeParsedImportRows(expanded),
+    opts?.companyFilter,
+  );
   const rows = filtered.slice(0, IMPORT_ROW_LIMIT);
 
   const labeled = rows.filter((r) => r.segment);

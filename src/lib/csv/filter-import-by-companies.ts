@@ -25,7 +25,14 @@ export function rowMatchesCompanyFilter(
   filters: readonly string[],
 ): boolean {
   if (filters.length === 0) return true;
-  const candidates = [row.name, row.contact_name].filter(Boolean) as string[];
+  const candidates = [
+    row.name,
+    row.contact_name,
+    row.notes,
+    row.email?.split("@")[1],
+    row.company_code,
+    ...(row.locations?.map((loc) => [loc.label, loc.line1, loc.city].filter(Boolean).join(" ")) ?? []),
+  ].filter(Boolean) as string[];
   return filters.some((filter) => candidates.some((name) => stringsMatch(name, filter)));
 }
 

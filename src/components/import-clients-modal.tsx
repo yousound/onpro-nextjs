@@ -101,11 +101,12 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
   const [companyFilter, setCompanyFilter] = useState("");
 
   const visibleSections = useMemo(() => {
-    if (previews.length === 0) {
+    const showReview = analyzing || previews.length > 0 || parseMeta != null || Boolean(batchNotice);
+    if (!showReview) {
       return IMPORT_SECTIONS.filter((s) => s.id !== "review");
     }
     return IMPORT_SECTIONS;
-  }, [previews.length]);
+  }, [analyzing, previews.length, parseMeta, batchNotice]);
 
   useEffect(() => {
     if (!open) return;
@@ -363,9 +364,6 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
             .filter(Boolean)
             .join(" "),
         );
-        setPreviews([]);
-        setParseMeta(null);
-        setActiveSection("review");
         await analyzeCsvText(
           chunkPlan.chunks[nextIndex]!,
           chunkPlan.fileName,
@@ -625,8 +623,32 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
               </div>
             ) : null}
 
+            {analyzing ? (
+              <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-6 text-center">
+                <p className="text-sm font-semibold text-violet-950">Scanning your CSV…</p>
+                <p className="mt-1 text-xs text-violet-800">
+                  Reading every column for contacts — this may take a moment on large files.
+                </p>
+              </div>
+            ) : null}
+
             {previews.length === 0 ? (
-              <p className="text-sm text-slate-500">Upload a CSV first to see rows here.</p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+                {parseMeta?.summary ? (
+                  <>
+                    <p className="font-semibold text-slate-900">Scan complete — no rows to review in this batch.</p>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-600">{parseMeta.summary}</p>
+                    {companyFilterNames.length > 0 ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Try a broader company name, leave the filter blank for all rows, or check the next batch if
+                        your file is large.
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p>Upload a CSV and click Pull to scan rows for review.</p>
+                )}
+              </div>
             ) : (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
@@ -736,6 +758,17 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                                   }
                                 />
                               </label>
+                            ) : row.contact_name ? (
+                              <label className={reviewLabelClass}>
+                                Contact name
+                                <input
+                                  className={reviewFieldClass}
+                                  value={row.contact_name ?? ""}
+                                  onChange={(e) =>
+                                    patchRow(row.rowKey, { contact_name: e.target.value })
+                                  }
+                                />
+                              </label>
                             ) : null}
                             {(row.segment === "client" || row.segment === "vendor") ? (
                               <label className={reviewLabelClass}>
@@ -765,6 +798,36 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                                 onChange={(e) => patchRow(row.rowKey, { phone: e.target.value })}
                               />
                             </label>
+                            {row.team_role ? (
+                              <label className={reviewLabelClass}>
+                                Team role
+                                <input
+                                  className={`${reviewFieldClass} bg-slate-50`}
+                                  value={row.team_role}
+                                  readOnly
+                                />
+                              </label>
+                            ) : null}
+                            {row.business_structure ? (
+                              <label className={reviewLabelClass}>
+                                Business structure
+                                <input
+                                  className={`${reviewFieldClass} bg-slate-50`}
+                                  value={row.business_structure}
+                                  readOnly
+                                />
+                              </label>
+                            ) : null}
+                            {row.other_emails?.length ? (
+                              <label className={`${reviewLabelClass} sm:col-span-2`}>
+                                Other emails
+                                <input
+                                  className={`${reviewFieldClass} bg-slate-50`}
+                                  value={row.other_emails.join(", ")}
+                                  readOnly
+                                />
+                              </label>
+                            ) : null}
                             <label className={`${reviewLabelClass} sm:col-span-2 lg:col-span-3`}>
                               Notes
                               <textarea
@@ -849,6 +912,20 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                                           }
                                         />
                                       </label>
+                                      <label className={`${reviewLabelClass} sm:col-span-2 lg:col-span-3`}>
+                                        Line 2
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.line2 ?? ""}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                line2: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
                                       <label className={reviewLabelClass}>
                                         City
                                         <input
@@ -886,6 +963,20 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                                             patchRow(row.rowKey, {
                                               locations: patchImportLocation(row.locations, locIndex, {
                                                 postal_code: e.target.value,
+                                              }),
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className={reviewLabelClass}>
+                                        Country
+                                        <input
+                                          className={reviewFieldClass}
+                                          value={loc.country ?? ""}
+                                          onChange={(e) =>
+                                            patchRow(row.rowKey, {
+                                              locations: patchImportLocation(row.locations, locIndex, {
+                                                country: e.target.value,
                                               }),
                                             })
                                           }

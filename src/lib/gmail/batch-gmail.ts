@@ -37,17 +37,26 @@ function parseBatchResponse(
 
   for (const part of parts) {
     if (!part.trim() || part.trim() === "--") continue;
-    const httpSplit = part.split("\r\n\r\n");
+    const httpSplit = part.split(/\r\n\r\n|\n\n/);
     if (httpSplit.length < 2) continue;
     const headers = httpSplit[0];
-    const rest = httpSplit.slice(1).join("\r\n\r\n");
+    const rest = httpSplit.slice(1).join("\n\n");
     const statusMatch = headers.match(/HTTP\/[\d.]+ (\d+)/);
     const status = statusMatch ? Number(statusMatch[1]) : 0;
     const bodyStart = rest.indexOf("{");
-    const body = bodyStart >= 0 ? rest.slice(bodyStart).trim() : "";
+    const body = bodyStart >= 0 ? rest.slice(bodyStart).replace(/\r\n--[\s\S]*$/, "").trim() : "";
     out.push({ status, body });
   }
   return out;
+}
+
+function batchResultsNeedFallback(
+  ids: string[],
+  results: (EmailThread | null)[],
+): boolean {
+  if (ids.length === 0) return false;
+  const ok = results.filter(Boolean).length;
+  return ok === 0 || ok < ids.length;
 }
 
 /** Gmail multipart batch — one HTTP round trip for up to 50 thread GETs. */
@@ -112,6 +121,10 @@ export async function batchFetchGmailThreads(
     } catch {
       results.push(null);
     }
+  }
+
+  if (batchResultsNeedFallback(ids, results)) {
+    return Promise.all(ids.map((id) => fetchGmailThreadById(accessToken, id, opts)));
   }
 
   return results;

@@ -70,14 +70,22 @@ async function fetchInboxPageFromGmail(
     : page.threads;
 
   if (!opts.q?.trim()) {
-    void upsertInboxThreads(userId, enriched).catch((e) =>
-      console.warn("[mailroom] inbox cache upsert failed", e),
-    );
-    void updateGmailSyncState(userId, {
-      last_inbox_sync_at: new Date().toISOString(),
-      next_page_token: page.nextPageToken,
-      inbox_estimate: page.resultSizeEstimate,
-    }).catch(() => undefined);
+    if (enriched.length > 0) {
+      void upsertInboxThreads(userId, enriched).catch((e) =>
+        console.warn("[mailroom] inbox cache upsert failed", e),
+      );
+      void updateGmailSyncState(userId, {
+        last_inbox_sync_at: new Date().toISOString(),
+        next_page_token: page.nextPageToken,
+        inbox_estimate: page.resultSizeEstimate,
+      }).catch(() => undefined);
+    } else if (page.resultSizeEstimate && page.resultSizeEstimate > 0) {
+      console.warn(
+        "[mailroom] Gmail inbox estimate",
+        page.resultSizeEstimate,
+        "but 0 threads parsed — skipping cache update",
+      );
+    }
 
     const sync = await getGmailSyncState(userId);
     if (watchNeedsRenewal(sync?.watch_expiration)) {

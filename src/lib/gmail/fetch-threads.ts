@@ -358,13 +358,19 @@ async function fetchGmailThreadsByIds(
   opts?: { resolveInlineImages?: boolean; format?: GmailThreadFormat },
 ): Promise<EmailThread[]> {
   if (ids.length === 0) return [];
-  const format: GmailThreadFormat = opts?.format ?? "metadata";
-  const { batchFetchGmailThreads } = await import("@/lib/gmail/batch-gmail");
-  const mapped = await batchFetchGmailThreads(accessToken, ids, {
-    format,
-    resolveInlineImages: opts?.resolveInlineImages,
-  });
+  const concurrency = 8;
+  const mapped: (EmailThread | null)[] = [];
+  for (let i = 0; i < ids.length; i += concurrency) {
+    const chunk = ids.slice(i, i + concurrency);
+    const chunkResults = await Promise.all(
+      chunk.map((id) => fetchGmailThreadById(accessToken, id, opts)),
+    );
+    mapped.push(...chunkResults);
+  }
   const threads = mapped.filter((t): t is EmailThread => t != null);
+  if (threads.length === 0 && ids.length > 0) {
+    console.warn("[gmail/fetch-threads] thread detail fetch returned 0 threads for", ids.length, "ids");
+  }
   return sortThreadsByLatest(threads);
 }
 

@@ -495,11 +495,13 @@ export function MailroomView() {
         }
 
         if (gmailOAuthFlag === "connected") {
+          clearMailroomGmailThreadCache();
           const params = new URLSearchParams(searchParams.toString());
           params.delete("gmail");
           params.delete("cover");
           const q = params.toString();
           router.replace(q ? `/mailroom?${q}` : "/mailroom", { scroll: false });
+          router.refresh();
         }
 
         try {

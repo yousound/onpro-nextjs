@@ -141,6 +141,29 @@ export function NotificationsPopover({
   }, [live, pathname]);
 
   useEffect(() => {
+    if (!live) return;
+    const refresh = () => {
+      void fetch("/api/workspace/joined-teams", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { pending: [] }))
+        .then(
+          (data: { pending?: WorkspaceMatch[] }) => {
+            const mapped = (data.pending ?? []).map((team) => ({
+              id: `pending-team-${team.operatorUserId}:${team.contactId}`,
+              title: `You've been invited to ${team.workspaceName}`,
+              subtitle: `Tap to join · ${team.contactDisplayName}`,
+              href: "/people?segment=team",
+              match: team,
+            }));
+            setPendingTeamInvites(mapped);
+          },
+        )
+        .catch(() => setPendingTeamInvites([]));
+    };
+    window.addEventListener("onpro-workspace-changed", refresh);
+    return () => window.removeEventListener("onpro-workspace-changed", refresh);
+  }, [live]);
+
+  useEffect(() => {
     if (!open) return;
     function onDocMouseDown(e: MouseEvent) {
       const el = rootRef.current;

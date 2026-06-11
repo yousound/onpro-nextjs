@@ -26,8 +26,8 @@ export async function GET() {
       resolveWorkspaceView(supabase, user.id),
       fetchMemberWorkspaceTeams(supabase, user.id, user.email),
     ]);
-    const joined = teams.filter((t) => t.alreadyJoined);
-    const pending = teams.filter((t) => !t.alreadyJoined);
+    const { splitWorkspaceTeams } = await import("@/lib/workspace-team-filters");
+    const { joined, pending } = splitWorkspaceTeams(teams, user.id);
 
     return NextResponse.json({ active, teams, joined, pending, authUserId: user.id });
   } catch (e) {

@@ -14,15 +14,19 @@ import type { ParsedImportContactRow } from "@/lib/types/contact-import";
 export type ImportContactRowPreview = ParsedImportContactRow & {
   rowKey: string;
   selected: boolean;
-  status: "ready" | "skip" | "error" | "needs_segment";
+  status: "ready" | "skip" | "error" | "needs_segment" | "update";
   statusMessage?: string;
 };
 
 /** @deprecated */
 export type ImportClientRowPreview = ImportContactRowPreview;
 
-function resolvedCode(row: ParsedImportContactRow): string {
+export function resolvedCodeForImportRow(row: ParsedImportContactRow): string {
   return (row.company_code?.trim() || deriveCompanyCode(row.name)).toUpperCase().slice(0, 3);
+}
+
+function resolvedCode(row: ParsedImportContactRow): string {
+  return resolvedCodeForImportRow(row);
 }
 
 function locationLabelNorm(label: string | undefined): string {
@@ -80,7 +84,7 @@ export function validateImportRow(
     return {
       selected: false,
       status: "error",
-      statusMessage: "Email is required to import into People.",
+      statusMessage: "Email is required to import into Contacts.",
     };
   }
 
@@ -94,10 +98,17 @@ export function validateImportRow(
 
   const dup = findContactByEmail(contacts, email);
   if (dup) {
+    if (dup.segment === row.segment) {
+      return {
+        selected: true,
+        status: "update",
+        statusMessage: `Update existing ${dup.segment} contact (${dup.name}).`,
+      };
+    }
     return {
       selected: false,
       status: "skip",
-      statusMessage: `Already in People as ${dup.segment} (${dup.name}).`,
+      statusMessage: `Already in Contacts as ${dup.segment} (${dup.name}).`,
     };
   }
 
@@ -131,10 +142,28 @@ export function buildImportPreviews(
   rows: ParsedImportContactRow[],
   existingContacts: Contact[],
 ): ImportContactRowPreview[] {
+  const batchCompanyCodes = new Map<string, string>();
   return rows.map((row, i) => {
     const hinted = withSuggestedCompanyCode(row);
     const rowKey = `${i}-${hinted.email || hinted.name}`;
-    const check = validateImportRow(hinted, existingContacts);
+    let check = validateImportRow(hinted, existingContacts);
+    if (
+      (check.status === "ready" || check.status === "update") &&
+      hinted.segment === "client" &&
+      hinted.kind === "company"
+    ) {
+      const code = resolvedCode(hinted);
+      const prior = batchCompanyCodes.get(code);
+      if (prior) {
+        check = {
+          selected: false,
+          status: "error",
+          statusMessage: `Duplicate company code ${code} in this file (${prior} and ${hinted.name}). Import people as members under one company row.`,
+        };
+      } else {
+        batchCompanyCodes.set(code, hinted.name);
+      }
+    }
     return { ...hinted, rowKey, ...check };
   });
 }
@@ -148,7 +177,7 @@ export function revalidateImportPreview(
   return { ...parsed, rowKey: row.rowKey, ...check };
 }
 
-export function previewToContact(row: ImportContactRowPreview): Contact {
+export function previewToContact(row: ImportContactRowPreview, existing?: Contact): Contact {
   if (!row.segment) {
     throw new Error("Cannot import a row without a segment");
   }
@@ -170,7 +199,7 @@ export function previewToContact(row: ImportContactRowPreview): Contact {
   const legacyAddresses = legacyAddressesFromLocations(locations);
 
   const base: Contact = {
-    id: newContactId(),
+    id: existing?.id ?? newContactId(),
     segment,
     kind: row.segment === "team" ? "individual" : row.kind,
     company_code: code,
@@ -191,7 +220,7 @@ export function previewToContact(row: ImportContactRowPreview): Contact {
     avatar_url: null,
     member_contact_ids: [],
     permissions: defaultPermissionsForSegment(segment),
-    created_at: now,
+    created_at: existing?.created_at ?? now,
     updated_at: now,
   };
 
@@ -222,13 +251,17 @@ export function previewToContact(row: ImportContactRowPreview): Contact {
 export function validateImportCodeForContact(
   contacts: readonly Contact[],
   contact: Contact,
+  options?: { excludeContactId?: string; isCompanyMember?: boolean },
 ): string | undefined {
+  if (contact.segment === "client" && options?.isCompanyMember) {
+    return undefined;
+  }
   if (contact.segment === "client") {
-    return validateClientCompanyCode(contacts, contact.company_code, undefined, {
+    return validateClientCompanyCode(contacts, contact.company_code, options?.excludeContactId, {
       importName: contact.name,
     });
   }
-  return validateDirectoryCompanyCode(contacts, contact.company_code);
+  return validateDirectoryCompanyCode(contacts, contact.company_code, options?.excludeContactId);
 }
 
 export function patchImportPreview(

@@ -1,10 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { segmentLabel } from "@/lib/mock/people";
 import { joinWorkspaceMatch } from "@/lib/workspace-join-client";
+import { isActiveTeamWorkspace } from "@/lib/workspace-team-filters";
+import { useWorkspace } from "@/components/workspace-provider";
 import type { WorkspaceMatch } from "@/lib/types/workspace";
 
 type Props = {
@@ -14,51 +16,16 @@ type Props = {
 };
 
 export function YourTeamsSection({ variant = "overview", className }: Props) {
+  const router = useRouter();
   const liveMode = isClientLiveBackend();
-  const [teams, setTeams] = useState<WorkspaceMatch[]>([]);
-  const [joined, setJoined] = useState<WorkspaceMatch[]>([]);
-  const [pending, setPending] = useState<WorkspaceMatch[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { active, switchWorkspace, joinedTeams, pendingTeams, loading: wsLoading } =
+    useWorkspace();
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!liveMode) return;
-    setLoading(true);
-    try {
-      const res = await fetch("/api/workspace/joined-teams", { cache: "no-store" });
-      const data = (await res.json()) as {
-        teams?: WorkspaceMatch[];
-        joined?: WorkspaceMatch[];
-        pending?: WorkspaceMatch[];
-      };
-      const all = data.teams ?? [];
-      setTeams(all);
-      setJoined(data.joined ?? all.filter((t) => t.alreadyJoined));
-      setPending(data.pending ?? all.filter((t) => !t.alreadyJoined));
-    } catch {
-      setTeams([]);
-      setJoined([]);
-      setPending([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [liveMode]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    if (!liveMode) return;
-    const onChange = () => void load();
-    window.addEventListener("onpro-workspace-changed", onChange);
-    window.addEventListener("focus", onChange);
-    return () => {
-      window.removeEventListener("onpro-workspace-changed", onChange);
-      window.removeEventListener("focus", onChange);
-    };
-  }, [liveMode, load]);
+  const teams = [...pendingTeams, ...joinedTeams];
+  const loading = wsLoading;
 
   async function handleJoin(team: WorkspaceMatch) {
     const key = `${team.operatorUserId}:${team.contactId}`;
@@ -72,11 +39,26 @@ export function YourTeamsSection({ variant = "overview", className }: Props) {
         body: JSON.stringify({ operator_user_id: team.operatorUserId }),
       });
       window.dispatchEvent(new Event("onpro-workspace-changed"));
-      await load();
     } catch (e) {
       setJoinError(e instanceof Error ? e.message : "Could not join team");
     } finally {
       setJoiningId(null);
+    }
+  }
+
+  async function openTeamProjects(team: WorkspaceMatch) {
+    const key = `${team.operatorUserId}:${team.contactId}`;
+    setSwitchingId(key);
+    setJoinError(null);
+    try {
+      if (!isActiveTeamWorkspace(active, team)) {
+        await switchWorkspace(team.operatorUserId);
+      }
+      router.push("/projects");
+    } catch (e) {
+      setJoinError(e instanceof Error ? e.message : "Could not open projects");
+    } finally {
+      setSwitchingId(null);
     }
   }
 
@@ -101,7 +83,7 @@ export function YourTeamsSection({ variant = "overview", className }: Props) {
         </li>
       ) : (
         <>
-          {pending.map((team) => {
+          {pendingTeams.map((team) => {
             const key = `${team.operatorUserId}:${team.contactId}`;
             const roleLabel = team.segment ? segmentLabel(team.segment) : "Team";
             return (
@@ -131,9 +113,10 @@ export function YourTeamsSection({ variant = "overview", className }: Props) {
               </li>
             );
           })}
-          {joined.map((team) => {
+          {joinedTeams.map((team) => {
             const key = `${team.operatorUserId}:${team.contactId}`;
             const roleLabel = team.segment ? segmentLabel(team.segment) : "Team";
+            const connected = isActiveTeamWorkspace(active, team);
             return (
               <li key={key}>
                 <div
@@ -144,18 +127,31 @@ export function YourTeamsSection({ variant = "overview", className }: Props) {
                   }
                 >
                   <div className="min-w-0">
-                    <p className="font-semibold text-text-primary">{team.workspaceName}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-text-primary">{team.workspaceName}</p>
+                      {connected ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                          Connected
+                        </span>
+                      ) : null}
+                    </div>
                     <p className="mt-0.5 text-sm text-text-secondary">
                       {roleLabel} · {team.contactDisplayName} · {team.projectCount}{" "}
                       {team.projectCount === 1 ? "project" : "projects"}
                     </p>
                   </div>
-                  <Link
-                    href="/projects"
-                    className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95"
+                  <button
+                    type="button"
+                    disabled={switchingId === key}
+                    onClick={() => void openTeamProjects(team)}
+                    className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95 disabled:opacity-60"
                   >
-                    Open projects
-                  </Link>
+                    {switchingId === key
+                      ? "Opening…"
+                      : connected
+                        ? "Open projects"
+                        : "Switch & open projects"}
+                  </button>
                 </div>
               </li>
             );
@@ -190,14 +186,19 @@ export function YourTeamsSection({ variant = "overview", className }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold text-text-primary">Your teams</h2>
         <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-          {loading ? "…" : joined.length}
+          {loading ? "…" : joinedTeams.length}
         </span>
-        {pending.length > 0 ? (
+        {pendingTeams.length > 0 ? (
           <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-900">
-            {pending.length} invite{pending.length === 1 ? "" : "s"}
+            {pendingTeams.length} invite{pendingTeams.length === 1 ? "" : "s"}
           </span>
         ) : null}
       </div>
+      {joinError ? (
+        <p className="mt-2 text-xs font-medium text-red-600" role="alert">
+          {joinError}
+        </p>
+      ) : null}
       {list}
     </section>
   );

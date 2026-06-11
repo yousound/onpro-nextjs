@@ -20,15 +20,13 @@ import {
 import {
   buildImportPreviews,
   patchImportPreview,
-  previewToContact,
-  validateImportCodeForContact,
   type ImportContactRowPreview,
 } from "@/lib/csv/import-client-rows";
 import type { ContactLocation } from "@/lib/types/contact";
 import type { ParsedImportContactRow } from "@/lib/types/contact-import";
 import { segmentLabel } from "@/lib/mock/people";
 import type { PeopleSegment } from "@/lib/mock/people";
-import { commitSingleContact } from "@/lib/data/commit-contacts";
+import { commitImportRows } from "@/lib/csv/import-commit";
 import { loadContacts } from "@/lib/contacts-store";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import {
@@ -145,8 +143,10 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
     }
   }, [visibleSections, activeSection]);
 
-  const selectedReady = previews.filter((p) => p.selected && p.status === "ready");
-  const readyCount = previews.filter((p) => p.status === "ready").length;
+  const isImportable = (p: ImportContactRowPreview) =>
+    p.status === "ready" || p.status === "update";
+  const selectedReady = previews.filter((p) => p.selected && isImportable(p));
+  const readyCount = previews.filter((p) => isImportable(p)).length;
   const needsSegmentCount = previews.filter((p) => p.status === "needs_segment").length;
 
   const chunkCount = chunkPlan?.chunks.length ?? parseMeta?.chunkCount ?? 1;
@@ -314,13 +314,15 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
 
   function toggleRow(rowKey: string) {
     setPreviews((prev) =>
-      prev.map((p) => (p.rowKey === rowKey && p.status === "ready" ? { ...p, selected: !p.selected } : p)),
+      prev.map((p) =>
+        p.rowKey === rowKey && isImportable(p) ? { ...p, selected: !p.selected } : p,
+      ),
     );
   }
 
   function toggleAllReady(checked: boolean) {
     setPreviews((prev) =>
-      prev.map((p) => (p.status === "ready" ? { ...p, selected: checked } : p)),
+      prev.map((p) => (isImportable(p) ? { ...p, selected: checked } : p)),
     );
   }
 
@@ -328,28 +330,9 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
     if (selectedReady.length === 0) return;
     setImporting(true);
     setError(null);
-    const working = [...loadContacts()];
-    let saved = 0;
-    const failures: string[] = [];
 
     try {
-      for (const row of selectedReady) {
-        const contact = previewToContact(row);
-        const codeErr = validateImportCodeForContact(working, contact);
-        if (codeErr) {
-          failures.push(`${row.name}: ${codeErr}`);
-          continue;
-        }
-        try {
-          const persisted = await commitSingleContact(contact);
-          working.push(persisted);
-          saved++;
-        } catch (e) {
-          failures.push(
-            `${row.name}: ${e instanceof Error ? e.message : "Save failed"}`,
-          );
-        }
-      }
+      const { saved, failures } = await commitImportRows(selectedReady, loadContacts());
 
       if (saved === 0) {
         setError(failures[0] ?? "No contacts were imported.");
@@ -363,12 +346,22 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
       const hasMoreBatches =
         chunkPlan != null && chunkPlan.chunkIndex + 1 < chunkPlan.chunks.length;
 
+      const failureNote =
+        failures.length > 0
+          ? `${failures.length} row${failures.length === 1 ? "" : "s"} could not be imported: ${failures.slice(0, 3).join(" · ")}${failures.length > 3 ? ` · +${failures.length - 3} more` : ""}`
+          : null;
+
       if (hasMoreBatches) {
         const nextIndex = chunkPlan.chunkIndex + 1;
         const batchNum = chunkPlan.chunkIndex + 1;
         const totalBatches = chunkPlan.chunks.length;
         setBatchNotice(
-          `Batch ${batchNum} of ${totalBatches} imported (${saved} contact${saved === 1 ? "" : "s"}). Review batch ${nextIndex + 1} next.`,
+          [
+            `Batch ${batchNum} of ${totalBatches} imported (${saved} contact${saved === 1 ? "" : "s"}). Review batch ${nextIndex + 1} next.`,
+            failureNote,
+          ]
+            .filter(Boolean)
+            .join(" "),
         );
         setPreviews([]);
         setParseMeta(null);
@@ -384,16 +377,15 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
           },
           companyFilter,
         );
-        if (failures.length > 0) {
-          console.warn("[import-clients] partial failures in batch", failures);
-        }
+        return;
+      }
+
+      if (failureNote) {
+        setError(failureNote);
         return;
       }
 
       onClose();
-      if (failures.length > 0) {
-        console.warn("[import-clients] partial failures", failures);
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -665,7 +657,7 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                     <li
                       key={row.rowKey}
                       className={`rounded-xl border bg-white p-4 shadow-sm ${
-                        row.status === "ready"
+                        row.status === "ready" || row.status === "update"
                           ? "border-slate-200"
                           : row.status === "needs_segment"
                             ? "border-violet-300 ring-1 ring-violet-200"
@@ -684,7 +676,7 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                             type="checkbox"
                             className="rounded border-slate-300 text-[#7c3aed] disabled:opacity-30"
                             checked={row.selected}
-                            disabled={row.status !== "ready"}
+                            disabled={row.status !== "ready" && row.status !== "update"}
                             onChange={() => toggleRow(row.rowKey)}
                             aria-label={`Import ${row.name}`}
                           />
@@ -907,8 +899,10 @@ export function ImportClientsModal({ open, onClose, onImported }: Props) {
                           </div>
                           <p
                             className={`text-xs font-medium ${
-                              row.status === "ready"
-                                ? "text-emerald-700"
+                              row.status === "ready" || row.status === "update"
+                                ? row.status === "update"
+                                  ? "text-sky-800"
+                                  : "text-emerald-700"
                                 : row.status === "needs_segment"
                                   ? "text-violet-800"
                                   : row.status === "skip"

@@ -87,10 +87,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         authUserId?: string;
       };
       const all = data.teams ?? [];
+      const authId = data.authUserId ?? null;
       setActive(data.active ?? defaultActive);
       setTeams(all);
-      setJoinedTeams(data.joined ?? all.filter((t) => t.alreadyJoined));
-      setPendingTeams(data.pending ?? all.filter((t) => !t.alreadyJoined));
+      if (data.joined && data.pending) {
+        setJoinedTeams(data.joined);
+        setPendingTeams(data.pending);
+      } else {
+        const { splitWorkspaceTeams } = await import("@/lib/workspace-team-filters");
+        const split = splitWorkspaceTeams(all, authId);
+        setJoinedTeams(split.joined);
+        setPendingTeams(split.pending);
+      }
       setAuthUserId(data.authUserId ?? null);
     } catch {
       setTeams([]);

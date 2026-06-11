@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { DirectoryAvatar } from "@/components/directory-avatar";
 import { useCurrentUser } from "@/components/profile-provider";
 import { useWorkspace } from "@/components/workspace-provider";
+import { isActiveTeamWorkspace } from "@/lib/workspace-team-filters";
 import { isSupabaseConfigured } from "@/lib/config/backend";
 import { displayAvatarUrl } from "@/lib/current-user-display";
 
@@ -158,8 +159,7 @@ export function WorkspaceSwitcher({ collapsed = false }: Props) {
           })}
           {joinedTeams.map((team) => {
             const key = `${team.operatorUserId}:${team.contactId}`;
-            const selected =
-              active.mode === "team" && active.operatorUserId === team.operatorUserId;
+            const selected = isActiveTeamWorkspace(active, team);
             return (
               <button
                 key={key}
@@ -175,7 +175,9 @@ export function WorkspaceSwitcher({ collapsed = false }: Props) {
               >
                 <span className="block truncate font-medium">{team.workspaceName}</span>
                 <span className="block truncate text-xs text-text-secondary">
-                  {team.projectCount} {team.projectCount === 1 ? "project" : "projects"}
+                  {selected
+                    ? "Connected"
+                    : `${team.projectCount} ${team.projectCount === 1 ? "project" : "projects"}`}
                 </span>
               </button>
             );

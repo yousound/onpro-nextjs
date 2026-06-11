@@ -19,9 +19,9 @@ export async function GET() {
 
   try {
     const teams = await fetchMemberWorkspaceTeams(supabase, user.id, user.email);
-    const joined = teams.filter((t) => t.alreadyJoined);
-    const pending = teams.filter((t) => !t.alreadyJoined);
-    return NextResponse.json({ teams, joined, pending });
+    const { splitWorkspaceTeams } = await import("@/lib/workspace-team-filters");
+    const { joined, pending } = splitWorkspaceTeams(teams, user.id);
+    return NextResponse.json({ teams, joined, pending, authUserId: user.id });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Lookup failed";
     return NextResponse.json({ error: msg, teams: [] }, { status: 400 });

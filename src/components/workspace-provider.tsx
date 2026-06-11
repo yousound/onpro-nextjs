@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { clearLiveCache } from "@/lib/data/live-cache";
 import { joinWorkspaceMatch } from "@/lib/workspace-join-client";
-import { writeActiveWorkspaceSession } from "@/lib/workspace-context";
+import { writeActiveWorkspaceSession, readActiveWorkspaceSession } from "@/lib/workspace-context";
 import type { WorkspaceView } from "@/lib/workspace-context";
 import type { WorkspaceMatch } from "@/lib/types/workspace";
 
@@ -37,6 +38,17 @@ const defaultActive: WorkspaceView = {
   workspaceName: "My workspace",
 };
 
+function initialActiveFromSession(): WorkspaceView {
+  if (typeof window === "undefined") return defaultActive;
+  const operatorUserId = readActiveWorkspaceSession();
+  if (!operatorUserId) return defaultActive;
+  return {
+    mode: "team",
+    operatorUserId,
+    workspaceName: "Workspace",
+  };
+}
+
 const WorkspaceCtx = createContext<WorkspaceContextValue>({
   loading: true,
   active: defaultActive,
@@ -59,7 +71,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const live = isClientLiveBackend();
   const [loading, setLoading] = useState(live);
-  const [active, setActive] = useState<WorkspaceView>(defaultActive);
+  const [active, setActive] = useState<WorkspaceView>(initialActiveFromSession);
+  const hasLoadedOnceRef = useRef(false);
   const [teams, setTeams] = useState<WorkspaceMatch[]>([]);
   const [joinedTeams, setJoinedTeams] = useState<WorkspaceMatch[]>([]);
   const [pendingTeams, setPendingTeams] = useState<WorkspaceMatch[]>([]);
@@ -75,7 +88,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setAuthUserId(null);
       return;
     }
-    setLoading(true);
+    const isInitialLoad = !hasLoadedOnceRef.current;
+    if (isInitialLoad) setLoading(true);
     try {
       const res = await fetch("/api/workspace/context", { cache: "no-store" });
       if (!res.ok) throw new Error("context failed");
@@ -106,6 +120,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setPendingTeams([]);
       setActive(defaultActive);
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, [live]);
@@ -116,7 +131,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!live) return;
-    const onFocus = () => void load();
+    const lastFocusLoadRef = { at: 0 };
+    const onFocus = () => {
+      if (Date.now() - lastFocusLoadRef.at < 90_000) return;
+      lastFocusLoadRef.at = Date.now();
+      void load();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [live, load]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -105,13 +105,16 @@ import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import {
   applySuggestionViaApi,
   disconnectGmailViaApi,
-  fetchGmailStatusViaApi,
+  fetchMailroomBootstrapViaApi,
+  fetchMailroomThreadDetailViaApi,
   fetchMailroomThreadsViaApi,
   GmailStatusError,
   mailroomApiEnabled,
+  MAILROOM_FIRST_INBOX_PAGE_SIZE,
   sendMailroomChatViaApi,
   invalidateMailroomSummarizeCache,
   summarizeThreadViaApi,
+  type MailroomBootstrapResponse,
   type MailroomChatResponse,
 } from "@/lib/data/mailroom-api";
 import { detectMailroomChatIntent } from "@/lib/mailroom/chat-intent";
@@ -301,17 +304,39 @@ function mergeGmailThreadLists(existing: EmailThread[], incoming: EmailThread[])
   });
 }
 
+function readMailroomLastRefreshMs(): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = sessionStorage.getItem("onpro_mailroom_last_inbox_refresh");
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function touchMailroomLastRefreshMs(): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem("onpro_mailroom_last_inbox_refresh", String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function MailroomView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user: currentUser } = useCurrentUser();
   const requestedThreadId = searchParams.get("thread");
   const showCoverPage = searchParams.get("cover") === "1";
+  const gmailOAuthFlag = searchParams.get("gmail");
   const isMock = isClientMockBackend();
   const isLiveMailroom = mailroomApiEnabled();
-  const [state, setState] = useState<MailroomState | null>(null);
+  const [state, setState] = useState<MailroomState | null>(() => loadMailroomState());
   const [gmailThreads, setGmailThreads] = useState<EmailThread[]>([]);
   const [gmailNextPageToken, setGmailNextPageToken] = useState<string | null>(null);
+  const [gmailThreadsLoading, setGmailThreadsLoading] = useState(false);
   const [gmailLoadingMore, setGmailLoadingMore] = useState(false);
   const [gmailInboxEstimate, setGmailInboxEstimate] = useState<number | null>(null);
   const [gmailSyncComplete, setGmailSyncComplete] = useState(false);
@@ -320,9 +345,12 @@ export function MailroomView() {
   const [gmailSearchResults, setGmailSearchResults] = useState<EmailThread[]>([]);
   const [gmailSearching, setGmailSearching] = useState(false);
   const gmailBackgroundLoadRef = useRef(false);
+  const gmailFullThreadIdsRef = useRef(new Set<string>());
+  const lastInboxRefreshRef = useRef(0);
+  const [gmailThreadDetailLoading, setGmailThreadDetailLoading] = useState(false);
   const [gmailStatus, setGmailStatus] = useState({
-    loading: isLiveMailroom,
-    connected: false,
+    loading: isLiveMailroom && gmailOAuthFlag !== "connected",
+    connected: gmailOAuthFlag === "connected",
     email: null as string | null,
     oauthConfigured: false,
     message: undefined as string | undefined,
@@ -410,40 +438,74 @@ export function MailroomView() {
     };
   }, []);
 
-  const gmailOAuthFlag = searchParams.get("gmail");
-
-  async function loadMoreGmailPages(
-    startToken: string,
-    estimate?: number | null,
-  ) {
-    if (gmailBackgroundLoadRef.current) return;
+  async function loadNextGmailPage(startToken: string, estimate?: number | null) {
+    if (gmailBackgroundLoadRef.current || !startToken) return;
     gmailBackgroundLoadRef.current = true;
     setGmailLoadingMore(true);
     try {
-      let token: string | null = startToken;
-      let inboxEstimate = estimate ?? gmailInboxEstimate;
-      while (token) {
-        const data = await fetchMailroomThreadsViaApi({ pageToken: token, maxResults: 40 });
-        if (data.resultSizeEstimate != null) inboxEstimate = data.resultSizeEstimate;
-        setGmailInboxEstimate(inboxEstimate);
-        setGmailThreads((prev) => mergeGmailThreadLists(prev, data.threads));
-        mergeCachedMailroomGmailThreads(data.threads, data.nextPageToken ?? null, {
-          estimatedTotal: inboxEstimate,
-          markComplete: !data.nextPageToken,
-        });
-        token = data.nextPageToken ?? null;
-        setGmailNextPageToken(token);
-        setGmailSyncComplete(!token);
-        if (token) await new Promise((r) => setTimeout(r, 350));
-      }
+      const data = await fetchMailroomThreadsViaApi({
+        pageToken: startToken,
+        maxResults: 40,
+      });
+      const inboxEstimate = data.resultSizeEstimate ?? estimate ?? gmailInboxEstimate;
+      setGmailInboxEstimate(inboxEstimate);
+      setGmailThreads((prev) => mergeGmailThreadLists(prev, data.threads));
+      mergeCachedMailroomGmailThreads(data.threads, data.nextPageToken ?? null, {
+        estimatedTotal: inboxEstimate,
+        markComplete: !data.nextPageToken,
+      });
+      const token = data.nextPageToken ?? null;
+      setGmailNextPageToken(token);
+      setGmailSyncComplete(!token);
     } catch (e) {
-      console.warn("[mailroom] background Gmail page load failed", e);
-      setToast("Inbox import paused — showing what loaded so far. Refresh to continue.");
+      console.warn("[mailroom] Gmail page load failed", e);
+      setToast("Could not load more threads — scroll to try again.");
     } finally {
       gmailBackgroundLoadRef.current = false;
       setGmailLoadingMore(false);
     }
   }
+
+  const applyBootstrapThreads = useCallback((bootstrap: MailroomBootstrapResponse) => {
+    const estimate = bootstrap.resultSizeEstimate ?? null;
+    setGmailInboxEstimate(estimate);
+    const merged = mergeCachedMailroomGmailThreads(
+      bootstrap.threads,
+      bootstrap.nextPageToken ?? null,
+      { estimatedTotal: estimate, markComplete: !bootstrap.nextPageToken },
+    );
+    setGmailThreads(merged);
+    setGmailNextPageToken(bootstrap.nextPageToken ?? null);
+    setGmailSyncComplete(!bootstrap.nextPageToken);
+    return merged;
+  }, []);
+
+  const refreshInbox = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!isLiveMailroom || gmailSearchActive || gmailThreadsLoading) return;
+      setGmailThreadsLoading(true);
+      try {
+        const bootstrap = await fetchMailroomBootstrapViaApi({
+          maxResults: MAILROOM_FIRST_INBOX_PAGE_SIZE,
+          fresh: true,
+        });
+        if (!bootstrap.connected) return;
+        const merged = applyBootstrapThreads(bootstrap);
+        lastInboxRefreshRef.current = Date.now();
+        touchMailroomLastRefreshMs();
+        if (!opts?.silent) {
+          setToast(`Inbox updated · ${merged.length} thread${merged.length === 1 ? "" : "s"}`);
+        }
+      } catch (e) {
+        if (!opts?.silent) {
+          setToast(e instanceof Error ? e.message : "Could not refresh inbox");
+        }
+      } finally {
+        setGmailThreadsLoading(false);
+      }
+    },
+    [applyBootstrapThreads, gmailSearchActive, gmailThreadsLoading, isLiveMailroom],
+  );
 
   async function runGmailInboxSearch() {
     const q = threadSearch.trim();
@@ -457,7 +519,11 @@ export function MailroomView() {
       const data = await fetchMailroomThreadsViaApi({ q, maxResults: 40 });
       setGmailSearchResults(data.threads);
       setGmailSearchActive(true);
-      if (data.threads[0]) setSelectedThreadId(data.threads[0].id);
+      if (data.threads.length === 0) {
+        setToast(`No threads found for “${q}”.`);
+      } else if (data.threads[0]) {
+        setSelectedThreadId(data.threads[0].id);
+      }
     } catch (e) {
       setToast(e instanceof Error ? e.message : "Gmail search failed");
     } finally {
@@ -472,41 +538,49 @@ export function MailroomView() {
     }
     let cancelled = false;
 
-    async function loadGmailStatus(attempt = 0) {
+    async function loadMailroom(attempt = 0) {
       let statusConnected = false;
       try {
-        const status = await fetchGmailStatusViaApi();
+        const bootstrap = await fetchMailroomBootstrapViaApi({
+          maxResults: MAILROOM_FIRST_INBOX_PAGE_SIZE,
+          fresh:
+            gmailOAuthFlag === "connected" ||
+            Date.now() - readMailroomLastRefreshMs() > 60_000,
+        });
         if (cancelled) return;
-        statusConnected = status.connected;
+        statusConnected = bootstrap.connected;
+        const effectiveConnected =
+          bootstrap.connected || (gmailOAuthFlag === "connected" && attempt < 2);
         setGmailStatus({
           loading: false,
-          connected: status.connected,
-          email: status.email,
-          oauthConfigured: status.oauthConfigured ?? true,
-          message: status.message,
+          connected: effectiveConnected,
+          email: bootstrap.email,
+          oauthConfigured: bootstrap.oauthConfigured ?? true,
+          message: bootstrap.message,
         });
-        if (!status.connected) {
+        if (!bootstrap.connected) {
           setGmailThreads([]);
           if (gmailOAuthFlag === "connected" && attempt < 2) {
             await new Promise((r) => setTimeout(r, 500));
-            if (!cancelled) await loadGmailStatus(attempt + 1);
+            if (!cancelled) await loadMailroom(attempt + 1);
           }
           return;
         }
 
         if (gmailOAuthFlag === "connected") {
           clearMailroomGmailThreadCache();
+          gmailFullThreadIdsRef.current.clear();
           const params = new URLSearchParams(searchParams.toString());
           params.delete("gmail");
           params.delete("cover");
           const q = params.toString();
           router.replace(q ? `/mailroom?${q}` : "/mailroom", { scroll: false });
-          router.refresh();
         }
 
+        setGmailThreadsLoading(true);
         try {
           const cached = getCachedMailroomGmailThreads();
-          if (!cancelled && cached.fresh && cached.threads.length > 0) {
+          if (!cancelled && cached.fresh && cached.threads.length > 0 && !gmailOAuthFlag) {
             setGmailThreads(cached.threads);
             setGmailNextPageToken(cached.nextPageToken);
             setGmailInboxEstimate(cached.sync.estimatedTotal);
@@ -514,28 +588,12 @@ export function MailroomView() {
             if (!selectedThreadId && cached.threads[0]) {
               setSelectedThreadId(cached.threads[0].id);
             }
-            if (cached.nextPageToken && !cached.sync.complete) {
-              void loadMoreGmailPages(cached.nextPageToken, cached.sync.estimatedTotal);
-            }
           }
 
-          const data = await fetchMailroomThreadsViaApi({ maxResults: 40 });
           if (!cancelled) {
-            const estimate = data.resultSizeEstimate ?? null;
-            setGmailInboxEstimate(estimate);
-            const merged = mergeCachedMailroomGmailThreads(
-              data.threads,
-              data.nextPageToken ?? null,
-              { estimatedTotal: estimate, markComplete: !data.nextPageToken },
-            );
-            setGmailThreads(merged);
-            setGmailNextPageToken(data.nextPageToken ?? null);
-            setGmailSyncComplete(!data.nextPageToken);
-            if (!selectedThreadId && merged[0]) {
-              setSelectedThreadId(merged[0].id);
-            }
-            if (data.nextPageToken) {
-              void loadMoreGmailPages(data.nextPageToken, estimate);
+            applyBootstrapThreads(bootstrap);
+            if (!selectedThreadId && bootstrap.threads[0]) {
+              setSelectedThreadId(bootstrap.threads[0].id);
             }
           }
         } catch (threadErr) {
@@ -557,9 +615,15 @@ export function MailroomView() {
             }));
             setToast("Inbox load failed — tap Refresh or try again in a moment.");
           }
+        } finally {
+          if (!cancelled) {
+            setGmailThreadsLoading(false);
+            lastInboxRefreshRef.current = Date.now();
+            touchMailroomLastRefreshMs();
+          }
         }
       } catch (e) {
-        console.warn("[mailroom] Gmail status load failed", e);
+        console.warn("[mailroom] Mailroom bootstrap failed", e);
         if (!cancelled) {
           const needsSignIn = e instanceof GmailStatusError && e.status === 401;
           setGmailStatus({
@@ -576,17 +640,43 @@ export function MailroomView() {
           if (!statusConnected) setGmailThreads([]);
           if (gmailOAuthFlag === "connected" && attempt < 2 && !statusConnected) {
             await new Promise((r) => setTimeout(r, 500));
-            if (!cancelled) await loadGmailStatus(attempt + 1);
+            if (!cancelled) await loadMailroom(attempt + 1);
           }
         }
       }
     }
 
-    void loadGmailStatus();
+    void loadMailroom();
     return () => {
       cancelled = true;
     };
   }, [isLiveMailroom, gmailOAuthFlag, router, searchParams]);
+
+  const refreshInboxRef = useRef(refreshInbox);
+  refreshInboxRef.current = refreshInbox;
+
+  useEffect(() => {
+    if (!isLiveMailroom || !gmailStatus.connected || gmailSearchActive) return;
+    const MIN_REFRESH_MS = 30_000;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastInboxRefreshRef.current < MIN_REFRESH_MS) return;
+      void refreshInboxRef.current({ silent: true });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isLiveMailroom, gmailStatus.connected, gmailSearchActive]);
+
+  /** Poll Gmail while Mailroom is open — Pub/Sub updates server cache only, not the browser. */
+  useEffect(() => {
+    if (!isLiveMailroom || !gmailStatus.connected || gmailSearchActive) return;
+    const POLL_MS = 20_000;
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshInboxRef.current({ silent: true });
+    }, POLL_MS);
+    return () => clearInterval(id);
+  }, [isLiveMailroom, gmailStatus.connected, gmailSearchActive]);
 
   useEffect(() => {
     if (gmailOAuthFlag === "connected") setToast("Gmail connected — loading your inbox.");
@@ -603,25 +693,55 @@ export function MailroomView() {
 
   const inboxThreadsForList = useMemo(() => {
     if (isMock) return MOCK_EMAIL_THREADS;
-    const base = gmailSearchActive ? gmailSearchResults : gmailThreads;
-    return filterImportedGmailThreads(base, threadSearch);
+    if (gmailSearchActive) return gmailSearchResults;
+    return filterImportedGmailThreads(gmailThreads, threadSearch);
   }, [isMock, gmailSearchActive, gmailSearchResults, gmailThreads, threadSearch]);
 
   const threads = useMemo(() => {
-    const promoted = state ? state.promoted_threads : [];
     const inbox = inboxThreadsForList;
+    const promoted = gmailSearchActive || !state ? [] : state.promoted_threads;
     const merged = [...promoted, ...inbox];
     if (!state) return merged;
     return merged.map((t) => ({
       ...t,
       status: state.thread_status[t.id] ?? t.status,
     }));
-  }, [state, isMock, gmailThreads]);
+  }, [state, inboxThreadsForList, gmailSearchActive]);
 
   const selectedThread = useMemo(
     () => threads.find((t) => t.id === selectedThreadId) ?? threads[0] ?? null,
     [threads, selectedThreadId],
   );
+
+  useEffect(() => {
+    if (!isLiveMailroom || isMock || !selectedThreadId) return;
+    if (!selectedThreadId.startsWith("gmail-")) return;
+    if (gmailFullThreadIdsRef.current.has(selectedThreadId)) return;
+
+    let cancelled = false;
+    void (async () => {
+      setGmailThreadDetailLoading(true);
+      try {
+        const { thread } = await fetchMailroomThreadDetailViaApi(selectedThreadId);
+        if (cancelled) return;
+        gmailFullThreadIdsRef.current.add(selectedThreadId);
+        setGmailThreads((prev) => mergeGmailThreadLists(prev, [thread]));
+        setGmailSearchResults((prev) =>
+          prev.some((t) => t.id === thread.id)
+            ? prev.map((t) => (t.id === thread.id ? thread : t))
+            : prev,
+        );
+      } catch (e) {
+        console.warn("[mailroom] Gmail thread detail load failed", e);
+      } finally {
+        if (!cancelled) setGmailThreadDetailLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedThreadId, isLiveMailroom, isMock]);
 
   const allSuggestionsForThread = useMemo<AgentSuggestion[]>(() => {
     if (!selectedThread) return [];
@@ -850,7 +970,10 @@ export function MailroomView() {
   const mailroomContentCount = inboxConnectedForCover ? Math.max(threads.length, 1) : 0;
   useStripSectionCoverWhenPopulated("/mailroom", searchParams, mailroomContentCount);
 
-  if (!state || (isLiveMailroom && gmailStatus.loading)) {
+  const showStatusLoading =
+    isLiveMailroom && gmailStatus.loading && !gmailStatus.connected;
+
+  if (!state || showStatusLoading) {
     return (
       <MailroomShell>
         <div className="flex flex-1 items-center justify-center text-text-secondary">
@@ -893,6 +1016,7 @@ export function MailroomView() {
       setGmailSearchActive(false);
       setGmailSearchResults([]);
       gmailBackgroundLoadRef.current = false;
+      gmailFullThreadIdsRef.current.clear();
       setGmailStatus({
         loading: false,
         connected: false,
@@ -916,7 +1040,7 @@ export function MailroomView() {
           statusMessage={
             isMock
               ? "Demo threads are stored locally. Switch to Live for real Gmail."
-              : (gmailStatus.message ?? "Sign in with Supabase, then authorize Gmail read access.")
+              : gmailStatus.message
           }
           onConnectMock={() => setState(connectMockGmail("ric@connectdots.la"))}
           connected={inboxConnected}
@@ -1447,7 +1571,9 @@ export function MailroomView() {
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1.5 text-xs text-text-secondary">
             <span className="size-2 animate-pulse rounded-full bg-emerald-500" />
-            Mailroom is listening — {connectedEmail}
+            {gmailThreadsLoading && !isMock
+              ? `Connected — loading emails${connectedEmail ? ` (${connectedEmail})` : "…"}`
+              : `Mailroom is listening — ${connectedEmail}`}
           </span>
           {pendingTotal > 0 ? (
             <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent">
@@ -1455,13 +1581,25 @@ export function MailroomView() {
             </span>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={() => void handleDisconnectInbox()}
-          className="text-[11px] font-semibold text-text-secondary hover:text-accent hover:underline"
-        >
-          Disconnect
-        </button>
+        <div className="flex items-center gap-3">
+          {!isMock && inboxConnected ? (
+            <button
+              type="button"
+              onClick={() => void refreshInbox()}
+              disabled={gmailThreadsLoading}
+              className="text-[11px] font-semibold text-text-secondary hover:text-accent hover:underline disabled:cursor-wait disabled:opacity-60"
+            >
+              {gmailThreadsLoading ? "Fetching…" : "Refresh inbox"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleDisconnectInbox()}
+            className="text-[11px] font-semibold text-text-secondary hover:text-accent hover:underline"
+          >
+            Disconnect
+          </button>
+        </div>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_320px] grid-rows-[minmax(0,1fr)] divide-x divide-border-light">
@@ -1472,10 +1610,14 @@ export function MailroomView() {
               estimatedTotal={gmailInboxEstimate}
               syncComplete={gmailSyncComplete}
               loadingMore={gmailLoadingMore}
+              initialLoading={gmailThreadsLoading}
               search={threadSearch}
               onSearchChange={(value) => {
                 setThreadSearch(value);
                 if (!value.trim()) {
+                  setGmailSearchActive(false);
+                  setGmailSearchResults([]);
+                } else if (gmailSearchActive) {
                   setGmailSearchActive(false);
                   setGmailSearchResults([]);
                 }
@@ -1493,12 +1635,30 @@ export function MailroomView() {
             canRemove={(t) => canRemoveThreadFromMailroom(t, state)}
             onRemove={handleRemovePromotedThread}
             loadingMore={!isMock && gmailLoadingMore}
-            hasMore={!isMock && !gmailSyncComplete && (gmailLoadingMore || Boolean(gmailNextPageToken))}
+            hasMore={!isMock && !gmailSearchActive && !gmailSyncComplete && Boolean(gmailNextPageToken)}
+            initialLoading={
+              !isMock &&
+              ((gmailThreadsLoading && inboxThreadsForList.length === 0 && !gmailSearchActive) ||
+                (gmailSearching && threads.length === 0))
+            }
+            fetchingInbox={!isMock && gmailThreadsLoading && inboxThreadsForList.length > 0 && !gmailSearchActive}
+            emptyMessage={
+              gmailSearchActive && !gmailSearching
+                ? "No Gmail threads matched. Try different keywords or from:address."
+                : undefined
+            }
+            onLoadMore={
+              !isMock && !gmailSearchActive && gmailNextPageToken && !gmailLoadingMore
+                ? () => void loadNextGmailPage(gmailNextPageToken, gmailInboxEstimate)
+                : undefined
+            }
           />
         </div>
         <ConversationPane
           className="min-h-0"
           thread={selectedThread}
+          inboxLoading={!isMock && gmailThreadsLoading && inboxThreadsForList.length === 0}
+          threadDetailLoading={gmailThreadDetailLoading}
           canRemoveFromMailroom={
             selectedThread ? canRemoveThreadFromMailroom(selectedThread, state) : false
           }
@@ -1730,6 +1890,7 @@ function MailroomInboxSyncBar({
   estimatedTotal,
   syncComplete,
   loadingMore,
+  initialLoading = false,
   search,
   onSearchChange,
   onSearchSubmit,
@@ -1740,6 +1901,7 @@ function MailroomInboxSyncBar({
   estimatedTotal: number | null;
   syncComplete: boolean;
   loadingMore: boolean;
+  initialLoading?: boolean;
   search: string;
   onSearchChange: (value: string) => void;
   onSearchSubmit: () => void;
@@ -1755,17 +1917,24 @@ function MailroomInboxSyncBar({
     <div className="shrink-0 border-b border-border-light bg-slate-50/80 px-3 py-2.5">
       <div className="flex items-center justify-between gap-2 text-[10px] text-text-secondary">
         <span className="font-medium">
-          {syncComplete
-            ? `Inbox synced · ${loadedCount} thread${loadedCount === 1 ? "" : "s"} cached`
-            : loadingMore
-              ? `Importing inbox… ${loadedCount}${estimatedTotal ? ` / ~${estimatedTotal}` : ""}`
-              : `Imported ${loadedCount}${estimatedTotal ? ` of ~${estimatedTotal}` : ""} threads`}
+          {initialLoading
+            ? "Fetching your inbox from Gmail…"
+            : syncComplete
+              ? `Inbox ready · ${loadedCount} thread${loadedCount === 1 ? "" : "s"}`
+              : loadingMore
+                ? `Loading more… ${loadedCount}${estimatedTotal ? ` / ~${estimatedTotal}` : ""}`
+                : `${loadedCount} thread${loadedCount === 1 ? "" : "s"} loaded${estimatedTotal ? ` · ~${estimatedTotal} in inbox` : ""} — scroll for more`}
         </span>
-        {loadingMore ? (
+        {initialLoading || loadingMore ? (
           <span className="size-2 shrink-0 animate-pulse rounded-full bg-violet-500" />
         ) : null}
       </div>
-      {!syncComplete && progressPct != null ? (
+      {initialLoading ? (
+        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200">
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-violet-500" />
+        </div>
+      ) : null}
+      {!syncComplete && progressPct != null && loadingMore ? (
         <div
           className="mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200"
           role="progressbar"
@@ -1789,14 +1958,31 @@ function MailroomInboxSyncBar({
         placeholder="Filter imported… Enter searches all of Gmail"
         className="mt-2 w-full rounded-lg border border-border-light bg-white px-2.5 py-1.5 text-[11px] focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
       />
-      <p className="mt-1 text-[10px] leading-snug text-text-secondary">
-        {gmailSearchActive
-          ? "Showing Gmail search results (up to 40). Clear to return to imported inbox."
-          : "Typing filters cached threads. Press Enter for Gmail search (from:, subject:, etc.)."}
-      </p>
+      {gmailSearchActive ? (
+        <p className="mt-1 text-[10px] leading-snug text-text-secondary">
+          Showing Gmail search results (up to 40). Clear to return to imported inbox.
+        </p>
+      ) : null}
       {searching ? (
         <p className="mt-0.5 text-[10px] font-medium text-accent">Searching Gmail…</p>
       ) : null}
+    </div>
+  );
+}
+
+function MailroomPaneLoader({
+  message,
+  className,
+}: {
+  message: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center ${className ?? ""}`}
+    >
+      <span className="size-8 animate-spin rounded-full border-2 border-violet-200 border-t-violet-600" />
+      <p className="text-sm font-medium text-text-secondary">{message}</p>
     </div>
   );
 }
@@ -1810,6 +1996,10 @@ function ThreadList({
   onRemove,
   loadingMore = false,
   hasMore = false,
+  initialLoading = false,
+  fetchingInbox = false,
+  emptyMessage,
+  onLoadMore,
 }: {
   threads: EmailThread[];
   selectedId: string | null;
@@ -1819,9 +2009,65 @@ function ThreadList({
   onRemove?: (t: EmailThread) => void;
   loadingMore?: boolean;
   hasMore?: boolean;
+  initialLoading?: boolean;
+  fetchingInbox?: boolean;
+  emptyMessage?: string;
+  onLoadMore?: () => void;
 }) {
+  const loadMoreSentinelRef = useRef<HTMLLIElement | null>(null);
+
+  useEffect(() => {
+    if (!onLoadMore || !hasMore || loadingMore) return;
+    const node = loadMoreSentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) onLoadMore();
+      },
+      { root: node.closest("ul"), rootMargin: "120px", threshold: 0 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onLoadMore, hasMore, loadingMore, threads.length]);
+
+  if (initialLoading && threads.length === 0) {
+    return (
+      <ul className="min-h-0 overflow-y-auto" aria-busy="true" aria-label="Loading inbox">
+        {Array.from({ length: 8 }, (_, i) => (
+          <li
+            key={i}
+            className="border-b border-border-light/70 px-3 py-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-3 w-24 animate-pulse rounded bg-slate-200" />
+              <div className="h-2.5 w-10 animate-pulse rounded bg-slate-100" />
+            </div>
+            <div
+              className="mt-1.5 h-3.5 animate-pulse rounded bg-slate-200"
+              style={{ width: `${55 + ((i * 13) % 35)}%` }}
+            />
+            <div className="mt-1 h-2.5 w-full max-w-[85%] animate-pulse rounded bg-slate-100" />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
     <ul className="min-h-0 overflow-y-auto">
+      {fetchingInbox ? (
+        <li className="sticky top-0 z-10 border-b border-violet-200 bg-violet-50/95 px-3 py-2 text-[11px] font-medium text-violet-800">
+          <span className="inline-flex items-center gap-2">
+            <span className="size-2 animate-pulse rounded-full bg-violet-600" />
+            Fetching latest emails…
+          </span>
+        </li>
+      ) : null}
+      {threads.length === 0 && !initialLoading ? (
+        <li className="px-3 py-8 text-center text-[12px] text-text-secondary">
+          {emptyMessage ?? "No emails loaded yet. Try Refresh inbox above."}
+        </li>
+      ) : null}
       {threads.map((t) => {
         const lastMsg = t.messages[t.messages.length - 1];
         const sender = lastMsg?.from.name ?? "Unknown";
@@ -1906,8 +2152,11 @@ function ThreadList({
         );
       })}
       {hasMore ? (
-        <li className="border-b border-border-light/70 px-3 py-3 text-center text-[11px] text-text-secondary">
-          {loadingMore ? "Importing more inbox threads…" : "More inbox threads queued"}
+        <li
+          ref={loadMoreSentinelRef}
+          className="border-b border-border-light/70 px-3 py-3 text-center text-[11px] text-text-secondary"
+        >
+          {loadingMore ? "Loading more…" : "Scroll for more inbox threads"}
         </li>
       ) : null}
     </ul>
@@ -2032,6 +2281,8 @@ function ConversationPane({
   generatedItems,
   onOpenGeneratedItem,
   className,
+  inboxLoading = false,
+  threadDetailLoading = false,
 }: {
   thread: EmailThread | null;
   className?: string;
@@ -2087,6 +2338,8 @@ function ConversationPane({
   onRemoveFromMailroom?: () => void;
   generatedItems: GeneratedItem[];
   onOpenGeneratedItem: (item: GeneratedItem) => void;
+  inboxLoading?: boolean;
+  threadDetailLoading?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [replyBody, setReplyBody] = useState("");
@@ -2104,9 +2357,12 @@ function ConversationPane({
   }, [thread?.id]);
 
   if (!thread) {
+    if (inboxLoading) {
+      return <MailroomPaneLoader message="Fetching your emails from Gmail…" className={className} />;
+    }
     return (
-      <div className="flex items-center justify-center text-text-secondary">
-        Select a thread.
+      <div className={`flex items-center justify-center text-text-secondary ${className ?? ""}`}>
+        Select a thread or refresh inbox to load mail.
       </div>
     );
   }
@@ -2149,6 +2405,14 @@ function ConversationPane({
     <div
       className={`grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden ${className ?? ""}`}
     >
+      {threadDetailLoading ? (
+        <div className="shrink-0 border-b border-violet-200 bg-violet-50 px-5 py-2 text-[11px] font-medium text-violet-800">
+          <span className="inline-flex items-center gap-2">
+            <span className="size-2 animate-pulse rounded-full bg-violet-600" />
+            Loading full email content…
+          </span>
+        </div>
+      ) : null}
       <div className="border-b border-border-light px-5 py-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex flex-wrap items-center gap-2">

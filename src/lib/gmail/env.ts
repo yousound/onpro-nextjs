@@ -19,3 +19,13 @@ export const GMAIL_SCOPES = [
   "email",
   "profile",
 ].join(" ");
+
+/** Full Pub/Sub topic name, e.g. projects/my-project/topics/gmail-mailroom */
+export function gmailPubSubTopic(): string | null {
+  const topic = process.env.GMAIL_PUBSUB_TOPIC?.trim();
+  return topic || null;
+}
+
+export function isGmailPushConfigured(): boolean {
+  return Boolean(gmailPubSubTopic());
+}

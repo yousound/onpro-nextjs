@@ -34,7 +34,7 @@ export function NotificationsPopover({
 }: NotificationsPopoverProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { switchWorkspace, joinTeam, refresh: refreshWorkspace } = useWorkspace();
+  const { switchWorkspace, joinTeam, refresh: refreshWorkspace, active } = useWorkspace();
   const [open, setOpen] = useState(false);
   const [memberEvents, setMemberEvents] = useState<
     { id: string; eventId: number; title: string; subtitle: string; href: string }[]
@@ -43,6 +43,8 @@ export function NotificationsPopover({
     {
       id: string;
       eventId: number;
+      eventType: string;
+      workspaceName: string;
       title: string;
       subtitle: string;
       href: string;
@@ -110,11 +112,16 @@ export function NotificationsPopover({
           const mapped = (data.events ?? []).map((ev) => ({
             id: `inbox-${ev.id}`,
             eventId: ev.id,
+            eventType: ev.eventType,
+            workspaceName: ev.workspaceName,
             title:
               ev.eventType === "joined"
                 ? `You were added to ${ev.workspaceName}`
                 : `Access removed from ${ev.workspaceName}`,
-            subtitle: "Open this team workspace",
+            subtitle:
+              ev.eventType === "joined"
+                ? "Dismiss or open that team workspace"
+                : "Tap dismiss to clear this notice",
             href: "/projects",
             operatorUserId: ev.operatorUserId,
           }));
@@ -180,6 +187,27 @@ export function NotificationsPopover({
     };
   }, [open]);
 
+  function dismissInboxEvent(eventId: number, rowId: string) {
+    void fetch("/api/workspace/member-inbox", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_ids: [eventId] }),
+    });
+    setInboxEvents((prev) => prev.filter((e) => e.id !== rowId));
+  }
+
+  async function openInboxWorkspace(inboxRow: (typeof inboxEvents)[number]) {
+    const alreadyThere =
+      active.mode === "team" && active.operatorUserId === inboxRow.operatorUserId;
+    if (alreadyThere) {
+      router.push(inboxRow.href);
+      return;
+    }
+    writeActiveWorkspaceSession(inboxRow.operatorUserId);
+    await switchWorkspace(inboxRow.operatorUserId);
+    router.push(inboxRow.href);
+  }
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -224,7 +252,44 @@ export function NotificationsPopover({
             <p className="px-3 py-6 text-center text-sm text-text-secondary">You&apos;re all caught up.</p>
           ) : (
             <ul className="max-h-[min(60vh,22rem)] overflow-y-auto py-1">
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const inboxRow = inboxEvents.find((ev) => ev.id === r.id);
+                if (inboxRow && live) {
+                  const canOpen = inboxRow.eventType === "joined";
+                  return (
+                    <li key={r.id} className="border-b border-border-light/60 px-3 py-2.5 last:border-b-0">
+                      <p className="text-sm font-medium text-text-primary">{r.title}</p>
+                      <p className="mt-0.5 text-xs text-text-secondary">{r.subtitle}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-border-light bg-white px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-surface-body"
+                          onClick={() => {
+                            dismissInboxEvent(inboxRow.eventId, inboxRow.id);
+                            setOpen(false);
+                          }}
+                        >
+                          Dismiss
+                        </button>
+                        {canOpen ? (
+                          <button
+                            type="button"
+                            className="rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90"
+                            onClick={() => {
+                              dismissInboxEvent(inboxRow.eventId, inboxRow.id);
+                              setOpen(false);
+                              void openInboxWorkspace(inboxRow);
+                            }}
+                          >
+                            Open workspace
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                }
+
+                return (
                 <li key={r.id}>
                   <Link
                     href={r.href}
@@ -240,22 +305,7 @@ export function NotificationsPopover({
                           .then(() => router.push("/projects"));
                         return;
                       }
-                      const inboxRow = inboxEvents.find((ev) => ev.id === r.id);
-                      if (inboxRow && live) {
-                        void fetch("/api/workspace/member-inbox", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ event_ids: [inboxRow.eventId] }),
-                        });
-                        setInboxEvents((prev) => prev.filter((e) => e.id !== r.id));
-                        writeActiveWorkspaceSession(inboxRow.operatorUserId);
-                        void switchWorkspace(inboxRow.operatorUserId).then(() => {
-                          router.push(inboxRow.href);
-                        });
-                        setOpen(false);
-                        return;
-                      }
-                      const memberRow = memberEvents.find((e) => e.id === r.id);
+                      const memberRow = memberEvents.find((ev) => ev.id === r.id);
                       if (memberRow && live) {
                         void fetch("/api/workspace/member-events", {
                           method: "POST",
@@ -271,7 +321,8 @@ export function NotificationsPopover({
                     <p className="mt-0.5 line-clamp-2 text-xs text-text-secondary">{r.subtitle}</p>
                   </Link>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
           <div className="border-t border-border-light px-2 py-2">

@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
-import {
-  enrichThreadsWithGoogleProfile,
-  fetchGmailInboxThreadPage,
-  fetchGoogleUserProfile,
-  GMAIL_INBOX_PAGE_SIZE,
-} from "@/lib/gmail/fetch-threads";
+import { GMAIL_INBOX_PAGE_SIZE } from "@/lib/gmail/fetch-threads";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
-import {
-  getGmailConnectionForUser,
-  getValidGmailAccessToken,
-} from "@/lib/supabase/gmail-connection";
+import { loadMailroomInboxPage } from "@/lib/mailroom/fetch-inbox-page";
+import { getGmailConnectionForUser } from "@/lib/supabase/gmail-connection";
 import { createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 60;
 
-/** Live: Gmail inbox threads only. Mock mode returns empty (client uses demo threads). */
+/** Live: Gmail inbox threads (metadata list, Supabase + edge cache on first page). */
 export async function GET(request: Request) {
   const live = await isLiveBackendEnabled();
   if (!live) {
@@ -56,28 +49,35 @@ export async function GET(request: Request) {
     ? Math.min(GMAIL_INBOX_PAGE_SIZE, Math.max(1, maxResultsRaw))
     : GMAIL_INBOX_PAGE_SIZE;
   const q = url.searchParams.get("q")?.trim() || undefined;
+  const skipCache = url.searchParams.get("fresh") === "1";
 
   try {
-    const { accessToken } = await getValidGmailAccessToken(connection);
-    const [page, profile] = await Promise.all([
-      fetchGmailInboxThreadPage(accessToken, { pageToken, maxResults, q }),
-      fetchGoogleUserProfile(accessToken).catch(() => null),
-    ]);
-    const enriched = profile
-      ? enrichThreadsWithGoogleProfile(page.threads, profile)
-      : page.threads;
-    return NextResponse.json({
-      threads: enriched,
+    const page = await loadMailroomInboxPage(user.id, connection, {
+      pageToken,
+      maxResults,
+      q,
+      skipCache,
+    });
+
+    const res = NextResponse.json({
+      threads: page.threads,
       nextPageToken: page.nextPageToken,
       hasMore: Boolean(page.nextPageToken),
       resultSizeEstimate: page.resultSizeEstimate,
-      pageSize: maxResults,
+      pageSize: page.pageSize,
       searchQuery: q ?? null,
       source: "live",
+      inboxSource: page.source,
       connected: true,
       email: connection.email,
-      profilePicture: profile?.picture ?? null,
+      profilePicture: page.profilePicture,
     });
+
+    if (page.source === "cache" && !pageToken && !q) {
+      res.headers.set("Cache-Control", "private, s-maxage=60, stale-while-revalidate=120");
+    }
+
+    return res;
   } catch (e) {
     console.error("[api/mailroom/threads]", e);
     return NextResponse.json(

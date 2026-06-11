@@ -113,19 +113,12 @@ export function MailroomConnectHero({
           </p>
         ) : null}
 
-        {!isMock && signedInEmail ? (
-          <p className="mt-4 text-xs text-slate-400">
-            Signed in to OnPro as{" "}
-            <span className="font-medium text-slate-600">{signedInEmail}</span>
-            {" — "}
-            Gmail connects to this account only.
-          </p>
-        ) : !isMock ? (
+        {!isMock && !signedInEmail ? (
           <p className="mt-4 max-w-md text-sm text-slate-600">
             <Link href="/login?next=/mailroom" className="font-semibold text-[#7c3aed] hover:underline">
-              Sign in to OnPro
+              Sign in
             </Link>{" "}
-            first, then connect your Gmail.
+            to connect Gmail.
           </p>
         ) : null}
 

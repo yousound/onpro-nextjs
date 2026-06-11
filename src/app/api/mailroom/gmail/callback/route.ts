@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { exchangeGmailCode } from "@/lib/gmail/oauth";
 import { fetchGoogleUserEmail } from "@/lib/gmail/fetch-threads";
+import { startGmailWatch } from "@/lib/gmail/watch";
 import {
   getGmailConnectionForUser,
   upsertGmailConnection,
@@ -53,6 +54,9 @@ export async function GET(request: Request) {
       expires_in: tokens.expires_in,
       scopes: tokens.scope,
     });
+    void startGmailWatch(tokens.access_token, user.id).catch((e) =>
+      console.warn("[gmail/callback] watch start failed", e),
+    );
     return NextResponse.redirect(`${origin}/mailroom?gmail=connected`);
   } catch (e) {
     console.error("[gmail/callback]", e);

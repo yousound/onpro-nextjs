@@ -6,7 +6,7 @@ import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { workspaceDisplayName } from "@/lib/workspace-display-name";
 
 export function WorkspaceTeamViewBanner() {
-  const { isTeamView, active, joinedTeams, canSwitch, switchWorkspace, loading } = useWorkspace();
+  const { isTeamView, active, joinedTeams, canSwitch, switchWorkspace } = useWorkspace();
 
   const viewedName = useMemo(() => {
     if (!isTeamView) return active.workspaceName;
@@ -18,7 +18,7 @@ export function WorkspaceTeamViewBanner() {
     });
   }, [isTeamView, active, joinedTeams]);
 
-  if (!isClientLiveBackend() || loading || !isTeamView || !canSwitch) return null;
+  if (!isClientLiveBackend() || !isTeamView || !canSwitch) return null;
 
   return (
     <div className="shrink-0 border-b border-violet-200/80 bg-violet-50/90 px-4 py-2 text-center text-sm text-violet-950">

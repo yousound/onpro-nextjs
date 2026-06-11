@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
+import { stopGmailWatch } from "@/lib/gmail/watch";
 import {
   deleteGmailConnection,
   getGmailConnectionForUser,
+  getValidGmailAccessToken,
   isMissingGmailTableError,
 } from "@/lib/supabase/gmail-connection";
+import { clearGmailInboxCache } from "@/lib/supabase/gmail-inbox-cache";
+import { invalidateMailroomInboxCache } from "@/lib/mailroom/fetch-inbox-page";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -80,7 +84,19 @@ export async function DELETE() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const connection = await getGmailConnectionForUser(user.id);
+  if (connection) {
+    try {
+      const { accessToken } = await getValidGmailAccessToken(connection);
+      await stopGmailWatch(accessToken);
+    } catch {
+      /* best effort */
+    }
+  }
+
   await deleteGmailConnection(user.id);
+  await clearGmailInboxCache(user.id);
+  invalidateMailroomInboxCache(user.id);
   return NextResponse.json({ connected: false, email: null });
 }
 

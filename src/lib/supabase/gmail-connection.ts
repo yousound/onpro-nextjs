@@ -36,6 +36,24 @@ export async function getGmailConnectionForUser(
   return data as GmailConnectionRow | null;
 }
 
+/** Service role lookup (webhooks / Pub/Sub — no user session). */
+export async function getGmailConnectionForUserService(
+  userId: string,
+): Promise<GmailConnectionRow | null> {
+  const supabase = createServiceClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("user_gmail_connections")
+    .select("user_id, email, refresh_token, access_token, access_token_expires_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingGmailTableError(error)) return null;
+    throw error;
+  }
+  return data as GmailConnectionRow | null;
+}
+
 export async function upsertGmailConnection(row: {
   user_id: string;
   email: string;

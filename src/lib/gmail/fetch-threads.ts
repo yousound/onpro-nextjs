@@ -185,18 +185,73 @@ function extractBodyFromPayload(payload: GmailPayload): string {
   return "";
 }
 
+export function gmailApiThreadIdFromEmailThreadId(threadId: string): string | null {
+  if (!threadId.startsWith("gmail-")) return null;
+  return threadId.slice("gmail-".length);
+}
+
+export type GmailThreadFormat = "full" | "metadata";
+
+type GmailThreadRaw = {
+  id: string;
+  messages?: Array<{
+    id: string;
+    internalDate?: string;
+    labelIds?: string[];
+    snippet?: string;
+    payload?: GmailPayload & { headers?: GmailHeader[] };
+  }>;
+};
+
+function mapGmailThreadMetadata(raw: GmailThreadRaw): EmailThread | null {
+  const messages = raw.messages ?? [];
+  if (messages.length === 0) return null;
+
+  const sorted = [...messages].sort(
+    (a, b) => Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0),
+  );
+  const first = sorted[0];
+  const subject = header(first.payload?.headers, "Subject") || "(No subject)";
+  const isUnread = messages.some((m) => m.labelIds?.includes("UNREAD"));
+
+  const mappedMessages: EmailMessage[] = sorted.map((m) => {
+    const fromRaw = header(m.payload?.headers, "From");
+    const at = m.internalDate
+      ? new Date(Number(m.internalDate)).toISOString()
+      : new Date().toISOString();
+    const snippet = (m.snippet ?? header(m.payload?.headers, "Snippet")).trim();
+    const body = snippet ? normalizeEmailBody(snippet) : "";
+    return {
+      id: m.id,
+      from: parseFrom(fromRaw),
+      at,
+      body,
+    };
+  });
+
+  const participants = new Map<string, { name: string; email: string }>();
+  for (const msg of mappedMessages) {
+    if (msg.from.email) participants.set(msg.from.email, msg.from);
+  }
+
+  return {
+    id: `gmail-${raw.id}`,
+    subject,
+    participants: [...participants.values()],
+    messages: mappedMessages,
+    status: isUnread ? "unread" : "read",
+    channel: "email",
+    category: "other",
+    related: {},
+  };
+}
+
 async function mapGmailThread(
   accessToken: string,
-  raw: {
-    id: string;
-    messages?: Array<{
-      id: string;
-      internalDate?: string;
-      labelIds?: string[];
-      payload?: GmailPayload & { headers?: GmailHeader[] };
-    }>;
-  },
+  raw: GmailThreadRaw,
+  opts?: { resolveInlineImages?: boolean },
 ): Promise<EmailThread | null> {
+  const resolveInlineImages = opts?.resolveInlineImages !== false;
   const messages = raw.messages ?? [];
   if (messages.length === 0) return null;
 
@@ -217,7 +272,9 @@ async function mapGmailThread(
       const bodyRaw = extractBodyFromPayload(payload).trim();
       const snippet = header(m.payload?.headers, "Snippet");
       const body = bodyRaw || (snippet ? normalizeEmailBody(snippet) : "");
-      const inlineImages = await resolveMessageImages(accessToken, m.id, payload);
+      const inlineImages = resolveInlineImages
+        ? await resolveMessageImages(accessToken, m.id, payload)
+        : [];
       return {
         id: m.id,
         from: parseFrom(fromRaw),
@@ -245,8 +302,19 @@ async function mapGmailThread(
   };
 }
 
+/** Map a Gmail threads.get JSON payload to EmailThread (metadata or full). */
+export async function mapGmailThreadFromRaw(
+  accessToken: string,
+  raw: GmailThreadRaw,
+  opts?: { format?: GmailThreadFormat; resolveInlineImages?: boolean },
+): Promise<EmailThread | null> {
+  if (opts?.format === "metadata") return mapGmailThreadMetadata(raw);
+  return mapGmailThread(accessToken, raw, opts);
+}
+
 export const GMAIL_INBOX_PAGE_SIZE = 40;
-const GMAIL_THREAD_FETCH_CONCURRENCY = 6;
+/** Smaller first page for faster connect / first paint. */
+export const GMAIL_INBOX_FIRST_PAGE_SIZE = 15;
 
 export type GmailInboxPage = {
   threads: EmailThread[];
@@ -263,36 +331,55 @@ function sortThreadsByLatest(threads: EmailThread[]): EmailThread[] {
   });
 }
 
-async function fetchGmailThreadById(
+export async function fetchGmailThreadById(
   accessToken: string,
   id: string,
+  opts?: { resolveInlineImages?: boolean; format?: GmailThreadFormat },
 ): Promise<EmailThread | null> {
+  const format: GmailThreadFormat = opts?.format ?? "full";
+  const params = new URLSearchParams({ format });
+  if (format === "metadata") {
+    params.append("metadataHeaders", "Subject");
+    params.append("metadataHeaders", "From");
+    params.append("metadataHeaders", "To");
+  }
   const threadRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}?format=full`,
+    `https://gmail.googleapis.com/gmail/v1/users/me/threads/${id}?${params}`,
     { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
   );
   if (!threadRes.ok) return null;
-  const raw = (await threadRes.json()) as Parameters<typeof mapGmailThread>[1];
-  return mapGmailThread(accessToken, raw);
+  const raw = (await threadRes.json()) as GmailThreadRaw;
+  return mapGmailThreadFromRaw(accessToken, raw, { ...opts, format });
 }
 
 async function fetchGmailThreadsByIds(
   accessToken: string,
   ids: string[],
+  opts?: { resolveInlineImages?: boolean; format?: GmailThreadFormat },
 ): Promise<EmailThread[]> {
-  const threads: EmailThread[] = [];
-  for (let i = 0; i < ids.length; i += GMAIL_THREAD_FETCH_CONCURRENCY) {
-    const batch = ids.slice(i, i + GMAIL_THREAD_FETCH_CONCURRENCY);
-    const mapped = await Promise.all(batch.map((id) => fetchGmailThreadById(accessToken, id)));
-    for (const t of mapped) if (t) threads.push(t);
-  }
+  if (ids.length === 0) return [];
+  const format: GmailThreadFormat = opts?.format ?? "metadata";
+  const { batchFetchGmailThreads } = await import("@/lib/gmail/batch-gmail");
+  const mapped = await batchFetchGmailThreads(accessToken, ids, {
+    format,
+    resolveInlineImages: opts?.resolveInlineImages,
+  });
+  const threads = mapped.filter((t): t is EmailThread => t != null);
   return sortThreadsByLatest(threads);
 }
 
 /** One page of INBOX threads (default 40) with optional Gmail `pageToken`. */
 export async function fetchGmailInboxThreadPage(
   accessToken: string,
-  opts?: { maxResults?: number; pageToken?: string; q?: string },
+  opts?: {
+    maxResults?: number;
+    pageToken?: string;
+    q?: string;
+    /** When false, skips Gmail attachment fetches for inline images (faster list load). */
+    resolveInlineImages?: boolean;
+    /** List loads use metadata (fast); detail uses full. */
+    format?: GmailThreadFormat;
+  },
 ): Promise<GmailInboxPage> {
   const maxResults = Math.min(
     GMAIL_INBOX_PAGE_SIZE,
@@ -321,7 +408,10 @@ export async function fetchGmailInboxThreadPage(
     resultSizeEstimate?: number;
   };
   const ids = (listJson.threads ?? []).map((t) => t.id);
-  const threads = await fetchGmailThreadsByIds(accessToken, ids);
+  const threads = await fetchGmailThreadsByIds(accessToken, ids, {
+    resolveInlineImages: opts?.resolveInlineImages,
+    format: opts?.format ?? "metadata",
+  });
 
   return {
     threads,

@@ -111,6 +111,7 @@ import {
   GmailStatusError,
   mailroomApiEnabled,
   MAILROOM_FIRST_INBOX_PAGE_SIZE,
+  MAILROOM_REFRESH_INBOX_PAGE_SIZE,
   sendMailroomChatViaApi,
   invalidateMailroomSummarizeCache,
   summarizeThreadViaApi,
@@ -123,6 +124,7 @@ import {
   clearMailroomGmailThreadCache,
   getCachedMailroomGmailThreads,
   mergeCachedMailroomGmailThreads,
+  refreshMailroomGmailFromBootstrap,
 } from "@/lib/mailroom/gmail-thread-cache";
 import { MailroomConnectHero } from "@/components/mailroom-connect-hero";
 import { useCurrentUser } from "@/components/profile-provider";
@@ -347,6 +349,7 @@ export function MailroomView() {
   const gmailBackgroundLoadRef = useRef(false);
   const gmailFullThreadIdsRef = useRef(new Set<string>());
   const lastInboxRefreshRef = useRef(0);
+  const inboxRefreshInFlightRef = useRef(false);
   const [gmailThreadDetailLoading, setGmailThreadDetailLoading] = useState(false);
   const [gmailStatus, setGmailStatus] = useState({
     loading: isLiveMailroom && gmailOAuthFlag !== "connected",
@@ -482,18 +485,38 @@ export function MailroomView() {
 
   const refreshInbox = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!isLiveMailroom || gmailSearchActive || gmailThreadsLoading) return;
+      if (!isLiveMailroom || gmailSearchActive || inboxRefreshInFlightRef.current) return;
+      inboxRefreshInFlightRef.current = true;
       setGmailThreadsLoading(true);
       try {
         const bootstrap = await fetchMailroomBootstrapViaApi({
-          maxResults: MAILROOM_FIRST_INBOX_PAGE_SIZE,
+          maxResults: MAILROOM_REFRESH_INBOX_PAGE_SIZE,
           fresh: true,
         });
         if (!bootstrap.connected) return;
-        const merged = applyBootstrapThreads(bootstrap);
+        const estimate = bootstrap.resultSizeEstimate ?? null;
+        setGmailInboxEstimate(estimate);
+        const { threads: merged, newThreadIds, updatedThreadIds } =
+          refreshMailroomGmailFromBootstrap(bootstrap.threads, bootstrap.nextPageToken ?? null, {
+            estimatedTotal: estimate,
+            markComplete: !bootstrap.nextPageToken,
+          });
+        setGmailThreads(merged);
+        setGmailNextPageToken(bootstrap.nextPageToken ?? null);
+        setGmailSyncComplete(!bootstrap.nextPageToken);
         lastInboxRefreshRef.current = Date.now();
         touchMailroomLastRefreshMs();
-        if (!opts?.silent) {
+
+        const incomingCount = newThreadIds.length + updatedThreadIds.length;
+        if (incomingCount > 0) {
+          if (newThreadIds[0]) setSelectedThreadId(newThreadIds[0]);
+          else if (updatedThreadIds[0]) setSelectedThreadId(updatedThreadIds[0]);
+          const label =
+            newThreadIds.length > 0
+              ? `${newThreadIds.length} new thread${newThreadIds.length === 1 ? "" : "s"}`
+              : `${updatedThreadIds.length} updated thread${updatedThreadIds.length === 1 ? "" : "s"}`;
+          setToast(opts?.silent ? `New mail · ${label}` : `Inbox updated · ${label}`);
+        } else if (!opts?.silent) {
           setToast(`Inbox updated · ${merged.length} thread${merged.length === 1 ? "" : "s"}`);
         }
       } catch (e) {
@@ -501,10 +524,11 @@ export function MailroomView() {
           setToast(e instanceof Error ? e.message : "Could not refresh inbox");
         }
       } finally {
+        inboxRefreshInFlightRef.current = false;
         setGmailThreadsLoading(false);
       }
     },
-    [applyBootstrapThreads, gmailSearchActive, gmailThreadsLoading, isLiveMailroom],
+    [gmailSearchActive, isLiveMailroom],
   );
 
   async function runGmailInboxSearch() {

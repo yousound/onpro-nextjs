@@ -14,8 +14,42 @@ import {
   updateGmailSyncState,
   upsertInboxThreads,
 } from "@/lib/supabase/gmail-inbox-cache";
+import { syncGmailHistoryForUser } from "@/lib/gmail/history-sync";
 import { startGmailWatch, watchNeedsRenewal } from "@/lib/gmail/watch";
 import type { EmailThread } from "@/lib/types/agent";
+
+function threadLatestAt(thread: EmailThread): string {
+  return thread.messages[thread.messages.length - 1]?.at ?? "";
+}
+
+function sortInboxThreads(list: EmailThread[]): EmailThread[] {
+  return [...list].sort((a, b) => threadLatestAt(b).localeCompare(threadLatestAt(a)));
+}
+
+function mergeInboxThreadsPreferNewer(...lists: EmailThread[][]): EmailThread[] {
+  const byId = new Map<string, EmailThread>();
+  for (const list of lists) {
+    for (const t of list) {
+      const prev = byId.get(t.id);
+      if (!prev || threadLatestAt(t) >= threadLatestAt(prev)) byId.set(t.id, t);
+    }
+  }
+  return sortInboxThreads([...byId.values()]);
+}
+
+async function syncRecentGmailHistory(
+  userId: string,
+  connection: GmailConnectionRow,
+): Promise<void> {
+  const sync = await getGmailSyncState(userId);
+  if (!sync?.history_id) return;
+  try {
+    const { accessToken } = await getValidGmailAccessToken(connection);
+    await syncGmailHistoryForUser(userId, accessToken, sync.history_id);
+  } catch (e) {
+    console.warn("[mailroom] history sync on fresh load failed", e);
+  }
+}
 
 export type MailroomInboxPageResult = {
   threads: EmailThread[];
@@ -127,9 +161,25 @@ export async function loadMailroomInboxPage(
     if (cached) return cached;
   }
 
-  return fetchInboxPageFromGmail(userId, connection, {
+  if (opts?.skipCache && !pageToken && !q) {
+    await syncRecentGmailHistory(userId, connection);
+  }
+
+  const page = await fetchInboxPageFromGmail(userId, connection, {
     pageToken: pageToken ?? undefined,
     maxResults,
     q: q ?? undefined,
   });
+
+  if (opts?.skipCache && !pageToken && !q) {
+    const dbRecent = await getCachedInboxThreads(userId, maxResults);
+    if (dbRecent.length > 0) {
+      return {
+        ...page,
+        threads: mergeInboxThreadsPreferNewer(page.threads, dbRecent).slice(0, maxResults),
+      };
+    }
+  }
+
+  return page;
 }

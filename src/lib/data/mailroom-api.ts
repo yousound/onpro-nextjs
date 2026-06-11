@@ -58,6 +58,8 @@ export class GmailStatusError extends Error {
 }
 
 export const MAILROOM_FIRST_INBOX_PAGE_SIZE = 15;
+/** Larger page on manual/poll refresh so new mail is more likely to appear. */
+export const MAILROOM_REFRESH_INBOX_PAGE_SIZE = 40;
 
 export type MailroomBootstrapResponse = GmailStatusResponse & {
   threads: EmailThread[];

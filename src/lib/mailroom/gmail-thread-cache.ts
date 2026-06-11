@@ -42,6 +42,10 @@ export function getCachedMailroomGmailThreads(): {
   };
 }
 
+function threadLatestAt(thread: EmailThread): string {
+  return thread.messages[thread.messages.length - 1]?.at ?? "";
+}
+
 export function mergeCachedMailroomGmailThreads(
   incoming: EmailThread[],
   pageToken: string | null,
@@ -55,6 +59,35 @@ export function mergeCachedMailroomGmailThreads(
   if (opts?.markComplete || !pageToken) syncComplete = !pageToken;
   cachedAt = Date.now();
   return threads;
+}
+
+/** Fresh poll/refresh — update first-page data, bubble updated threads to top, detect new mail. */
+export function refreshMailroomGmailFromBootstrap(
+  incoming: EmailThread[],
+  pageToken: string | null,
+  opts?: { estimatedTotal?: number | null; markComplete?: boolean },
+): { threads: EmailThread[]; newThreadIds: string[]; updatedThreadIds: string[] } {
+  const prevById = new Map(threads.map((t) => [t.id, t]));
+  const incomingMap = new Map(incoming.map((t) => [t.id, t]));
+  const newThreadIds: string[] = [];
+  const updatedThreadIds: string[] = [];
+
+  for (const t of incoming) {
+    const prev = prevById.get(t.id);
+    if (!prev) {
+      newThreadIds.push(t.id);
+    } else if (threadLatestAt(t) !== threadLatestAt(prev)) {
+      updatedThreadIds.push(t.id);
+    }
+  }
+
+  const kept = threads.filter((t) => !incomingMap.has(t.id));
+  threads = sortThreads([...incoming, ...kept]);
+  nextPageToken = pageToken;
+  if (opts?.estimatedTotal != null) estimatedTotal = opts.estimatedTotal;
+  if (opts?.markComplete || !pageToken) syncComplete = !pageToken;
+  cachedAt = Date.now();
+  return { threads, newThreadIds, updatedThreadIds };
 }
 
 export function getMailroomGmailSyncMeta(): MailroomGmailSyncMeta {

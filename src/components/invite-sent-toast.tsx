@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { TOAST_AUTO_DISMISS_MS } from "@/components/app-toast";
 import { ToastViewport } from "@/components/toast-viewport";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { segmentBadgeSoftClass, segmentLabel } from "@/lib/mock/people";
@@ -23,7 +24,7 @@ export function InviteSentToast({
 
   useEffect(() => {
     if (!payload) return;
-    const id = window.setTimeout(() => dismissRef.current(), 5200);
+    const id = window.setTimeout(() => dismissRef.current(), TOAST_AUTO_DISMISS_MS);
     return () => window.clearTimeout(id);
   }, [payload]);
 

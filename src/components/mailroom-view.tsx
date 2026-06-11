@@ -130,7 +130,7 @@ import { MailroomConnectHero } from "@/components/mailroom-connect-hero";
 import { useCurrentUser } from "@/components/profile-provider";
 import { shouldShowSectionCover } from "@/lib/section-cover";
 import { useStripSectionCoverWhenPopulated } from "@/lib/section-cover-hooks";
-import { ToastViewport } from "@/components/toast-viewport";
+import { AppToast } from "@/components/app-toast";
 import { emailBodyPreview, normalizeEmailBody } from "@/lib/email-body";
 import { importMailroomImagesToDocuments } from "@/lib/documents/import-mailroom-images";
 import { getDocuments } from "@/lib/mock/documents";
@@ -1606,16 +1606,6 @@ export function MailroomView() {
           ) : null}
         </div>
         <div className="flex items-center gap-3">
-          {!isMock && inboxConnected ? (
-            <button
-              type="button"
-              onClick={() => void refreshInbox()}
-              disabled={gmailThreadsLoading}
-              className="text-[11px] font-semibold text-text-secondary hover:text-accent hover:underline disabled:cursor-wait disabled:opacity-60"
-            >
-              {gmailThreadsLoading ? "Fetching…" : "Refresh inbox"}
-            </button>
-          ) : null}
           <button
             type="button"
             onClick={() => void handleDisconnectInbox()}
@@ -1635,6 +1625,8 @@ export function MailroomView() {
               syncComplete={gmailSyncComplete}
               loadingMore={gmailLoadingMore}
               initialLoading={gmailThreadsLoading}
+              onRefresh={() => void refreshInbox()}
+              refreshing={gmailThreadsLoading}
               search={threadSearch}
               onSearchChange={(value) => {
                 setThreadSearch(value);
@@ -1797,20 +1789,7 @@ export function MailroomView() {
           />
       </div>
 
-      {toast ? (
-        <ToastViewport>
-          <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-text-primary px-4 py-2 text-xs font-semibold text-white shadow-xl">
-            {toast}
-            <button
-              type="button"
-              onClick={() => setToast(null)}
-              className="rounded px-2 py-0.5 text-[10px] uppercase ring-1 ring-white/30 hover:bg-white/10"
-            >
-              Dismiss
-            </button>
-          </div>
-        </ToastViewport>
-      ) : null}
+      <AppToast message={toast} onDismiss={() => setToast(null)} />
 
       {viewItem ? (
         <GeneratedItemDetailModal item={viewItem} onClose={() => setViewItem(null)} />
@@ -1915,6 +1894,8 @@ function MailroomInboxSyncBar({
   syncComplete,
   loadingMore,
   initialLoading = false,
+  onRefresh,
+  refreshing = false,
   search,
   onSearchChange,
   onSearchSubmit,
@@ -1926,6 +1907,8 @@ function MailroomInboxSyncBar({
   syncComplete: boolean;
   loadingMore: boolean;
   initialLoading?: boolean;
+  onRefresh?: () => void;
+  refreshing?: boolean;
   search: string;
   onSearchChange: (value: string) => void;
   onSearchSubmit: () => void;
@@ -1940,7 +1923,7 @@ function MailroomInboxSyncBar({
   return (
     <div className="shrink-0 border-b border-border-light bg-slate-50/80 px-3 py-2.5">
       <div className="flex items-center justify-between gap-2 text-[10px] text-text-secondary">
-        <span className="font-medium">
+        <span className="min-w-0 font-medium leading-snug">
           {initialLoading
             ? "Fetching your inbox from Gmail…"
             : syncComplete
@@ -1949,9 +1932,21 @@ function MailroomInboxSyncBar({
                 ? `Loading more… ${loadedCount}${estimatedTotal ? ` / ~${estimatedTotal}` : ""}`
                 : `${loadedCount} thread${loadedCount === 1 ? "" : "s"} loaded${estimatedTotal ? ` · ~${estimatedTotal} in inbox` : ""} — scroll for more`}
         </span>
-        {initialLoading || loadingMore ? (
-          <span className="size-2 shrink-0 animate-pulse rounded-full bg-violet-500" />
-        ) : null}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {initialLoading || loadingMore ? (
+            <span className="size-2 shrink-0 animate-pulse rounded-full bg-violet-500" />
+          ) : null}
+          {onRefresh ? (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-accent hover:bg-accent/10 hover:underline disabled:cursor-wait disabled:opacity-60"
+            >
+              {refreshing ? "Fetching…" : "Refresh"}
+            </button>
+          ) : null}
+        </div>
       </div>
       {initialLoading ? (
         <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200">
@@ -2089,7 +2084,7 @@ function ThreadList({
       ) : null}
       {threads.length === 0 && !initialLoading ? (
         <li className="px-3 py-8 text-center text-[12px] text-text-secondary">
-          {emptyMessage ?? "No emails loaded yet. Try Refresh inbox above."}
+          {emptyMessage ?? "No emails loaded yet. Tap Refresh beside the inbox count."}
         </li>
       ) : null}
       {threads.map((t) => {

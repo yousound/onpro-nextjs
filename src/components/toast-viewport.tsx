@@ -1,10 +1,22 @@
-import type { ReactNode } from "react";
+"use client";
 
-/** Fixed top-center slot for transient toasts (below typical page chrome). */
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+/** Fixed top-center slot for transient toasts — portaled above all page chrome. */
 export function ToastViewport({ children }: { children: ReactNode }) {
-  return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-[280] flex justify-center px-4 sm:top-6">
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="pointer-events-none fixed inset-x-0 top-4 z-[9999] flex justify-center px-4 sm:top-6">
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }

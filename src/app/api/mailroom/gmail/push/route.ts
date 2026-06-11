@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { syncGmailHistoryForUser, resolveHistoryStartId } from "@/lib/gmail/history-sync";
-import { invalidateMailroomInboxCache } from "@/lib/mailroom/fetch-inbox-page";
 import {
   getGmailConnectionForUserService,
   getValidGmailAccessToken,
@@ -63,7 +62,6 @@ export async function POST(request: Request) {
     }
 
     const result = await syncGmailHistoryForUser(userId, accessToken, startId);
-    invalidateMailroomInboxCache(userId);
 
     return NextResponse.json({
       ok: true,

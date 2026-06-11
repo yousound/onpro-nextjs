@@ -1,4 +1,3 @@
-import { unstable_cache, revalidateTag } from "next/cache";
 import {
   enrichThreadsWithGoogleProfile,
   fetchGmailInboxThreadPage,
@@ -27,14 +26,6 @@ export type MailroomInboxPageResult = {
   profilePicture: string | null;
 };
 
-function cacheTag(userId: string): string {
-  return `mailroom-inbox-${userId}`;
-}
-
-export function invalidateMailroomInboxCache(userId: string): void {
-  revalidateTag(cacheTag(userId));
-}
-
 async function readCachedInboxPage(
   userId: string,
   maxResults: number,
@@ -51,14 +42,6 @@ async function readCachedInboxPage(
     source: "cache",
     profilePicture: null,
   };
-}
-
-function getCachedInboxPage(userId: string, maxResults: number) {
-  return unstable_cache(
-    async () => readCachedInboxPage(userId, maxResults),
-    ["mailroom-inbox-page", userId, String(maxResults)],
-    { revalidate: 60, tags: [cacheTag(userId)] },
-  );
 }
 
 async function fetchInboxPageFromGmail(
@@ -132,7 +115,7 @@ export async function loadMailroomInboxPage(
   const q = opts?.q?.trim() || null;
 
   if (!opts?.skipCache && !pageToken && !q) {
-    const cached = await getCachedInboxPage(userId, maxResults)();
+    const cached = await readCachedInboxPage(userId, maxResults);
     if (cached) return cached;
   }
 
@@ -142,5 +125,3 @@ export async function loadMailroomInboxPage(
     q: q ?? undefined,
   });
 }
-
-export { cacheTag as mailroomInboxCacheTag };

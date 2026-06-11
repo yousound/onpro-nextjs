@@ -9,7 +9,6 @@ import {
   isMissingGmailTableError,
 } from "@/lib/supabase/gmail-connection";
 import { clearGmailInboxCache } from "@/lib/supabase/gmail-inbox-cache";
-import { invalidateMailroomInboxCache } from "@/lib/mailroom/fetch-inbox-page";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -96,7 +95,6 @@ export async function DELETE() {
 
   await deleteGmailConnection(user.id);
   await clearGmailInboxCache(user.id);
-  invalidateMailroomInboxCache(user.id);
   return NextResponse.json({ connected: false, email: null });
 }
 

@@ -1,5 +1,6 @@
 import type { PackingSlipDocument, PackingSlipVariant } from "@/lib/types/packing-slip";
 import { packingSlipCompanyName, totalPieces } from "@/lib/packing-slip";
+import { LABEL_LOGO_SRC } from "@/lib/label-logo";
 
 function escapeHtml(s: string): string {
   return s
@@ -171,7 +172,7 @@ export function openPackingSlipPrintWindow(
   const w = window.open("", "_blank", "noopener,noreferrer");
   if (!w) return null;
   const title = options?.documentTitle ?? `Packing list ${slip.document_number}`;
-  const logoUrl = `${window.location.origin}/cd-label-logo.png`;
+  const logoUrl = `${window.location.origin}${LABEL_LOGO_SRC.startsWith("/") ? LABEL_LOGO_SRC : `/${LABEL_LOGO_SRC}`}`;
   w.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>${PRINT_STYLES}</style></head><body>

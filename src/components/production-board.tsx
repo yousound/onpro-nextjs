@@ -23,7 +23,9 @@ import { clientCodeByName } from "@/lib/reference/client-codes";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { JOB_WIP_COLUMNS, formatJobWipCell } from "@/lib/job-wip-columns";
 import { JobStatusBadge } from "@/components/job-status-badge";
+import { effectivePoNumber } from "@/lib/po-context";
 import { parseInspectJob } from "@/lib/job-inspect";
+import { dispatchAppToast } from "@/lib/onpro-events";
 
 export type ProductionJobRow = ProjectJob & {
   projectName: string;
@@ -31,6 +33,7 @@ export type ProductionJobRow = ProjectJob & {
   orderNumber: string;
   orderDue: string | null;
   orderPo: string;
+  projectPo: string;
 };
 
 function rowKey(row: Pick<ProductionJobRow, "project_id" | "id">): string {
@@ -47,6 +50,7 @@ export function ProductionBoard({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [modalJob, setModalJob] = useState<{ project: Project; job: ProjectJob } | null>(null);
+  const [jobsRevision, setJobsRevision] = useState(0);
 
   const projects = useMemo(() => {
     if (!isClientMockBackend()) return projectsProp;
@@ -60,18 +64,20 @@ export function ProductionBoard({
       const orderById = new Map(orders.map((o) => [o.id, o]));
       for (const j of loadProjectJobs(p.id, p)) {
         const order: ProjectOrder | undefined = j.order_id ? orderById.get(j.order_id) : orders[0];
+        const orderPo = order?.client_po_number?.trim() || order?.po_number?.trim() || "";
         rows.push({
           ...j,
           projectName: p.name,
           clientName: p.client.name,
           orderNumber: order?.order_number ?? "—",
           orderDue: order?.due_date ?? null,
-          orderPo: order?.client_po_number?.trim() || order?.po_number?.trim() || "",
+          orderPo,
+          projectPo: p.po_number?.trim() || p.project_number?.trim() || "",
         });
       }
     }
     return rows;
-  }, [projects, refreshKey]);
+  }, [projects, refreshKey, jobsRevision]);
 
   const vendors = useMemo(() => vendorContacts(loadContacts()), []);
 
@@ -101,7 +107,12 @@ export function ProductionBoard({
       { id: "job", header: "Job", size: 160, accessorFn: (r) => r.name, cell: ({ row }) => row.original.name || "—" },
       { id: "project", header: "Project", size: 140, accessorFn: (r) => r.projectName },
       { id: "client", header: "Client", size: 120, accessorFn: (r) => r.clientName },
-      { id: "po", header: "PO #", size: 130, accessorFn: (r) => r.client_po_number?.trim() || r.po_number || "" },
+      {
+        id: "po",
+        header: "PO #",
+        size: 130,
+        accessorFn: (r) => effectivePoNumber(r) || r.orderPo || r.projectPo || "—",
+      },
       {
         id: "status",
         header: "Status",
@@ -162,11 +173,13 @@ export function ProductionBoard({
   function handleSaveJob(saved: ProjectJob) {
     if (!modalJob) return;
     const current = loadProjectJobs(modalJob.project.id, modalJob.project);
-    const next = current.some((j) => j.id === saved.id)
-      ? current.map((j) => (j.id === saved.id ? saved : j))
-      : [...current, saved];
+    const isNewJob = !current.some((j) => j.id === saved.id);
+    const isDuplicate = isNewJob && modalJob.job.id !== saved.id;
+    const next = isNewJob ? [...current, saved] : current.map((j) => (j.id === saved.id ? saved : j));
     saveProjectJobs(modalJob.project.id, next);
-    setModalJob({ project: modalJob.project, job: saved });
+    setJobsRevision((r) => r + 1);
+    closeJobModal();
+    dispatchAppToast(isDuplicate ? "Job duplicated" : isNewJob ? "Job created" : "Job saved");
   }
 
   function handleDeleteJob() {
@@ -245,9 +258,7 @@ export function ProductionBoard({
           clientCode={clientCodeByName(modalJob.project.client.name) ?? "GG"}
           vendors={vendors}
           onClose={closeJobModal}
-          onSave={(saved) => {
-            handleSaveJob(saved);
-          }}
+          onSave={handleSaveJob}
           onDelete={handleDeleteJob}
         />
       ) : null}

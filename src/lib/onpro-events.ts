@@ -10,6 +10,16 @@ export const PROJECT_DELETED_EVENT = "onpro:project-deleted";
 /** Browser document library changed (mailroom import or new upload). */
 export const DOCUMENTS_CHANGED_EVENT = "onpro:documents-changed";
 
+/** App-wide transient toast (AppToastHost listens). */
+export const APP_TOAST_EVENT = "onpro:app-toast";
+
+export type AppToastDetail = { message: string };
+
+export function dispatchAppToast(message: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<AppToastDetail>(APP_TOAST_EVENT, { detail: { message } }));
+}
+
 export function dispatchOpenNewProject(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(OPEN_NEW_PROJECT_EVENT));

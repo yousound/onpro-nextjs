@@ -9,6 +9,7 @@ import { WorkspaceProvider } from "@/components/workspace-provider";
 import { WorkspaceDataSync } from "@/components/workspace-data-sync";
 import { WorkspaceTeamViewBanner } from "@/components/workspace-team-view-banner";
 import { WorkspaceWelcomeGate } from "@/components/workspace-welcome-gate";
+import { AppToastHost } from "@/components/app-toast-host";
 import { ensureClientLiveBackendCookie } from "@/lib/config/backend-mode";
 
 export function DashboardShell({
@@ -38,6 +39,7 @@ export function DashboardShell({
           <CommandPalette />
           <AssistantChatModal />
           <WorkspaceWelcomeGate />
+          <AppToastHost />
         </div>
       </WorkspaceProvider>
     </ProfileProvider>

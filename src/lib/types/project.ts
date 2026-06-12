@@ -83,6 +83,26 @@ export interface CostingExtraTrack {
   approval_status: ApprovalStatus | null;
 }
 
+/** Repeatable trim workflow rows on a job (Development). */
+export interface TrimLineTrack {
+  id: string;
+  vendor: string | null;
+  trim_type: string | null;
+  trim_ordered_date: ISODate;
+  trim_received_date: ISODate;
+}
+
+/** Fixed sample approval stage (Development). */
+export type SampleApprovalKey = "1st" | "2nd" | "pp";
+
+export interface SampleApprovalStage {
+  key: SampleApprovalKey;
+  label: string;
+  requested_date: ISODate;
+  due_date: ISODate;
+  status: ApprovalStatus | null;
+}
+
 /** Repeatable bulk production schedules on one project. */
 export interface BulkProductionTrack {
   id: string;
@@ -93,6 +113,8 @@ export interface BulkProductionTrack {
   barcodes_sent_to_vendor_date: ISODate;
   top_due_date: ISODate;
   top_approved_date: ISODate;
+  /** Print production — single trimming completed date. */
+  trimming_completed_date: ISODate;
   bulk_target_delivery_date: ISODate;
   ex_factory_date: ISODate;
 }

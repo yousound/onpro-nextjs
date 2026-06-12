@@ -161,6 +161,9 @@ export function ProjectModalPanelFooter({
   deleteLabel,
   onDelete,
   deleteDisabled,
+  extraLeftLabel,
+  onExtraLeft,
+  onPrimary,
 }: {
   secondaryLabel: string;
   onSecondary: () => void;
@@ -170,22 +173,41 @@ export function ProjectModalPanelFooter({
   deleteLabel?: string;
   onDelete?: () => void;
   deleteDisabled?: boolean;
+  extraLeftLabel?: string;
+  onExtraLeft?: () => void;
+  /** When set, primary renders as type="button" instead of submit. */
+  onPrimary?: () => void;
 }) {
+  const hasLeft = Boolean((deleteLabel && onDelete) || (extraLeftLabel && onExtraLeft));
   return (
     <div
       className={`flex shrink-0 items-center gap-3 border-t border-slate-100 px-5 py-4 sm:px-6 ${
-        deleteLabel && onDelete ? "justify-between" : "justify-end"
+        hasLeft ? "justify-between" : "justify-end"
       }`}
     >
-      {deleteLabel && onDelete ? (
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={deleteDisabled}
-          className="rounded-xl px-2 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-        >
-          {deleteLabel}
-        </button>
+      {hasLeft ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {deleteLabel && onDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleteDisabled}
+              className="rounded-xl px-2 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              {deleteLabel}
+            </button>
+          ) : null}
+          {extraLeftLabel && onExtraLeft ? (
+            <button
+              type="button"
+              onClick={onExtraLeft}
+              disabled={deleteDisabled}
+              className="rounded-xl px-2 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            >
+              {extraLeftLabel}
+            </button>
+          ) : null}
+        </div>
       ) : (
         <span />
       )}
@@ -199,7 +221,8 @@ export function ProjectModalPanelFooter({
           {secondaryLabel}
         </button>
         <button
-          type="submit"
+          type={onPrimary ? "button" : "submit"}
+          onClick={onPrimary}
           disabled={primaryDisabled}
           className="inline-flex items-center gap-2 rounded-xl bg-[#7c3aed] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-500/25 hover:bg-[#6d28d9] disabled:opacity-50"
         >

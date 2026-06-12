@@ -39,28 +39,35 @@ export function saveProjectOrders(projectId: number, orders: ProjectOrder[]) {
   }
 }
 
+/** Backfill jobs missing order_id onto the first project order. */
+export function backfillOrphanJobOrderIds(projectId: number, orders: ProjectOrder[]): boolean {
+  if (orders.length === 0) return false;
+  const jobs = loadProjectJobs(projectId);
+  if (!jobs.some((j) => !j.order_id)) return false;
+  const defaultOrderId = orders[0]!.id;
+  saveProjectJobs(
+    projectId,
+    jobs.map((j) => (j.order_id ? j : { ...j, order_id: defaultOrderId })),
+  );
+  return true;
+}
+
 /** Backfill: one order per project grouping legacy jobs without order_id. */
 export function ensureDefaultOrders(
   projectId: number,
   project: Project,
   operatorCode = "OP",
 ): ProjectOrder[] {
-  const jobs = loadProjectJobs(projectId, project);
   const existing = readStoredProjectOrders(projectId);
   if (existing.length > 0) {
     saveProjectOrders(projectId, existing);
+    backfillOrphanJobOrderIds(projectId, existing);
     return existing;
   }
 
   const order = createNewOrderSeed(project, [], operatorCode);
   saveProjectOrders(projectId, [order]);
-
-  if (jobs.some((j) => !j.order_id)) {
-    saveProjectJobs(
-      projectId,
-      jobs.map((j) => (j.order_id ? j : { ...j, order_id: order.id })),
-    );
-  }
+  backfillOrphanJobOrderIds(projectId, [order]);
 
   return [order];
 }

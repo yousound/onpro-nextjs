@@ -50,7 +50,7 @@ import { EditProjectModal } from "@/components/edit-project-modal";
 import { parseInspectJob } from "@/lib/job-inspect";
 import { commitDeleteProject } from "@/lib/data/delete-project";
 import { countExtraDocumentsForProject } from "@/lib/documents/delete-documents";
-import { dispatchProjectDeleted } from "@/lib/onpro-events";
+import { dispatchProjectDeleted, dispatchAppToast } from "@/lib/onpro-events";
 
 const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
   "IN DEVELOPMENT",
@@ -165,6 +165,7 @@ export function ProjectJobsView({
         : null,
     );
     setOrders(ensureDefaultOrders(project.id, mergedProject, opCode));
+    setJobs(loadProjectJobs(project.id, mergedProject));
     setHydrated(true);
   }, [project, project.id, initialJobs, currentUser]);
 
@@ -301,15 +302,29 @@ export function ProjectJobsView({
     setEditModal(null);
     setJobDetailsFocus(null);
     setPendingOrderId(null);
+    const params = new URLSearchParams(searchParams.toString());
+    if (params.has("inspectJob")) {
+      params.delete("inspectJob");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }
   }
 
   function handleSaveJob(saved: ProjectJob) {
+    const modalJobId = editModal?.kind === "job" ? editModal.jobId : null;
+    const isCreate = modalJobId === "__new__";
+    const isDuplicate =
+      modalJobId != null &&
+      modalJobId !== "__new__" &&
+      modalJobId !== saved.id &&
+      !jobs.some((j) => j.id === saved.id);
     persistJobs((prev) => {
       const exists = prev.some((j) => j.id === saved.id);
       if (exists) return prev.map((j) => (j.id === saved.id ? saved : j));
       return [...prev, saved];
     });
     closeModal();
+    dispatchAppToast(isDuplicate ? "Job duplicated" : isCreate ? "Job created" : "Job saved");
   }
 
   function handleDeleteJob() {
@@ -419,6 +434,11 @@ export function ProjectJobsView({
         onOpenJob={openJobEdit}
         onAddJobToOrder={(orderId) => {
           setPendingOrderId(orderId);
+          setEditModal({ kind: "job", jobId: "__new__" });
+        }}
+        onAddJob={() => {
+          const orderId = orders[0]?.id;
+          if (orderId) setPendingOrderId(orderId);
           setEditModal({ kind: "job", jobId: "__new__" });
         }}
       />

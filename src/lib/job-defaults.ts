@@ -7,6 +7,8 @@ import {
   defaultDyeCostingTrack,
   defaultPrintEmbroideryTrack,
 } from "@/lib/project-repeatable-tracks";
+import { defaultSampleApprovalStages, resolveSampleApprovalStages } from "@/lib/job-development";
+import { repairJobTimelineWithTemplate } from "@/lib/job-timeline-templates";
 
 export function defaultJobEstimate(project?: Project): NonNullable<ProjectJob["estimate"]> {
   return {
@@ -22,9 +24,13 @@ export function defaultJobCosting(project?: Project): NonNullable<ProjectJob["co
     cost_sheet_prepared_date: project?.cost_sheet_prepared_date ?? null,
     estimate_sent_date: project?.estimate_sent_date ?? null,
     costing_approved: project?.costing_approved ?? null,
+    costing_approved_at: null,
     blanks_purchased_date: null,
     pg_requested_date: null,
+    blanks_received_date: null,
     dye_costing_tracks: [defaultDyeCostingTrack()],
+    trim_line_tracks: [],
+    sample_approval_stages: defaultSampleApprovalStages(),
     print_embroidery_costing_tracks: [defaultPrintEmbroideryTrack()],
     costing_extra_tracks: [defaultCostingExtraTrack()],
     colorways: project?.colorways?.length
@@ -44,13 +50,18 @@ export function defaultJobApprovals(project?: Project): NonNullable<ProjectJob["
 }
 
 export function defaultJobTechPack(project?: Project): NonNullable<ProjectJob["tech_pack"]> {
+  const due = project?.cs_tech_pack_due_date ?? project?.artwork_tech_pack_due_date ?? null;
+  const complete =
+    project?.cs_tech_pack_complete_date ?? project?.artwork_tech_pack_complete_date ?? null;
   return {
+    tech_pack_due_date: due,
+    tech_pack_complete_date: complete,
     cs_tech_pack_request_date: project?.cs_tech_pack_request_date ?? null,
-    cs_tech_pack_due_date: project?.cs_tech_pack_due_date ?? null,
-    cs_tech_pack_complete_date: project?.cs_tech_pack_complete_date ?? null,
+    cs_tech_pack_due_date: due,
+    cs_tech_pack_complete_date: complete,
     artwork_tech_pack_request_date: project?.artwork_tech_pack_request_date ?? null,
-    artwork_tech_pack_due_date: project?.artwork_tech_pack_due_date ?? null,
-    artwork_tech_pack_complete_date: project?.artwork_tech_pack_complete_date ?? null,
+    artwork_tech_pack_due_date: due,
+    artwork_tech_pack_complete_date: complete,
     artwork_files: [],
     dropbox_links: [],
   };
@@ -123,6 +134,8 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
         job.costing?.dye_costing_tracks?.length
           ? job.costing.dye_costing_tracks
           : defaultJobCosting(project).dye_costing_tracks,
+      trim_line_tracks: job.costing?.trim_line_tracks ?? defaultJobCosting(project).trim_line_tracks,
+      sample_approval_stages: resolveSampleApprovalStages(job.costing?.sample_approval_stages),
       print_embroidery_costing_tracks:
         job.costing?.print_embroidery_costing_tracks?.length
           ? job.costing.print_embroidery_costing_tracks
@@ -142,5 +155,6 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
     vendor_quotes: job.vendor_quotes ?? [],
     costing_sheet: job.costing_sheet ?? defaultCostingSheet(job),
     estimates: job.estimates ?? [],
+    timeline: repairJobTimelineWithTemplate(job.timeline, job.job_type ?? "print_production"),
   };
 }

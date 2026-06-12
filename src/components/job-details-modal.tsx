@@ -22,6 +22,7 @@ import type { Contact } from "@/lib/types/contact";
 import {
   JobDetailsFocus,
   JobDetailsSection,
+  JobScopeKind,
   JobType,
   ProjectJob,
   ProjectOrder,
@@ -45,7 +46,20 @@ import {
 import { VendorFieldSelect } from "@/components/vendor-select";
 import { sanitizeJobDisplayName } from "@/lib/job-display-name";
 import { normalizeJob } from "@/lib/job-defaults";
-import { applyDevelopmentPatch, developmentFromJob } from "@/lib/job-development";
+import {
+  applyDevelopmentPatch,
+  applyTechPackPatch,
+  barcodesSentDate,
+  developmentFromJob,
+  patchBarcodesSentDate,
+  techPackCompleteDate,
+  techPackDueDate,
+  updateSampleStage,
+  updateTrimLineTrack,
+  sampleApprovalFieldLabels,
+} from "@/lib/job-development";
+import { duplicateJobSeed } from "@/lib/project-job-create";
+import { DuplicateJobDialog, type DuplicateJobFormValues } from "@/components/duplicate-job-dialog";
 import {
   accordionSectionsFor,
   buildUpcomingJobTimelineForType,
@@ -64,6 +78,7 @@ import {
   defaultBulkProductionTrack,
   defaultDyeCostingTrack,
   defaultPrintEmbroideryTrack,
+  defaultTrimLineTrack,
   updateBulkTrack,
   updateDyeTrack,
   updatePrintEmbTrack,
@@ -401,6 +416,8 @@ export function JobDetailsModal({
     () => (focus?.section ?? "overview") as JobModalSection,
   );
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -450,10 +467,7 @@ export function JobDetailsModal({
   }, []);
 
   const patchTechPack = useCallback((partial: Partial<NonNullable<ProjectJob["tech_pack"]>>) => {
-    setDraft((prev) => ({
-      ...prev,
-      tech_pack: { ...prev.tech_pack!, ...partial },
-    }));
+    setDraft((prev) => applyTechPackPatch(prev, partial));
   }, []);
 
   const patchDevelopment = useCallback(
@@ -544,7 +558,8 @@ export function JobDetailsModal({
     const step = draft.timeline.find((s) => s.id === stepId);
     const section = wipStepToSection(stepId, step?.opensIn);
     setActiveSection(section as JobModalSection);
-    const targetId = `job-step-${stepId}`;
+    const focusStepId = stepId.startsWith("sample_") ? "sample_approvals" : stepId;
+    const targetId = `job-step-${focusStepId}`;
     setHighlightId(targetId);
     window.setTimeout(() => {
       const root = scrollRef.current;
@@ -576,6 +591,7 @@ export function JobDetailsModal({
 
   function handleSave(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     const sku = draft.sku?.trim() || null;
     if (sku) {
       const dup = findDuplicateSku(sku, allJobs, draft.id);
@@ -591,7 +607,33 @@ export function JobDetailsModal({
       scope_note: draft.scope_note?.trim() || undefined,
       updated_at: new Date().toISOString(),
     };
-    onSave(normalizeJob(saved, project));
+    setSaving(true);
+    try {
+      onSave(normalizeJob(saved, project));
+    } catch (err) {
+      console.error("Job save failed", err);
+      window.alert("Could not save job. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleDuplicate() {
+    if (isNew) return;
+    setDuplicateOpen(true);
+  }
+
+  function confirmDuplicate(values: DuplicateJobFormValues) {
+    const color_code =
+      values.color_code.trim() || resolveColorCode(values.colorway, draft.color_code) || "";
+    const dup = duplicateJobSeed(draft, project, allJobs, {
+      name: values.name,
+      colorway: values.colorway,
+      style_number: values.style_number,
+      color_code,
+    });
+    setDuplicateOpen(false);
+    onSave(normalizeJob(dup, project));
   }
 
   const estimate = draft.estimate!;
@@ -604,6 +646,9 @@ export function JobDetailsModal({
 
   const development = developmentFromJob(draft);
   const dyeTracks = development.dye_costing_tracks;
+  const trimLineTracks = development.trim_line_tracks;
+  const sampleStages = development.sample_approval_stages;
+  const barcodesDate = barcodesSentDate(draft);
   const printTracks = costing.print_embroidery_costing_tracks;
   const colorways = costing.colorways;
   const visibleSections = accordionSectionsForJob(draft.job_type);
@@ -734,7 +779,7 @@ export function JobDetailsModal({
           <JobShareMenu project={project} job={draft} />
         </div>
       ) : null}
-      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSave}>
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSave} noValidate>
         <ModalSectionLayout
           sections={sectionNavItems}
           activeSection={activeSection}
@@ -875,6 +920,18 @@ export function JobDetailsModal({
               </label>
 
               <label className={labelClass}>
+                Scope
+                <select
+                  className={fieldClass}
+                  value={draft.scope_kind ?? "original"}
+                  onChange={(e) => patch({ scope_kind: e.target.value as JobScopeKind })}
+                >
+                  <option value="original">Original deliverable</option>
+                  <option value="addon">Reorder</option>
+                </select>
+              </label>
+
+              <label className={labelClass}>
                 Colorway
                 <input
                   className={fieldClass}
@@ -1006,10 +1063,10 @@ export function JobDetailsModal({
 
               {draft.scope_kind === "addon" ? (
                 <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-950">Add-on scope</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-950">Reorder scope</p>
                   <div className="mt-3 space-y-3">
                     <label className={labelClass}>
-                      Add-on category
+                      Reorder category
                       <select
                         className={fieldClass}
                         value={draft.addon_category ?? ""}
@@ -1228,46 +1285,24 @@ export function JobDetailsModal({
                     <WipStepFieldBlock stepId="tp_setup" highlight={highlightId === "job-step-tp_setup"}>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className={labelClass}>
-                          C&S tech pack request
+                          Tech pack due
                           <input
                             type="date"
                             className={fieldClass}
-                            value={isoToDateInput(techPack.cs_tech_pack_request_date)}
+                            value={isoToDateInput(techPackDueDate(techPack))}
                             onChange={(e) =>
-                              patchTechPack({ cs_tech_pack_request_date: dateInputToIso(e.target.value) })
+                              patchTechPack({ tech_pack_due_date: dateInputToIso(e.target.value) })
                             }
                           />
                         </label>
                         <label className={labelClass}>
-                          C&S tech pack due
+                          Tech pack complete
                           <input
                             type="date"
                             className={fieldClass}
-                            value={isoToDateInput(techPack.cs_tech_pack_due_date)}
+                            value={isoToDateInput(techPackCompleteDate(techPack))}
                             onChange={(e) =>
-                              patchTechPack({ cs_tech_pack_due_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Artwork tech pack request
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(techPack.artwork_tech_pack_request_date)}
-                            onChange={(e) =>
-                              patchTechPack({ artwork_tech_pack_request_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Artwork tech pack due
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(techPack.artwork_tech_pack_due_date)}
-                            onChange={(e) =>
-                              patchTechPack({ artwork_tech_pack_due_date: dateInputToIso(e.target.value) })
+                              patchTechPack({ tech_pack_complete_date: dateInputToIso(e.target.value) })
                             }
                           />
                         </label>
@@ -1287,7 +1322,7 @@ export function JobDetailsModal({
                       highlight={highlightId === "job-step-blanks_lab_dip"}
                     >
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Blanks purchased / PG requested
+                        Blanks purchasing
                       </p>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <label className={labelClass}>
@@ -1302,13 +1337,24 @@ export function JobDetailsModal({
                           />
                         </label>
                         <label className={labelClass}>
-                          PG requested
+                          Products Go blanks requested
                           <input
                             type="date"
                             className={fieldClass}
                             value={isoToDateInput(development.pg_requested_date)}
                             onChange={(e) =>
                               patchDevelopment({ pg_requested_date: dateInputToIso(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className={labelClass}>
+                          Blanks received
+                          <input
+                            type="date"
+                            className={fieldClass}
+                            value={isoToDateInput(development.blanks_received_date)}
+                            onChange={(e) =>
+                              patchDevelopment({ blanks_received_date: dateInputToIso(e.target.value) })
                             }
                           />
                         </label>
@@ -1433,48 +1479,176 @@ export function JobDetailsModal({
 
                     <WipStepFieldBlock stepId="order_trims" highlight={highlightId === "job-step-order_trims"}>
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Trims & appliques ordered
+                        Trims
                       </p>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <label className={labelClass}>
-                          New product request
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(development.new_product_request_date)}
-                            onChange={(e) =>
-                              patchDevelopment({
-                                new_product_request_date: dateInputToIso(e.target.value),
-                              })
+                      <div className="mt-3 space-y-3">
+                        {trimLineTracks.map((t, i) => (
+                          <SectionCard
+                            key={t.id}
+                            title={trimLineTracks.length > 1 ? `Trim line ${i + 1}` : "Trim line"}
+                            headerExtra={
+                              trimLineTracks.length > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    patchDevelopment({
+                                      trim_line_tracks: trimLineTracks.filter((x) => x.id !== t.id),
+                                    })
+                                  }
+                                  className="text-[11px] font-semibold text-red-600 hover:underline"
+                                >
+                                  Remove
+                                </button>
+                              ) : undefined
                             }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Barcodes sent to vendor
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(development.barcodes_sent_to_vendor_date)}
-                            onChange={(e) =>
-                              patchDevelopment({
-                                barcodes_sent_to_vendor_date: dateInputToIso(e.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Bulk trim approved
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(development.bulk_trim_approval_date)}
-                            onChange={(e) =>
-                              patchDevelopment({
-                                bulk_trim_approval_date: dateInputToIso(e.target.value),
-                              })
-                            }
-                          />
-                        </label>
+                          >
+                            <VendorFieldSelect
+                              label="Vendor"
+                              vendors={vendors}
+                              value={t.vendor}
+                              onChange={(name) =>
+                                patchDevelopment({
+                                  trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                                    vendor: name,
+                                  }),
+                                })
+                              }
+                            />
+                            <label className={labelClass}>
+                              Trim type
+                              <input
+                                className={fieldClass}
+                                value={t.trim_type ?? ""}
+                                placeholder="e.g. woven label, hang tag"
+                                onChange={(e) =>
+                                  patchDevelopment({
+                                    trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                                      trim_type: e.target.value.trim() || null,
+                                    }),
+                                  })
+                                }
+                              />
+                            </label>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <label className={labelClass}>
+                                Trim ordered
+                                <input
+                                  type="date"
+                                  className={fieldClass}
+                                  value={isoToDateInput(t.trim_ordered_date)}
+                                  onChange={(e) =>
+                                    patchDevelopment({
+                                      trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                                        trim_ordered_date: dateInputToIso(e.target.value),
+                                      }),
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className={labelClass}>
+                                Trim received
+                                <input
+                                  type="date"
+                                  className={fieldClass}
+                                  value={isoToDateInput(t.trim_received_date)}
+                                  onChange={(e) =>
+                                    patchDevelopment({
+                                      trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                                        trim_received_date: dateInputToIso(e.target.value),
+                                      }),
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+                          </SectionCard>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            patchDevelopment({
+                              trim_line_tracks: [...trimLineTracks, defaultTrimLineTrack()],
+                            })
+                          }
+                          className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
+                        >
+                          + Add trim line
+                        </button>
+                      </div>
+                    </WipStepFieldBlock>
+
+                    <WipStepFieldBlock
+                      stepId="sample_approvals"
+                      title="SAMPLE APPROVALS"
+                      highlight={highlightId === "job-step-sample_approvals"}
+                    >
+                      <div className="space-y-5">
+                        {sampleStages.map((stage) => {
+                          const fieldLabels = sampleApprovalFieldLabels(stage.key);
+                          return (
+                            <div
+                              key={stage.key}
+                              className="grid gap-3 border-t border-border-light pt-4 first:border-t-0 first:pt-0 sm:grid-cols-3"
+                            >
+                              <label className={labelClass}>
+                                {fieldLabels.requested}
+                                <input
+                                  type="date"
+                                  className={fieldClass}
+                                  value={isoToDateInput(stage.requested_date)}
+                                  onChange={(e) =>
+                                    patchDevelopment({
+                                      sample_approval_stages: updateSampleStage(
+                                        sampleStages,
+                                        stage.key,
+                                        { requested_date: dateInputToIso(e.target.value) },
+                                      ),
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className={labelClass}>
+                                {fieldLabels.due}
+                                <input
+                                  type="date"
+                                  className={fieldClass}
+                                  value={isoToDateInput(stage.due_date)}
+                                  onChange={(e) =>
+                                    patchDevelopment({
+                                      sample_approval_stages: updateSampleStage(
+                                        sampleStages,
+                                        stage.key,
+                                        { due_date: dateInputToIso(e.target.value) },
+                                      ),
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className={labelClass}>
+                                {fieldLabels.status}
+                                <select
+                                  className={fieldClass}
+                                  value={stage.status ?? "PENDING"}
+                                  onChange={(e) =>
+                                    patchDevelopment({
+                                      sample_approval_stages: updateSampleStage(
+                                        sampleStages,
+                                        stage.key,
+                                        { status: e.target.value as ApprovalStatus },
+                                      ),
+                                    })
+                                  }
+                                >
+                                  {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
+                                    <option key={s} value={s}>
+                                      {s}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+                          );
+                        })}
                       </div>
                     </WipStepFieldBlock>
                   </>
@@ -1554,39 +1728,18 @@ export function JobDetailsModal({
                           ref={(el) => {
                             if (el) el.indeterminate = costing.costing_approved === null;
                           }}
-                          onChange={(e) =>
-                            patchCosting({ costing_approved: e.target.checked ? true : false })
-                          }
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            patchCosting({
+                              costing_approved: checked ? true : false,
+                              costing_approved_at: checked
+                                ? dateInputToIso(new Date().toISOString().slice(0, 10))
+                                : null,
+                            });
+                          }}
                         />
                         Deposit / payment received (costing approved)
                       </label>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock stepId="tp_completion" highlight={highlightId === "job-step-tp_completion"}>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className={labelClass}>
-                          C&S tech pack complete
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(techPack.cs_tech_pack_complete_date)}
-                            onChange={(e) =>
-                              patchTechPack({ cs_tech_pack_complete_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Artwork tech pack complete
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(techPack.artwork_tech_pack_complete_date)}
-                            onChange={(e) =>
-                              patchTechPack({ artwork_tech_pack_complete_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                      </div>
                     </WipStepFieldBlock>
 
                     <div className="space-y-3">
@@ -1962,54 +2115,107 @@ export function JobDetailsModal({
 
                 {section === "bulk" ? (
                   <>
+                    <WipStepFieldBlock
+                      stepId="barcodes"
+                      title="Barcodes sent to vendor"
+                      highlight={highlightId === "job-step-barcodes"}
+                    >
+                      <label className={labelClass}>
+                        Barcodes sent to vendor
+                        <input
+                          type="date"
+                          className={fieldClass}
+                          value={isoToDateInput(barcodesDate)}
+                          onChange={(e) =>
+                            setDraft((prev) =>
+                              patchBarcodesSentDate(prev, dateInputToIso(e.target.value)),
+                            )
+                          }
+                        />
+                      </label>
+                    </WipStepFieldBlock>
+
                     <WipStepFieldBlock stepId="trimming" highlight={highlightId === "job-step-trimming"}>
-                      <div className="grid gap-3 sm:grid-cols-2">
+                      {draft.job_type === "cut_sew" ? (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className={labelClass}>
+                            Bulk fabric approved
+                            <input
+                              type="date"
+                              className={fieldClass}
+                              value={isoToDateInput(primaryBulk.bulk_fabric_approval_date)}
+                              onChange={(e) =>
+                                updateBulkTracks(
+                                  updateBulkTrack(bulkTracks, primaryBulk.id, {
+                                    bulk_fabric_approval_date: dateInputToIso(e.target.value),
+                                  }),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className={labelClass}>
+                            Bulk trim approved
+                            <input
+                              type="date"
+                              className={fieldClass}
+                              value={isoToDateInput(primaryBulk.bulk_trim_approval_date)}
+                              onChange={(e) =>
+                                updateBulkTracks(
+                                  updateBulkTrack(bulkTracks, primaryBulk.id, {
+                                    bulk_trim_approval_date: dateInputToIso(e.target.value),
+                                  }),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className={labelClass}>
+                            TOP due
+                            <input
+                              type="date"
+                              className={fieldClass}
+                              value={isoToDateInput(primaryBulk.top_due_date)}
+                              onChange={(e) =>
+                                updateBulkTracks(
+                                  updateBulkTrack(bulkTracks, primaryBulk.id, {
+                                    top_due_date: dateInputToIso(e.target.value),
+                                  }),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className={labelClass}>
+                            TOP approved
+                            <input
+                              type="date"
+                              className={fieldClass}
+                              value={isoToDateInput(primaryBulk.top_approved_date)}
+                              onChange={(e) =>
+                                updateBulkTracks(
+                                  updateBulkTrack(bulkTracks, primaryBulk.id, {
+                                    top_approved_date: dateInputToIso(e.target.value),
+                                  }),
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+                      ) : (
                         <label className={labelClass}>
-                          Bulk fabric approved
+                          Trimming completed
                           <input
                             type="date"
                             className={fieldClass}
-                            value={isoToDateInput(primaryBulk.bulk_fabric_approval_date)}
+                            value={isoToDateInput(primaryBulk.trimming_completed_date)}
                             onChange={(e) =>
                               updateBulkTracks(
                                 updateBulkTrack(bulkTracks, primaryBulk.id, {
-                                  bulk_fabric_approval_date: dateInputToIso(e.target.value),
+                                  trimming_completed_date: dateInputToIso(e.target.value),
                                 }),
                               )
                             }
                           />
                         </label>
-                        <label className={labelClass}>
-                          TOP due
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(primaryBulk.top_due_date)}
-                            onChange={(e) =>
-                              updateBulkTracks(
-                                updateBulkTrack(bulkTracks, primaryBulk.id, {
-                                  top_due_date: dateInputToIso(e.target.value),
-                                }),
-                              )
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          TOP approved
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(primaryBulk.top_approved_date)}
-                            onChange={(e) =>
-                              updateBulkTracks(
-                                updateBulkTrack(bulkTracks, primaryBulk.id, {
-                                  top_approved_date: dateInputToIso(e.target.value),
-                                }),
-                              )
-                            }
-                          />
-                        </label>
-                      </div>
+                      )}
                     </WipStepFieldBlock>
 
                     <WipStepFieldBlock stepId="packing" highlight={highlightId === "job-step-packing"}>
@@ -2150,14 +2356,23 @@ export function JobDetailsModal({
             !isNew && onDelete ? (deleting ? "Deleting…" : "Delete job") : undefined
           }
           onDelete={!isNew ? onDelete : undefined}
-          deleteDisabled={deleting}
+          deleteDisabled={deleting || saving}
+          extraLeftLabel={!isNew ? "Duplicate job" : undefined}
+          onExtraLeft={!isNew ? handleDuplicate : undefined}
           secondaryLabel="Cancel"
           onSecondary={onClose}
-          primaryLabel="Save job"
+          primaryLabel={saving ? "Saving…" : "Save job"}
           primaryIcon={<CheckMini />}
-          primaryDisabled={deleting}
+          primaryDisabled={deleting || saving}
         />
       </form>
+
+      <DuplicateJobDialog
+        open={duplicateOpen}
+        source={draft}
+        onClose={() => setDuplicateOpen(false)}
+        onConfirm={confirmDuplicate}
+      />
     </ProjectModalOverlay>
   );
 }

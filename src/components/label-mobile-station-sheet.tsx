@@ -13,7 +13,7 @@ import {
   printMobileStationSheet,
 } from "@/lib/label-station-print";
 
-const LABEL_LOGO_SRC = "/cd-label-logo.png";
+import { LABEL_LOGO_SRC } from "@/lib/label-logo";
 
 const sheetFont = "font-['Arial_Black','Helvetica_Neue',Helvetica,Arial,sans-serif]";
 

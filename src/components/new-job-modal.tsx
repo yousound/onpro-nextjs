@@ -236,7 +236,7 @@ export function NewJobModal({
               onChange={(e) => patch({ scope_kind: e.target.value as JobScopeKind })}
             >
               <option value="original">Original deliverable</option>
-              <option value="addon">Add-on</option>
+              <option value="addon">Reorder</option>
             </select>
           </ProjectModalField>
 
@@ -270,7 +270,7 @@ export function NewJobModal({
           </div>
 
           {draft.scope_kind === "addon" ? (
-            <ProjectModalField label="Add-on note (optional)" icon={<NotesIcon />}>
+            <ProjectModalField label="Reorder note (optional)" icon={<NotesIcon />}>
               <textarea
                 className={projectModalTextareaClass}
                 rows={2}

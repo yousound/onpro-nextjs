@@ -27,7 +27,7 @@ export const CONNECT_DOTS_PROJECT_WIP_STEPS: StepDef[] = [
   { id: "deposit_payment", label: "Deposit / Payment Received" },
   {
     id: "tp_setup",
-    label: "Tech Pack Set Up",
+    label: "Tech Pack Complete",
     durationShort: "2–3d",
     durationLabel: "2–3 days after payment receipt",
   },
@@ -48,6 +48,24 @@ export const CONNECT_DOTS_PROJECT_WIP_STEPS: StepDef[] = [
     label: "Strike-off Approvals",
     durationShort: "1–2d",
     durationLabel: "1–2 days after artwork passed",
+  },
+  {
+    id: "sample_1st",
+    label: "1st Sample Approval",
+    durationShort: "1–2w",
+    durationLabel: "First sample round",
+  },
+  {
+    id: "sample_2nd",
+    label: "2nd Sample Approval",
+    durationShort: "1–2w",
+    durationLabel: "Second sample round",
+  },
+  {
+    id: "sample_pp",
+    label: "PP Sample Approval",
+    durationShort: "1w",
+    durationLabel: "Pre-production sample approval",
   },
   {
     id: "trimming",

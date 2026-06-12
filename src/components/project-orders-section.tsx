@@ -7,6 +7,7 @@ import { formatShortDate, isoToDateInput, dateInputToIso } from "@/lib/format";
 import { createNewOrderSeed } from "@/lib/project-order-create";
 import { jobsForOrder } from "@/lib/project-order-edits";
 import { JOB_TYPE_OPTIONS } from "@/lib/reference/category-codes";
+import { effectiveJobPoDisplay } from "@/lib/effective-po";
 import { JobStatusBadge } from "@/components/job-status-badge";
 
 function effectivePo(order: ProjectOrder): string {
@@ -89,6 +90,7 @@ type Props = {
   onOrdersChange: (orders: ProjectOrder[]) => void;
   onOpenJob: (jobId: string) => void;
   onAddJobToOrder: (orderId: string) => void;
+  onAddJob?: () => void;
 };
 
 export function ProjectOrdersSection({
@@ -100,6 +102,7 @@ export function ProjectOrdersSection({
   onOrdersChange,
   onOpenJob,
   onAddJobToOrder,
+  onAddJob,
 }: Props) {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(() => new Set());
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(() => new Set());
@@ -139,7 +142,18 @@ export function ProjectOrdersSection({
     [orders, onOrdersChange],
   );
 
-  const overviewJobs = useMemo(() => jobs.filter((j) => j.order_id), [jobs]);
+  const overviewJobs = useMemo(() => jobs, [jobs]);
+
+  const orderById = useMemo(() => new Map(orders.map((o) => [o.id, o])), [orders]);
+
+  const jobPo = useCallback(
+    (job: ProjectJob) =>
+      effectiveJobPoDisplay(job, {
+        order: job.order_id ? orderById.get(job.order_id) : orders[0],
+        project,
+      }) || "—",
+    [orderById, orders, project],
+  );
 
   return (
     <div className="space-y-8">
@@ -149,10 +163,19 @@ export function ProjectOrdersSection({
             Jobs
             <span className="ml-2 font-normal text-text-secondary">({overviewJobs.length} jobs)</span>
           </h3>
+          {onAddJob ? (
+            <button
+              type="button"
+              onClick={onAddJob}
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-90"
+            >
+              + Add job
+            </button>
+          ) : null}
         </div>
         {overviewJobs.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border-light px-4 py-6 text-sm text-text-secondary">
-            No jobs yet. Create an order and add jobs below.
+            No jobs yet. Tap + Add job or create an order below.
           </p>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border-light bg-white">
@@ -161,6 +184,7 @@ export function ProjectOrdersSection({
                 <tr className="border-b border-border-light bg-slate-50/80 text-[10px] font-bold uppercase tracking-wide text-text-secondary">
                   <th className="px-4 py-2">Style name</th>
                   <th className="px-4 py-2">Style #</th>
+                  <th className="px-4 py-2">PO #</th>
                   <th className="px-4 py-2">Description</th>
                   <th className="px-4 py-2">Breakdown</th>
                   <th className="px-4 py-2">Job type</th>
@@ -183,6 +207,7 @@ export function ProjectOrdersSection({
                   >
                     <td className="px-4 py-2.5 font-semibold">{job.name || "—"}</td>
                     <td className="px-4 py-2.5 font-mono text-xs">{job.style_number || "—"}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs">{jobPo(job)}</td>
                     <td className="px-4 py-2.5 text-text-secondary">
                       {job.description?.trim() || "—"}
                     </td>

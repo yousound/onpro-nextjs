@@ -4,6 +4,7 @@ import type {
   DyeCostingTrack,
   PrintEmbroideryCostingTrack,
   Project,
+  TrimLineTrack,
 } from "@/lib/types/project";
 
 export function newTrackId(prefix: string): string {
@@ -48,6 +49,16 @@ export function defaultCostingExtraTrack(): CostingExtraTrack {
   };
 }
 
+export function defaultTrimLineTrack(): TrimLineTrack {
+  return {
+    id: newTrackId("trim"),
+    vendor: null,
+    trim_type: null,
+    trim_ordered_date: null,
+    trim_received_date: null,
+  };
+}
+
 export function defaultBulkProductionTrack(title: string): BulkProductionTrack {
   return {
     id: newTrackId("bulk"),
@@ -58,6 +69,7 @@ export function defaultBulkProductionTrack(title: string): BulkProductionTrack {
     barcodes_sent_to_vendor_date: null,
     top_due_date: null,
     top_approved_date: null,
+    trimming_completed_date: null,
     bulk_target_delivery_date: null,
     ex_factory_date: null,
   };
@@ -114,6 +126,7 @@ export function resolveBulkProductionTracks(project: Project): BulkProductionTra
       barcodes_sent_to_vendor_date: project.barcodes_sent_to_vendor_date,
       top_due_date: project.top_due_date,
       top_approved_date: project.top_approved_date,
+      trimming_completed_date: null,
       bulk_target_delivery_date: project.bulk_target_delivery_date,
       ex_factory_date: project.ex_factory_date,
     },

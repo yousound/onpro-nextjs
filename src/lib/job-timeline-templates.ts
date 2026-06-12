@@ -1,8 +1,16 @@
-import type { JobType, WipStep } from "@/lib/types/wip";
+import type { JobDetailsSection, JobType, WipStep } from "@/lib/types/wip";
 import {
   CONNECT_DOTS_PROJECT_WIP_STEPS,
   buildUpcomingJobTimeline,
 } from "@/lib/wip-project-timeline";
+
+const SAMPLE_TIMELINE_STEP_IDS = new Set(["sample_1st", "sample_2nd", "sample_pp"]);
+
+/** Cut & Sew sample approval steps open Development → SAMPLE APPROVALS. */
+export function timelineStepOpensIn(stepId: string): JobDetailsSection | undefined {
+  if (SAMPLE_TIMELINE_STEP_IDS.has(stepId)) return "development";
+  return undefined;
+}
 
 /** Subset of the canonical step ids for each job type. Order matters. */
 export const JOB_TIMELINE_TEMPLATES: Record<JobType, string[]> = {
@@ -35,6 +43,9 @@ export const JOB_TIMELINE_TEMPLATES: Record<JobType, string[]> = {
     "tp_completion",
     "sent_to_contractors",
     "strike_off",
+    "sample_1st",
+    "sample_2nd",
+    "sample_pp",
     "packing",
     "arrange_delivery",
     "completion",
@@ -73,11 +84,53 @@ export function buildUpcomingJobTimelineForType(type?: JobType): WipStep[] {
   return ids
     .map((id) => defs.get(id))
     .filter((d): d is NonNullable<ReturnType<typeof defs.get>> => Boolean(d))
-    .map((def) => ({
-      id: def.id,
-      label: def.label,
-      state: "upcoming" as const,
-    }));
+    .map((def) => {
+      const opensIn = timelineStepOpensIn(def.id);
+      return {
+        id: def.id,
+        label: def.label,
+        state: "upcoming" as const,
+        ...(opensIn ? { opensIn } : {}),
+      };
+    });
+}
+
+/**
+ * Merge saved timeline with the current template for this job type — inserts missing
+ * canonical steps (e.g. sample approvals on older Cut & Sew jobs) while preserving order.
+ */
+export function repairJobTimelineWithTemplate(
+  timeline: WipStep[] | undefined,
+  jobType?: JobType,
+): WipStep[] {
+  const template = buildUpcomingJobTimelineForType(jobType);
+  const saved = timeline ?? [];
+  if (saved.length === 0) return template;
+
+  const savedById = new Map(saved.map((s) => [s.id, s]));
+  const merged: WipStep[] = [];
+
+  for (const tpl of template) {
+    const hit = savedById.get(tpl.id);
+    savedById.delete(tpl.id);
+    merged.push(
+      hit
+        ? {
+            ...tpl,
+            ...hit,
+            label: hit.label.trim() || tpl.label,
+            state: hit.state ?? tpl.state,
+            opensIn: hit.opensIn ?? tpl.opensIn,
+          }
+        : { ...tpl },
+    );
+  }
+
+  for (const s of saved) {
+    if (!merged.some((m) => m.id === s.id)) merged.push(s);
+  }
+
+  return merged;
 }
 
 /** What accordion sections should the modal show for this job type? */

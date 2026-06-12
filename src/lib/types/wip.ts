@@ -6,6 +6,8 @@ import type {
   DyeCostingTrack,
   ISODate,
   PrintEmbroideryCostingTrack,
+  SampleApprovalStage,
+  TrimLineTrack,
 } from "@/lib/types/project";
 import type { FileRef } from "@/lib/types/contact";
 
@@ -118,12 +120,18 @@ export type JobCostingFields = {
   cost_sheet_prepared_date: ISODate;
   estimate_sent_date: ISODate;
   costing_approved: boolean | null;
+  /** Set when deposit/payment checkbox is checked. */
+  costing_approved_at: ISODate;
   /** @deprecated read/write via JobDevelopmentFields; kept here for back-compat. */
   blanks_purchased_date: ISODate;
   /** @deprecated read/write via JobDevelopmentFields. */
   pg_requested_date: ISODate;
   /** @deprecated read/write via JobDevelopmentFields. */
   dye_costing_tracks: DyeCostingTrack[];
+  /** Development — blanks received. */
+  blanks_received_date: ISODate;
+  trim_line_tracks: TrimLineTrack[];
+  sample_approval_stages: SampleApprovalStage[];
   print_embroidery_costing_tracks: PrintEmbroideryCostingTrack[];
   costing_extra_tracks: CostingExtraTrack[];
   /** Absorbed from former Cut & sew tab */
@@ -138,11 +146,10 @@ export type JobCostingFields = {
 export type JobDevelopmentFields = {
   blanks_purchased_date: ISODate;
   pg_requested_date: ISODate;
+  blanks_received_date: ISODate;
   dye_costing_tracks: DyeCostingTrack[];
-  /** From bulk_production_tracks[0] — surfaced under Development per the email feedback. */
-  new_product_request_date: ISODate;
-  barcodes_sent_to_vendor_date: ISODate;
-  bulk_trim_approval_date: ISODate;
+  trim_line_tracks: TrimLineTrack[];
+  sample_approval_stages: SampleApprovalStage[];
 };
 
 export type JobApprovalFields = {
@@ -169,6 +176,10 @@ export type TechPackDropboxLink = {
 };
 
 export type JobTechPackFields = {
+  /** Unified tech pack due (Development). */
+  tech_pack_due_date: ISODate;
+  /** Unified tech pack complete (Development). */
+  tech_pack_complete_date: ISODate;
   cs_tech_pack_request_date: ISODate;
   cs_tech_pack_due_date: ISODate;
   cs_tech_pack_complete_date: ISODate;
@@ -312,6 +323,10 @@ export function wipStepToSection(stepId: string, opensIn?: JobDetailsSection): J
     case "sent_to_contractors":
     case "strike_off":
       return "approvals";
+    case "sample_1st":
+    case "sample_2nd":
+    case "sample_pp":
+      return "development";
     case "trimming":
     case "packing":
     case "arrange_delivery":

@@ -9,6 +9,12 @@ import {
 } from "@/lib/supabase/projects";
 import { createClient } from "@/lib/supabase/server";
 import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
+import {
+  assertCanWriteOperatorWorkspace,
+  assertClientBelongsToOperator,
+  isOperatorWorkspaceTeamMember,
+} from "@/lib/server/workspace-write-access";
+import { createServiceClient } from "@/lib/supabase/service";
 import type { Project, ProjectStatus } from "@/lib/types/project";
 import { migrateProjectStatus, PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 
@@ -57,7 +63,21 @@ export async function POST(request: Request) {
   const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
 
   try {
-    const project = await insertProjectForUser(supabase, workspaceOwnerId, {
+    await assertCanWriteOperatorWorkspace(supabase, user.id, workspaceOwnerId);
+    await assertClientBelongsToOperator(supabase, workspaceOwnerId, clientId);
+
+    const teamMemberWrite = await isOperatorWorkspaceTeamMember(
+      supabase,
+      user.id,
+      workspaceOwnerId,
+    );
+    let writeClient = supabase;
+    if (teamMemberWrite) {
+      const service = createServiceClient();
+      if (service) writeClient = service;
+    }
+
+    const project = await insertProjectForUser(writeClient, workspaceOwnerId, {
       name,
       description: body.description?.trim() || null,
       clientId,
@@ -69,7 +89,11 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, project });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Create failed";
+    const msg =
+      e && typeof e === "object" && "message" in e
+        ? String((e as { message: unknown }).message)
+        : "Create failed";
+    console.error("[api/projects POST]", e);
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
@@ -97,7 +121,20 @@ export async function PATCH(request: Request) {
   const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
 
   try {
-    const project = await updateProjectForUser(supabase, workspaceOwnerId, id, body.patch);
+    await assertCanWriteOperatorWorkspace(supabase, user.id, workspaceOwnerId);
+
+    const teamMemberWrite = await isOperatorWorkspaceTeamMember(
+      supabase,
+      user.id,
+      workspaceOwnerId,
+    );
+    let writeClient = supabase;
+    if (teamMemberWrite) {
+      const service = createServiceClient();
+      if (service) writeClient = service;
+    }
+
+    const project = await updateProjectForUser(writeClient, workspaceOwnerId, id, body.patch);
     return NextResponse.json({ ok: true, project });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Update failed";

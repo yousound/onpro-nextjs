@@ -20,7 +20,7 @@ function mockProject(id: number, name: string, clientName: string): Project {
     id,
     name,
     client: { id: id * 10, name: clientName, avatar_url: null },
-    status: "IN DEVELOPMENT",
+    status: "Development",
   } as Project;
 }
 

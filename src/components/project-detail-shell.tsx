@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Project, ProjectStatus } from "@/lib/types/project";
+import { PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 import { dateInputToIso, formatCellValue, formatShortDate, isoToDateInput } from "@/lib/format";
 import { MilestoneStrip } from "@/components/milestone-strip";
 import { MOCK_LS, clearMockLs, readMockLs, writeMockLs } from "@/lib/mock-local";
@@ -122,13 +123,7 @@ function buildSections(project: Project): SectionDef[] {
   ];
 }
 
-const STATUS_OPTIONS: ProjectStatus[] = [
-  "IN DEVELOPMENT",
-  "PENDING",
-  "IN-PROGRESS",
-  "COMPLETED",
-  "DELIVERED",
-];
+const STATUS_OPTIONS = PROJECT_STATUS_OPTIONS;
 
 export function ProjectDetailShell({ project }: { project: Project }) {
   const [patch, setPatch] = useState<Partial<Project>>({});

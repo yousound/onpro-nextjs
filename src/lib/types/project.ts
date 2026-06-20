@@ -3,11 +3,11 @@
 import type { PackingSlipDocument } from "@/lib/types/packing-slip";
 
 export type ProjectStatus =
-  | "IN DEVELOPMENT"
-  | "PENDING"
-  | "IN-PROGRESS"
-  | "COMPLETED"
-  | "DELIVERED";
+  | "Intake"
+  | "On Hold"
+  | "Development"
+  | "Production"
+  | "Completed";
 
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED";
 

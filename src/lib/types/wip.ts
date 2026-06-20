@@ -230,8 +230,18 @@ export type ProjectOrder = {
 };
 
 export type JobCustomField = {
+  id?: string;
   key: string;
   value: string;
+};
+
+/** Per-color size grid on a job overview. */
+export type JobColorwayRow = {
+  id: string;
+  name: string;
+  color_code: string;
+  size_run: string[];
+  size_qty: Record<string, number>;
 };
 
 export type ProjectJob = {
@@ -250,6 +260,12 @@ export type ProjectJob = {
   size_breakdown?: string;
   /** Unit or line price summary. */
   price?: string | null;
+  /** When true, overview price is manual even if costing exists. */
+  price_manual_override?: boolean;
+  /** Human-readable style name (defaults from job name for non-apparel). */
+  style_name?: string;
+  /** Multiple colorways with per-size quantities. */
+  colorway_rows?: JobColorwayRow[];
   /** Company + category + style identifier — unique per workspace. */
   sku?: string | null;
   /** Optional industry-specific fields. */

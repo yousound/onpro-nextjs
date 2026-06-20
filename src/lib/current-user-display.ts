@@ -17,6 +17,7 @@ export type CurrentUserDisplay = {
   /** Team contact row for the signed-in operator (`profiles.self_contact_id`). */
   selfContactId: string | null;
   operatorCompanyCode: string | null;
+  businessType: string | null;
 };
 
 /** OAuth / provider photo from Supabase Auth `user_metadata`. */
@@ -90,5 +91,6 @@ export function buildCurrentUserDisplay(
     selfContactId:
       profile?.self_contact_id != null ? String(profile.self_contact_id) : null,
     operatorCompanyCode: profile?.operator_company_code?.trim() ?? null,
+    businessType: profile?.business_type?.trim() ?? null,
   };
 };

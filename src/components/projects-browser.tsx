@@ -3,16 +3,10 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { Project, ProjectStatus } from "@/lib/types/project";
+import { migrateProjectStatus, PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 import { ProjectCard } from "@/components/project-card";
 
-const STATUSES: (ProjectStatus | "ALL")[] = [
-  "ALL",
-  "IN DEVELOPMENT",
-  "PENDING",
-  "IN-PROGRESS",
-  "COMPLETED",
-  "DELIVERED",
-];
+const STATUSES: (ProjectStatus | "ALL")[] = ["ALL", ...PROJECT_STATUS_OPTIONS];
 
 /** Wider minimum track (~384px): fewer columns per row, cards use more horizontal space; `1fr` still evens gaps. */
 const CARD_GRID_CLASS =
@@ -32,7 +26,7 @@ export function ProjectsBrowser({ projects }: { projects: Project[] }) {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return projects.filter((p) => {
-      if (status !== "ALL" && p.status !== status) return false;
+      if (status !== "ALL" && migrateProjectStatus(p.status) !== status) return false;
       if (clientId !== "ALL" && p.client.id !== clientId) return false;
       if (!needle) return true;
       const blob = `${p.name} ${p.client.name} ${p.project_number ?? ""} ${p.style_number ?? ""} ${p.po_number ?? ""}`.toLowerCase();

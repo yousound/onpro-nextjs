@@ -1,5 +1,6 @@
 import type { ApprovalStatus, Client, Colorway, DevelopmentUpdate, Project, ProjectStatus } from "@/lib/types/project";
 import type { ProjectRowDb } from "@/lib/supabase/types-db";
+import { migrateProjectStatus } from "@/lib/project-status";
 
 function iso(v: string | null | undefined): string | null {
   return v ?? null;
@@ -13,15 +14,7 @@ function approval(v: string | null | undefined): ApprovalStatus | null {
 }
 
 function status(v: string): ProjectStatus {
-  const allowed: ProjectStatus[] = [
-    "IN DEVELOPMENT",
-    "PENDING",
-    "IN-PROGRESS",
-    "COMPLETED",
-    "DELIVERED",
-  ];
-  if (allowed.includes(v as ProjectStatus)) return v as ProjectStatus;
-  return "PENDING";
+  return migrateProjectStatus(v);
 }
 
 function parseJsonArray<T>(value: unknown, fallback: T[]): T[] {

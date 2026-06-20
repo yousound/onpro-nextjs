@@ -1,4 +1,4 @@
-import { clientCodeByName } from "@/lib/reference/client-codes";
+import { resolveClientCode } from "@/lib/reference/client-codes";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob } from "@/lib/types/wip";
 
@@ -30,7 +30,7 @@ export function generateJobNumberForProject(
   existingJobs: ProjectJob[],
   date: Date = new Date(),
 ): string {
-  const code = (clientCodeByName(project.client.name) ?? "XX").toUpperCase();
+  const code = resolveClientCode(project.client.name).toUpperCase();
   const year = date.getFullYear();
   const yy = year % 100;
   let maxSeq = 0;

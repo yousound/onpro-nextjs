@@ -4,6 +4,7 @@ import { mockDocuments } from "@/lib/mock/documents";
 import { MOCK_PENDING_INVITES } from "@/lib/mock/people";
 import { getJobsForProject } from "@/lib/mock/project-jobs";
 import { mockProjects } from "@/lib/mock/projects";
+import { migrateProjectStatus } from "@/lib/project-status";
 
 export type OverviewFocusTone = "default" | "warn" | "accent";
 
@@ -67,13 +68,14 @@ export function buildOverviewDigest(todayYmd: string): OverviewDigest {
   const totalUnreadMessages = conv.reduce((a, c) => a + (c.unread_count ?? 0), 0);
   const topUnread = conv.filter((c) => (c.unread_count ?? 0) > 0).sort((a, b) => (b.unread_count ?? 0) - (a.unread_count ?? 0))[0];
 
-  const projectsInFlight = mockProjects.filter(
-    (p) => p.status === "IN-PROGRESS" || p.status === "IN DEVELOPMENT",
-  ).length;
+  const projectsInFlight = mockProjects.filter((p) => {
+    const status = migrateProjectStatus(p.status);
+    return status === "Production" || status === "Development";
+  }).length;
 
   const overdueProjects = mockProjects.filter((p) => {
     if (!p.due_date) return false;
-    return p.due_date < `${todayYmd}T12:00:00.000Z` && p.status !== "COMPLETED" && p.status !== "DELIVERED";
+    return p.due_date < `${todayYmd}T12:00:00.000Z` && migrateProjectStatus(p.status) !== "Completed";
   });
 
   const totalJobs = countJobsAcrossMockProjects();
@@ -96,7 +98,9 @@ export function buildOverviewDigest(todayYmd: string): OverviewDigest {
     });
   }
 
-  const urgentProject = overdueProjects[0] ?? mockProjects.find((p) => p.status === "IN-PROGRESS");
+  const urgentProject =
+    overdueProjects[0] ??
+    mockProjects.find((p) => migrateProjectStatus(p.status) === "Production");
   if (urgentProject) {
     const overdue = overdueProjects.includes(urgentProject);
     focusItems.push({

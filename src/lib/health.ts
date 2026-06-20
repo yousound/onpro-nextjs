@@ -1,4 +1,5 @@
 import type { Project } from "@/lib/types/project";
+import { migrateProjectStatus } from "@/lib/project-status";
 
 export type HealthBand = "on_track" | "at_risk" | "delayed";
 
@@ -14,8 +15,8 @@ function parseDue(iso: string | null): number | null {
 export function projectHealth(project: Project): HealthBand {
   const now = Date.now();
   const due = parseDue(project.due_date);
-  const terminal =
-    project.status === "DELIVERED" || project.status === "COMPLETED";
+  const status = migrateProjectStatus(project.status);
+  const terminal = status === "Completed";
 
   if (terminal) return "on_track";
 
@@ -25,15 +26,17 @@ export function projectHealth(project: Project): HealthBand {
 
   if (due != null) {
     const days = (due - now) / MS_DAY;
-    if (days <= 14 && (project.status === "PENDING" || project.status === "IN-PROGRESS")) {
+    if (days <= 14 && (status === "Intake" || status === "Production")) {
       return "at_risk";
     }
   }
 
-  if (project.status === "PENDING" && due != null) {
+  if (status === "Intake" && due != null) {
     const days = (due - now) / MS_DAY;
     if (days <= 30) return "at_risk";
   }
+
+  if (status === "On Hold") return "at_risk";
 
   return "on_track";
 }

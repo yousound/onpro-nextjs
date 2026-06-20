@@ -1,6 +1,7 @@
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import { buildOverviewDigest } from "@/lib/mock/overview-digest";
+import { migrateProjectStatus } from "@/lib/project-status";
 
 export type NotificationRow = {
   id: string;
@@ -17,8 +18,7 @@ export function getNotificationRows(todayYmd: string): NotificationRow[] {
       (p) =>
         p.due_date &&
         p.due_date < todayYmd &&
-        p.status !== "COMPLETED" &&
-        p.status !== "DELIVERED",
+        migrateProjectStatus(p.status) !== "Completed",
     );
     return overdue.map((p) => ({
       id: `live-overdue-${p.id}`,

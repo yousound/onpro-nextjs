@@ -11,6 +11,7 @@ import {
   defaultJobTechPack,
   normalizeJob,
 } from "@/lib/job-defaults";
+import { newColorwayRow } from "@/lib/job-colorways";
 import { buildUpcomingJobTimelineForType } from "@/lib/job-timeline-templates";
 
 /** Seed for Job Details when adding a job (Projects or message attachments). */
@@ -33,7 +34,9 @@ export function createNewJobSeed(
     lead_vendor: "",
     category: "",
     style_number: "",
+    style_name: "",
     colorway: "",
+    colorway_rows: [newColorwayRow()],
     po_number: null,
     client_po_number: null,
     status: "Upcoming",

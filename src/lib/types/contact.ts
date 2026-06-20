@@ -32,6 +32,8 @@ export interface Contact {
   segment: PeopleSegment;
   kind: ContactKind;
   company_code: string;
+  /** When true, `company_code` overrides master-list resolution for POs. */
+  company_code_confirmed?: boolean;
   /** Company name or individual display name */
   name: string;
   contact_name?: string;

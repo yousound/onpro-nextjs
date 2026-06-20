@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useLedger } from "@/components/ledger/ledger-provider";
 import { LedgerProgressPair } from "@/components/ledger/ledger-progress-pair";
@@ -38,16 +39,24 @@ export function LedgerInvoiceList({ filterProject }: { filterProject?: LedgerPro
       <LedgerSection
         title="Invoices"
         action={
-          <button
-            type="button"
-            onClick={() => setShowAdd(true)}
-            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent/90"
-          >
-            Add invoice
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/ledger/financial/invoices/new"
+              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent/90"
+            >
+              Create printable invoice
+            </Link>
+            <button
+              type="button"
+              onClick={() => setShowAdd(true)}
+              className="rounded-lg border border-border-light px-3 py-1.5 text-sm font-medium hover:bg-surface-body"
+            >
+              Add invoice
+            </button>
+          </div>
         }
       >
-        <LedgerTable headers={["Date", "Description", "Amount", "Project", "Status", ""]}>
+        <LedgerTable headers={["Date", "Description", "Amount", "Project", "Status", "Actions"]}>
           {invoices.map((inv) => (
             <tr key={inv.id} className="text-text-primary">
               <td className="px-3 py-3 first:pl-0">{inv.dateLabel}</td>
@@ -66,15 +75,23 @@ export function LedgerInvoiceList({ filterProject }: { filterProject?: LedgerPro
                 </span>
               </td>
               <td className="px-3 py-3 text-right last:pr-0">
-                {inv.status === "pending" ? (
-                  <button
-                    type="button"
-                    onClick={() => markInvoicePaid(inv.id)}
-                    className="rounded-lg bg-health-ok px-3 py-1.5 text-xs font-semibold text-white hover:bg-health-ok/90"
+                <div className="flex justify-end gap-2">
+                  <Link
+                    href={`/ledger/financial/invoices/${inv.id}/print`}
+                    className="rounded-lg border border-border-light px-3 py-1.5 text-xs font-medium hover:bg-surface-body"
                   >
-                    Mark paid
-                  </button>
-                ) : null}
+                    Export PDF
+                  </Link>
+                  {inv.status === "pending" ? (
+                    <button
+                      type="button"
+                      onClick={() => markInvoicePaid(inv.id)}
+                      className="rounded-lg bg-health-ok px-3 py-1.5 text-xs font-semibold text-white hover:bg-health-ok/90"
+                    >
+                      Mark paid
+                    </button>
+                  ) : null}
+                </div>
               </td>
             </tr>
           ))}

@@ -9,6 +9,7 @@ import {
 } from "@/lib/supabase/projects";
 import { createClient } from "@/lib/supabase/server";
 import type { Project, ProjectStatus } from "@/lib/types/project";
+import { migrateProjectStatus, PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 
 /** Live: project list for client hydration when RSC payload is empty or stale. */
 export async function GET() {
@@ -48,14 +49,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Valid client is required" }, { status: 400 });
   }
 
-  const allowed: ProjectStatus[] = [
-    "IN DEVELOPMENT",
-    "PENDING",
-    "IN-PROGRESS",
-    "COMPLETED",
-    "DELIVERED",
-  ];
-  const status = allowed.includes(body.status) ? body.status : "PENDING";
+  const status = PROJECT_STATUS_OPTIONS.includes(body.status as ProjectStatus)
+    ? (body.status as ProjectStatus)
+    : migrateProjectStatus(body.status ?? "Intake");
 
   try {
     const project = await insertProjectForUser(supabase, user.id, {

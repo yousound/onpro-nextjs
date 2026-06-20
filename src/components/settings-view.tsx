@@ -81,6 +81,7 @@ export function SettingsView() {
           initials: MOCK_PROFILE.fullName.slice(0, 1),
           selfContactId: null,
           operatorCompanyCode: "MAT",
+          businessType: "apparel",
         } satisfies CurrentUserDisplay)
       : null;
 

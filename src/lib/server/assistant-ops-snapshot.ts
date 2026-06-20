@@ -15,6 +15,7 @@ import {
 } from "@/lib/mock/message-threads";
 import { MOCK_PENDING_INVITES } from "@/lib/mock/people";
 import { buildOverviewDigest } from "@/lib/mock/overview-digest";
+import { migrateProjectStatus } from "@/lib/project-status";
 import { trimPromptText } from "@/lib/server/assistant-prompt-trim";
 import { getGmailConnectionForUser } from "@/lib/supabase/gmail-connection";
 import { listMailroomScansForAssistant } from "@/lib/supabase/mailroom-thread-scans";
@@ -461,8 +462,7 @@ export async function buildAssistantOpsSnapshot(
           (p) =>
             p.due_date &&
             p.due_date < todayYmd &&
-            p.status !== "COMPLETED" &&
-            p.status !== "DELIVERED",
+            migrateProjectStatus(p.status) !== "Completed",
         ).length,
         projectsInFlight: projects.length,
         calendarNext7d: calendar.upcomingFromToday ?? 0,

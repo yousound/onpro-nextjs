@@ -46,19 +46,16 @@ import {
   newContactId,
 } from "@/lib/contacts-store";
 import { validateClientContactFields } from "@/lib/contact-field-validation";
-import { clientCodeByName } from "@/lib/reference/client-codes";
+import {
+  clientCodeFromContact,
+  clientCodeMismatchMessage,
+} from "@/lib/client-code-resolve";
+import { resolveClientCode } from "@/lib/reference/client-codes";
 import { defaultPermissionsForSegment } from "@/lib/project-permissions";
 import type { Contact } from "@/lib/types/contact";
 import { generatePoNumber } from "@/lib/po-number";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
-
-const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
-  "IN DEVELOPMENT",
-  "PENDING",
-  "IN-PROGRESS",
-  "COMPLETED",
-  "DELIVERED",
-];
+import { PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 
 function emptyProjectRecord(
   id: number,
@@ -217,7 +214,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   const [contactsTick, setContactsTick] = useState(0);
   const [name, setName] = useState("");
   const [clientSelect, setClientSelect] = useState<string>(() => String(initialProjects[0]?.client.id ?? ""));
-  const [status, setStatus] = useState<ProjectStatus>("PENDING");
+  const [status, setStatus] = useState<ProjectStatus>("Intake");
   const [dueDate, setDueDate] = useState("");
   const [description, setDescription] = useState("");
   const [poNumber, setPoNumber] = useState("");
@@ -260,10 +257,15 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
 
   const projectPoPreview = useMemo(() => {
     if (!selectedClient) return "";
-    const clientCode =
-      selectedClient.company_code || clientCodeByName(selectedClient.name) || "XX";
-    return generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
+    const resolution = clientCodeFromContact(selectedClient);
+    return generatePoNumber(resolution.effectiveCode, collectAllAppPoNumbers(projects));
   }, [selectedClient, projects]);
+
+  const clientCodeNotice = useMemo(() => {
+    if (!selectedClient) return null;
+    const resolution = clientCodeFromContact(selectedClient);
+    return clientCodeMismatchMessage(resolution, selectedClient.name);
+  }, [selectedClient]);
 
   useEffect(() => {
     if (poTouched) return;
@@ -278,7 +280,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     const firstId = clientsSorted[0]?.[0];
     setName("");
     setClientSelect(firstId != null ? String(firstId) : "");
-    setStatus("PENDING");
+    setStatus("Intake");
     setDueDate("");
     setDescription("");
     setPoNumber("");
@@ -288,9 +290,11 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   async function saveNewClient(draft: NewClientDraft): Promise<SavedNewClient | { error: string }> {
     const contacts = loadContacts();
     const email = draft.email.trim();
-    const code = draft.companyCode.trim().toUpperCase();
     const isCompany = draft.kind === "company";
     const label = draft.companyName.trim();
+    const resolved = resolveClientCode(label);
+    const code = draft.companyCode.trim().toUpperCase() || resolved;
+    const codeConfirmed = code !== resolved;
 
     if (!label || !email) {
       return {
@@ -316,6 +320,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       segment: "client",
       kind: draft.kind,
       company_code: code,
+      company_code_confirmed: codeConfirmed,
       name: label,
       contact_name: isCompany ? draft.contactName.trim() || undefined : undefined,
       email,
@@ -386,7 +391,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       name: contactDisplayName(contact, contactsDirectory),
       avatar_url: null,
     };
-    const clientCode = contact.company_code || clientCodeByName(contact.name) || "XX";
+    const clientCode = clientCodeFromContact(contact).effectiveCode;
     const po =
       poNumber.trim() ||
       generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
@@ -482,6 +487,24 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
           setPoTouched(true);
           setPoNumber(v);
         }}
+        clientCodeNotice={clientCodeNotice}
+        onUseResolvedClientCode={
+          selectedClient
+            ? async () => {
+                const resolution = clientCodeFromContact(selectedClient);
+                const updated: Contact = {
+                  ...selectedClient,
+                  company_code: resolution.resolvedCode,
+                  company_code_confirmed: false,
+                  updated_at: new Date().toISOString(),
+                };
+                const saved = await commitSingleContact(updated);
+                if (isClientLiveBackend()) upsertLiveContact(saved);
+                setContactsTick((t) => t + 1);
+                setPoTouched(false);
+              }
+            : undefined
+        }
         onSaveNewClient={saveNewClient}
         status={status}
         onStatusChange={(v) => setStatus(v as ProjectStatus)}

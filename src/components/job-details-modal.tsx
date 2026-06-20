@@ -91,6 +91,11 @@ import { WipTimeline } from "@/components/wip-timeline";
 import { JobLabelsSection } from "@/components/job-labels-section";
 import { TechPackArtworkSection } from "@/components/tech-pack-artwork-section";
 import { CostingSheetEditor } from "@/components/costing-sheet-editor";
+import { JobColorwayEditor } from "@/components/job-colorway-editor";
+import { useCurrentUser } from "@/components/profile-provider";
+import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
+import { effectiveJobPrice, priceFromCostingSheet } from "@/lib/job-price";
+import { isApparelWorkspace } from "@/lib/workspace-industry";
 import { VendorQuotesSection } from "@/components/vendor-quotes-section";
 import { EstimatesList } from "@/components/estimates-list";
 import {
@@ -418,6 +423,17 @@ export function JobDetailsModal({
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { user: currentUser } = useCurrentUser();
+  const apparelWorkspace = isApparelWorkspace(currentUser?.businessType);
+  const colorwayRows = useMemo(
+    () => draft.colorway_rows ?? normalizeColorwayRows(draft),
+    [draft.colorway_rows, draft.colorway, draft.color_code],
+  );
+  const costingPrice = useMemo(
+    () => priceFromCostingSheet(draft.costing_sheet),
+    [draft.costing_sheet],
+  );
+  const displayPrice = useMemo(() => effectiveJobPrice(draft), [draft]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -482,7 +498,16 @@ export function JobDetailsModal({
   }, []);
 
   const patchCostingSheet = useCallback((next: CostingSheet) => {
-    setDraft((prev) => ({ ...prev, costing_sheet: next }));
+    setDraft((prev) => {
+      const priceFromSheet = priceFromCostingSheet(next);
+      return {
+        ...prev,
+        costing_sheet: next,
+        ...(prev.price_manual_override || !priceFromSheet
+          ? {}
+          : { price: priceFromSheet }),
+      };
+    });
   }, []);
 
   const patchEstimates = useCallback((next: Estimate[]) => {
@@ -602,9 +627,11 @@ export function JobDetailsModal({
     }
     const saved: ProjectJob = {
       ...draft,
+      ...syncLegacyColorwayFields(draft),
       category: categoryDropdown,
       sku: sku || null,
       scope_note: draft.scope_note?.trim() || undefined,
+      price: displayPrice || draft.price || null,
       updated_at: new Date().toISOString(),
     };
     setSaving(true);
@@ -802,9 +829,38 @@ export function JobDetailsModal({
                   className={fieldClass}
                   value={draft.name}
                   placeholder="Style name"
-                  onChange={(e) => patch({ name: e.target.value })}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    if (!apparelWorkspace && !draft.style_name?.trim()) {
+                      patch({ name, style_name: name });
+                    } else {
+                      patch({ name });
+                    }
+                  }}
                 />
               </label>
+
+              <label className={labelClass}>
+                Style name
+                <input
+                  className={fieldClass}
+                  value={draft.style_name ?? draft.name ?? ""}
+                  placeholder={apparelWorkspace ? "Product or style name" : "Defaults from job name"}
+                  onChange={(e) => patch({ style_name: e.target.value })}
+                />
+              </label>
+
+              {apparelWorkspace ? (
+                <label className={labelClass}>
+                  Style #
+                  <input
+                    className={fieldClass}
+                    value={draft.style_number}
+                    placeholder="e.g. GGT01"
+                    onChange={(e) => patch({ style_number: e.target.value.toUpperCase() })}
+                  />
+                </label>
+              ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className={labelClass}>
@@ -910,16 +966,6 @@ export function JobDetailsModal({
               </button>
 
               <label className={labelClass}>
-                Style #
-                <input
-                  className={fieldClass}
-                  value={draft.style_number}
-                  placeholder="e.g. GGT01"
-                  onChange={(e) => patch({ style_number: e.target.value.toUpperCase() })}
-                />
-              </label>
-
-              <label className={labelClass}>
                 Scope
                 <select
                   className={fieldClass}
@@ -931,56 +977,15 @@ export function JobDetailsModal({
                 </select>
               </label>
 
-              <label className={labelClass}>
-                Colorway
-                <input
-                  className={fieldClass}
-                  list="job-colorway-options"
-                  value={draft.colorway ?? ""}
-                  placeholder="e.g. Black, Baby pink"
-                  onChange={(e) => patch({ colorway: e.target.value })}
-                />
-                <datalist id="job-colorway-options">
-                  {COMMON_COLORWAY_NAMES.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Pick a standard name or type your own. Code preview:{" "}
-                  <span className="font-mono font-semibold text-text-primary">
-                    {resolveColorCode(draft.colorway ?? "", draft.color_code) || "—"}
-                  </span>
-                </p>
-              </label>
-
-              <label className={labelClass}>
-                Color code (3 letters)
-                <input
-                  className={fieldClass}
-                  value={draft.color_code ?? ""}
-                  placeholder="Auto from colorway, or e.g. BLK"
-                  maxLength={3}
-                  onChange={(e) =>
-                    patch({
-                      color_code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3),
-                    })
-                  }
-                />
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Override when the colorway name is custom (Heather grey → HGR, etc.).
-                </p>
-              </label>
-
-              <label className={labelClass}>
-                Size breakdown qty
-                <textarea
-                  className={textareaClass}
-                  rows={2}
-                  value={draft.size_breakdown ?? ""}
-                  placeholder="e.g. S-12, M-24, L-18, XL-6"
-                  onChange={(e) => patch({ size_breakdown: e.target.value })}
-                />
-              </label>
+              <div>
+                <p className={labelClass}>Colorways & size breakdown</p>
+                <div className="mt-2">
+                  <JobColorwayEditor
+                    rows={colorwayRows}
+                    onChange={(rows) => patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))}
+                  />
+                </div>
+              </div>
 
               <label className={labelClass}>
                 Description
@@ -996,10 +1001,38 @@ export function JobDetailsModal({
                 Price
                 <input
                   className={fieldClass}
-                  value={draft.price ?? ""}
-                  onChange={(e) => patch({ price: e.target.value })}
+                  value={displayPrice}
+                  readOnly={Boolean(costingPrice && !draft.price_manual_override)}
+                  onChange={(e) =>
+                    patch({ price: e.target.value, price_manual_override: true })
+                  }
                   placeholder="Unit or line price"
                 />
+                {costingPrice ? (
+                  <p className="mt-1 text-[11px] text-text-secondary">
+                    {draft.price_manual_override
+                      ? "Manual override — clear override to use costing tab again."
+                      : `From costing sheet · $${costingPrice}`}
+                    {!draft.price_manual_override ? null : (
+                      <button
+                        type="button"
+                        className="ml-2 font-semibold text-accent hover:underline"
+                        onClick={() =>
+                          patch({
+                            price_manual_override: false,
+                            price: costingPrice,
+                          })
+                        }
+                      >
+                        Use costing
+                      </button>
+                    )}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-text-secondary">
+                    Enter manually or add lines on the Costing tab.
+                  </p>
+                )}
               </label>
 
               <label className={labelClass}>
@@ -1016,7 +1049,7 @@ export function JobDetailsModal({
               </label>
 
               {(draft.custom_fields ?? []).map((cf, idx) => (
-                <div key={`${cf.key}-${idx}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <div key={cf.id ?? `custom-field-${idx}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                   <input
                     className={fieldClass}
                     value={cf.key}
@@ -1030,6 +1063,7 @@ export function JobDetailsModal({
                   <input
                     className={fieldClass}
                     value={cf.value}
+                    placeholder="Value"
                     onChange={(e) => {
                       const next = [...(draft.custom_fields ?? [])];
                       next[idx] = { ...cf, value: e.target.value };
@@ -1049,11 +1083,21 @@ export function JobDetailsModal({
                   </button>
                 </div>
               ))}
+              <p className="text-[11px] text-text-secondary">
+                Optional extra fields for this job (e.g. fabric content, decoration notes).
+              </p>
               <button
                 type="button"
                 onClick={() =>
                   patch({
-                    custom_fields: [...(draft.custom_fields ?? []), { key: "", value: "" }],
+                    custom_fields: [
+                      ...(draft.custom_fields ?? []),
+                      {
+                        id: `cf-${Date.now().toString(36)}`,
+                        key: "",
+                        value: "",
+                      },
+                    ],
                   })
                 }
                 className="rounded-lg border border-dashed border-border-light px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent"

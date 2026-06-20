@@ -12,6 +12,7 @@ import { mockCalendarEvents } from "@/lib/mock/calendar-events";
 import { mockDocuments } from "@/lib/mock/documents";
 import { OverviewAssistant } from "@/components/overview-assistant";
 import { useCurrentUser } from "@/components/profile-provider";
+import { migrateProjectStatus } from "@/lib/project-status";
 import { isClientLiveBackend, isClientMockBackend } from "@/lib/config/backend-mode";
 import { buildOverviewDigest, type OverviewFocusItem } from "@/lib/mock/overview-digest";
 import type { CalendarEvent } from "@/lib/types/calendar";
@@ -109,12 +110,18 @@ function liveInProgressCards(
   jobsByProject: Record<number, ProjectJob[]>,
 ): InProgressCard[] {
   const cards: InProgressCard[] = [];
-  for (const p of projects.filter((x) => x.status === "IN-PROGRESS" || x.status === "PENDING").slice(0, 4)) {
+  for (const p of projects
+    .filter((x) => {
+      const status = migrateProjectStatus(x.status);
+      return status === "Production" || status === "Intake" || status === "Development";
+    })
+    .slice(0, 4)) {
+    const status = migrateProjectStatus(p.status);
     cards.push({
       kind: "Project",
       title: p.name,
       subtitle: p.client.name,
-      pct: p.status === "IN-PROGRESS" ? 50 : 25,
+      pct: status === "Production" ? 50 : status === "Development" ? 40 : 25,
       next: p.status_overview?.trim() || "Review milestones",
       href: `/projects/${p.id}`,
     });
@@ -189,8 +196,7 @@ export function OverviewView({
         (p) =>
           p.due_date &&
           p.due_date < todayYmd &&
-          p.status !== "COMPLETED" &&
-          p.status !== "DELIVERED",
+          migrateProjectStatus(p.status) !== "Completed",
       );
       const focusItems: OverviewFocusItem[] = overdue.map((p) => ({
         id: `live-overdue-${p.id}`,

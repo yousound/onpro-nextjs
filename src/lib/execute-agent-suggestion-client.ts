@@ -34,7 +34,8 @@ import { generatePoNumber } from "@/lib/po-number";
 import { createPackingSlipDraft } from "@/lib/packing-slip";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 import {
-  ensureDefaultOrders,
+  createFirstProjectOrder,
+  getOrCreateOrderForJob,
   loadProjectOrders,
   saveProjectOrders,
 } from "@/lib/project-order-edits";
@@ -113,7 +114,7 @@ function buildMockProject(
   const clientCode = resolveClientCode(client.name);
   const po =
     clientPoNumber?.trim() || generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
-  const status: ProjectStatus = "IN DEVELOPMENT";
+  const status: ProjectStatus = "Development";
   return {
     id: nextId,
     name,
@@ -274,7 +275,7 @@ async function execCreateProject(
         name,
         description: String(payload.notes ?? payload.description ?? "").trim() || null,
         clientId,
-        status: "IN DEVELOPMENT",
+        status: "Development",
         projectNumber: po,
         dueDate,
         leadTeamMember,
@@ -330,7 +331,8 @@ function execCreateOrder(
   const opCode = resolveOperatorCompanyCode(null);
   let orders = loadProjectOrders(project.id, project);
   if (orders.length === 0) {
-    orders = ensureDefaultOrders(project.id, project, opCode);
+    const order = createFirstProjectOrder(project.id, project, orders, opCode);
+    orders = [...orders, order];
   }
 
   const clientPo = String(suggestion.payload?.client_po_number ?? "").trim();
@@ -371,13 +373,15 @@ function execCreateJob(
 
   let jobs = loadProjectJobs(project.id, project);
   let orders = loadProjectOrders(project.id, project);
-  if (orders.length === 0) {
-    orders = ensureDefaultOrders(project.id, project, resolveOperatorCompanyCode(null));
-  }
+  const orderBundle = getOrCreateOrderForJob(
+    project.id,
+    project,
+    orders,
+    resolveOperatorCompanyCode(null),
+  );
+  orders = orderBundle.orders;
   const orderId =
-    String(payload.order_id ?? "").trim() ||
-    orders[orders.length - 1]?.id ||
-    orders[0]?.id;
+    String(payload.order_id ?? "").trim() || orderBundle.orderId;
   const created: ProjectJob[] = [];
 
   for (let i = 0; i < count; i++) {

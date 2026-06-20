@@ -204,6 +204,8 @@ export function previewToContact(row: ImportContactRowPreview, existing?: Contac
     segment,
     kind: row.segment === "team" ? "individual" : row.kind,
     company_code: code,
+    company_code_confirmed:
+      segment === "client" ? code !== resolveClientCode(name) : undefined,
     name,
     contact_name:
       segment === "team"

@@ -8,6 +8,8 @@ import {
   defaultPrintEmbroideryTrack,
 } from "@/lib/project-repeatable-tracks";
 import { defaultSampleApprovalStages, resolveSampleApprovalStages } from "@/lib/job-development";
+import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
+import { syncJobPriceFromCosting } from "@/lib/job-price";
 import { repairJobTimelineWithTemplate } from "@/lib/job-timeline-templates";
 
 export function defaultJobEstimate(project?: Project): NonNullable<ProjectJob["estimate"]> {
@@ -112,8 +114,20 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
   const labelLines = (job.label_lines ?? []).filter((l) => !isDemoLabelArtifact(l)).map((l) => ({ ...l }));
   const labelFiles = (job.label_files ?? []).filter((f) => !isDemoLabelFile(f)).map((f) => ({ ...f }));
 
+  const colorwayRows = normalizeColorwayRows(job);
+  const legacyColor = syncLegacyColorwayFields({ ...job, colorway_rows: colorwayRows });
+  const priceFields = syncJobPriceFromCosting(job);
+
   return {
     ...job,
+    ...legacyColor,
+    ...priceFields,
+    style_name: job.style_name ?? job.name ?? "",
+    price_manual_override: job.price_manual_override ?? false,
+    custom_fields: (job.custom_fields ?? []).map((cf, idx) => ({
+      ...cf,
+      id: cf.id ?? `cf-${idx}-${cf.key || "field"}`,
+    })),
     scope_kind: job.scope_kind ?? "original",
     job_type: job.job_type ?? (project !== undefined ? "print_production" : job.job_type),
     colorway: job.colorway ?? "",

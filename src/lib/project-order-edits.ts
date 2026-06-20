@@ -6,7 +6,7 @@ import { readMockLs, writeMockLs, MOCK_LS } from "@/lib/mock-local";
 import { createNewOrderSeed } from "@/lib/project-order-create";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 
-export function loadProjectOrders(projectId: number, project?: Project): ProjectOrder[] {
+export function loadProjectOrders(projectId: number, _project?: Project): ProjectOrder[] {
   if (isClientLiveBackend()) {
     const cached = getLiveCachedOrders(projectId);
     if (cached.length > 0) return cached;
@@ -15,13 +15,9 @@ export function loadProjectOrders(projectId: number, project?: Project): Project
       seedLiveOrdersForProject(projectId, stored);
       return stored;
     }
-    if (project) return ensureDefaultOrders(projectId, project);
-    return stored;
+    return [];
   }
-  const stored = readStoredProjectOrders(projectId);
-  if (stored.length > 0) return stored;
-  if (project) return ensureDefaultOrders(projectId, project);
-  return stored;
+  return readStoredProjectOrders(projectId);
 }
 
 function readStoredProjectOrders(projectId: number): ProjectOrder[] {
@@ -52,7 +48,23 @@ export function backfillOrphanJobOrderIds(projectId: number, orders: ProjectOrde
   return true;
 }
 
-/** Backfill: one order per project grouping legacy jobs without order_id. */
+/** Create the first order when a job is added or the user clicks + New order. */
+export function createFirstProjectOrder(
+  projectId: number,
+  project: Project,
+  existingOrders: ProjectOrder[],
+  operatorCode: string,
+  allProjects: { po_number?: string | null; project_number?: string | null }[] = [],
+  jobPos: string[] = [],
+): ProjectOrder {
+  const order = createNewOrderSeed(project, existingOrders, operatorCode, allProjects, jobPos);
+  const next = [...existingOrders, order];
+  saveProjectOrders(projectId, next);
+  backfillOrphanJobOrderIds(projectId, next);
+  return order;
+}
+
+/** @deprecated Prefer explicit createFirstProjectOrder — no longer auto-creates on project load. */
 export function ensureDefaultOrders(
   projectId: number,
   project: Project,
@@ -64,12 +76,21 @@ export function ensureDefaultOrders(
     backfillOrphanJobOrderIds(projectId, existing);
     return existing;
   }
+  return [];
+}
 
-  const order = createNewOrderSeed(project, [], operatorCode);
-  saveProjectOrders(projectId, [order]);
-  backfillOrphanJobOrderIds(projectId, [order]);
-
-  return [order];
+export function getOrCreateOrderForJob(
+  projectId: number,
+  project: Project,
+  existingOrders: ProjectOrder[],
+  operatorCode: string,
+  allProjects: { po_number?: string | null; project_number?: string | null }[] = [],
+): { orders: ProjectOrder[]; orderId: string } {
+  if (existingOrders.length > 0) {
+    return { orders: existingOrders, orderId: existingOrders[0]!.id };
+  }
+  const order = createFirstProjectOrder(projectId, project, existingOrders, operatorCode, allProjects);
+  return { orders: [...existingOrders, order], orderId: order.id };
 }
 
 export function loadAllOrdersAcrossProjects(
@@ -79,8 +100,7 @@ export function loadAllOrdersAcrossProjects(
 ): ProjectOrder[] {
   const all: ProjectOrder[] = [];
   for (const id of projectIds) {
-    const p = projectsById.get(id);
-    all.push(...loadProjectOrders(id, p));
+    all.push(...loadProjectOrders(id, projectsById.get(id)));
   }
   return all;
 }

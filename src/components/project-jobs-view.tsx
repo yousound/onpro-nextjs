@@ -21,7 +21,7 @@ import {
   saveProjectJobs,
 } from "@/lib/project-wip-edits";
 import {
-  ensureDefaultOrders,
+  getOrCreateOrderForJob,
   loadProjectOrders,
   saveProjectOrders,
 } from "@/lib/project-order-edits";
@@ -31,7 +31,9 @@ import { resolveOperatorCompanyCode } from "@/lib/operator-company-code";
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import type { UserProfile } from "@/lib/types/profile";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
-import { clientCodeByName } from "@/lib/reference/client-codes";
+import { clientCodeFromContact } from "@/lib/client-code-resolve";
+import { resolveClientCode } from "@/lib/reference/client-codes";
+import { PROJECT_STATUS_OPTIONS, projectStatusBadgeClass } from "@/lib/project-status";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
 import { projectPoNumber, rollPoNumberIfNewMonth } from "@/lib/po-number";
 import { normalizeJob } from "@/lib/job-defaults";
@@ -52,28 +54,10 @@ import { commitDeleteProject } from "@/lib/data/delete-project";
 import { countExtraDocumentsForProject } from "@/lib/documents/delete-documents";
 import { dispatchProjectDeleted, dispatchAppToast } from "@/lib/onpro-events";
 
-const PROJECT_STATUS_OPTIONS: ProjectStatus[] = [
-  "IN DEVELOPMENT",
-  "PENDING",
-  "IN-PROGRESS",
-  "COMPLETED",
-  "DELIVERED",
-];
-
 type EditModal = { kind: "project" } | { kind: "job"; jobId: string } | null;
 
 function statusBadgeClass(status: ProjectStatus): string {
-  switch (status) {
-    case "COMPLETED":
-    case "DELIVERED":
-      return "bg-violet-100 text-violet-800";
-    case "IN-PROGRESS":
-      return "bg-violet-100 text-violet-700";
-    case "PENDING":
-      return "bg-amber-100 text-amber-800";
-    default:
-      return "bg-slate-100 text-slate-700";
-  }
+  return projectStatusBadgeClass(status);
 }
 
 export function ProjectJobsView({
@@ -98,7 +82,7 @@ export function ProjectJobsView({
 
   const [draftProject, setDraftProject] = useState({
     name: "",
-    status: "IN-PROGRESS" as ProjectStatus,
+    status: "Intake" as ProjectStatus,
     po_number: "",
     hand_off: "",
     due_date: "",
@@ -155,17 +139,7 @@ export function ProjectJobsView({
     } else {
       setJobs(loadProjectJobs(project.id, mergedProject));
     }
-    const opCode = resolveOperatorCompanyCode(
-      currentUser
-        ? ({
-            id: currentUser.id,
-            operator_company_code: currentUser.operatorCompanyCode,
-            company_name: currentUser.companyName,
-          } as UserProfile)
-        : null,
-    );
-    setOrders(ensureDefaultOrders(project.id, mergedProject, opCode));
-    setJobs(loadProjectJobs(project.id, mergedProject));
+    setOrders(loadProjectOrders(project.id, mergedProject));
     setHydrated(true);
   }, [project, project.id, initialJobs, currentUser]);
 
@@ -181,10 +155,7 @@ export function ProjectJobsView({
       const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
       const patch = saved && typeof saved === "object" ? saved : {};
       const mergedProject = { ...project, ...patch };
-      const opCode = resolveOperatorCompanyCode(null);
-      setOrders(loadProjectOrders(project.id, mergedProject).length > 0
-        ? loadProjectOrders(project.id, mergedProject)
-        : ensureDefaultOrders(project.id, mergedProject, opCode));
+      setOrders(loadProjectOrders(project.id, mergedProject));
     }
     window.addEventListener("onpro-jobs-changed", reloadJobs);
     window.addEventListener("onpro-orders-changed", reloadOrders);
@@ -196,10 +167,11 @@ export function ProjectJobsView({
 
   const merged = useMemo(() => ({ ...project, ...projectPatch }), [project, projectPatch]);
 
-  const clientCode = useMemo(
-    () => clientCodeByName(merged.client.name) ?? "GG",
-    [merged.client.name],
-  );
+  const clientCode = useMemo(() => {
+    const contact = loadContacts().find((c) => String(c.id) === String(merged.client.id));
+    if (contact) return clientCodeFromContact(contact).effectiveCode;
+    return resolveClientCode(merged.client.name);
+  }, [merged.client.id, merged.client.name]);
 
   const vendors = useMemo(() => vendorContacts(loadContacts()), []);
 
@@ -275,7 +247,7 @@ export function ProjectJobsView({
 
   useEffect(() => {
     if (editModal?.kind !== "project") return;
-    const clientCode = clientCodeByName(merged.client.name) ?? "XX";
+    const clientCode = resolveClientCode(merged.client.name);
     const currentPo = projectPoNumber(merged);
     const rolledPo = rollPoNumberIfNewMonth(
       currentPo,
@@ -318,10 +290,26 @@ export function ProjectJobsView({
       modalJobId !== "__new__" &&
       modalJobId !== saved.id &&
       !jobs.some((j) => j.id === saved.id);
+
+    let jobToSave = saved;
+    if (isCreate && !saved.order_id) {
+      const created = getOrCreateOrderForJob(
+        project.id,
+        merged,
+        orders,
+        operatorCode,
+        allProjectsForOrders,
+      );
+      jobToSave = { ...saved, order_id: created.orderId };
+      if (created.orders.length !== orders.length) {
+        persistOrders(created.orders);
+      }
+    }
+
     persistJobs((prev) => {
-      const exists = prev.some((j) => j.id === saved.id);
-      if (exists) return prev.map((j) => (j.id === saved.id ? saved : j));
-      return [...prev, saved];
+      const exists = prev.some((j) => j.id === jobToSave.id);
+      if (exists) return prev.map((j) => (j.id === jobToSave.id ? jobToSave : j));
+      return [...prev, jobToSave];
     });
     closeModal();
     dispatchAppToast(isDuplicate ? "Job duplicated" : isCreate ? "Job created" : "Job saved");

@@ -10,6 +10,7 @@ import {
 } from "@/lib/contact-field-validation";
 import { loadContacts } from "@/lib/contacts-store";
 import { deriveCompanyCode, type ContactKind } from "@/lib/types/contact";
+import { resolveClientCode } from "@/lib/reference/client-codes";
 
 const fieldClass =
   "mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none focus:border-[#7c3aed] focus:ring-2 focus:ring-[#7c3aed]/15";
@@ -52,6 +53,8 @@ type Props = {
   onClose: () => void;
   onSubmit: (e: FormEvent) => void;
   onSaveNewClient: (draft: NewClientDraft) => Promise<SavedNewClient | { error: string }>;
+  clientCodeNotice?: string | null;
+  onUseResolvedClientCode?: () => void | Promise<void>;
   submitError?: string | null;
   submitting?: boolean;
 };
@@ -76,6 +79,8 @@ export function NewProjectModal({
   onClose,
   onSubmit,
   onSaveNewClient,
+  clientCodeNotice,
+  onUseResolvedClientCode,
   submitError,
   submitting = false,
 }: Props) {
@@ -115,7 +120,7 @@ export function NewProjectModal({
     setClientDraft((d) => {
       const label = d.companyName.trim();
       if (!label || d.companyCode.trim()) return d;
-      return { ...d, companyCode: deriveCompanyCode(label) };
+      return { ...d, companyCode: resolveClientCode(label) };
     });
   }, [clientDraft.kind, clientDraft.companyName]);
 
@@ -256,6 +261,20 @@ export function NewProjectModal({
                         ))}
                         <option value="__new__">+ Add new client</option>
                       </select>
+                      {clientCodeNotice ? (
+                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                          <p>{clientCodeNotice}</p>
+                          {onUseResolvedClientCode ? (
+                            <button
+                              type="button"
+                              className="mt-2 font-semibold text-accent hover:underline"
+                              onClick={() => void onUseResolvedClientCode()}
+                            >
+                              Update client to master list code
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </Field>
                     <Field label="PO number" icon={<HashIcon />}>
                       <input

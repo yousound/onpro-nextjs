@@ -2,6 +2,7 @@ import { findEmailThreadByQuery, labelLooksLikeMailroomEmail } from "@/lib/assis
 import { briefingIncludesSection } from "@/lib/assistant/prefs";
 import { withBriefingPartSpacing } from "@/lib/briefing-part-spacing";
 import type { BriefingBlock, BriefingPart, AssistantReply } from "@/lib/mock/overview-briefing";
+import { migrateProjectStatus } from "@/lib/project-status";
 import type { AssistantOpsSnapshot } from "@/lib/server/assistant-ops-snapshot";
 
 function text(value: string): BriefingPart {
@@ -64,8 +65,7 @@ export function buildBriefingFromSnapshot(snapshot: AssistantOpsSnapshot): Brief
     (p) =>
       p.due_date &&
       p.due_date < todayYmd &&
-      p.status !== "COMPLETED" &&
-      p.status !== "DELIVERED",
+      migrateProjectStatus(p.status) !== "Completed",
   );
 
   if (includeMessages && unreadMessages > 0) {
@@ -95,7 +95,10 @@ export function buildBriefingFromSnapshot(snapshot: AssistantOpsSnapshot): Brief
     });
   }
 
-  const inProgress = projects.filter((p) => p.status === "IN-PROGRESS" || p.status === "PENDING");
+  const inProgress = projects.filter((p) => {
+    const status = migrateProjectStatus(p.status);
+    return status === "Production" || status === "Intake" || status === "Development";
+  });
   if (includeProjects && inProgress.length > 0) {
     blocks.push({
       id: "in-flight",

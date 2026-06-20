@@ -44,10 +44,18 @@ export const COLORWAY_ABBREV: Record<string, string> = {
   natural: "NAT",
 };
 
+function titleCaseColorway(key: string): string {
+  return key.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /** Display names for colorway picker (title case). */
-export const COMMON_COLORWAY_NAMES = Object.keys(COLORWAY_ABBREV).map((k) =>
-  k.replace(/\b\w/g, (c) => c.toUpperCase()),
-);
+export const COMMON_COLORWAY_NAMES = Object.keys(COLORWAY_ABBREV).map(titleCaseColorway);
+
+/** Catalog colors for job colorway dropdown — name + resolved 3-letter code. */
+export const COMMON_COLORWAY_OPTIONS = Object.entries(COLORWAY_ABBREV).map(([key, code]) => ({
+  name: titleCaseColorway(key),
+  code,
+}));
 
 export function resolveColorCode(colorway: string, explicitCode?: string): string {
   const manual = explicitCode?.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3);

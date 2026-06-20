@@ -1,5 +1,5 @@
 import { DEFAULT_LABEL_SIZES } from "@/lib/label-sizes";
-import { resolveColorCode } from "@/lib/style-number";
+import { colorwayAbbrev, resolveColorCode } from "@/lib/style-number";
 import type { JobColorwayRow, ProjectJob } from "@/lib/types/wip";
 
 export const SIZE_RUN_PRESETS: { id: string; label: string; sizes: string[] }[] = [
@@ -91,7 +91,7 @@ export function patchColorwayRow(
     if (row.id !== rowId) return row;
     const next = { ...row, ...patch };
     if (patch.name !== undefined && patch.color_code === undefined) {
-      next.color_code = resolveColorCode(patch.name, row.color_code);
+      next.color_code = colorwayAbbrev(patch.name);
     }
     return next;
   });

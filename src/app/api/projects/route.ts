@@ -8,6 +8,7 @@ import {
   type CreateProjectInput,
 } from "@/lib/supabase/projects";
 import { createClient } from "@/lib/supabase/server";
+import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
 import type { Project, ProjectStatus } from "@/lib/types/project";
 import { migrateProjectStatus, PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 
@@ -53,8 +54,10 @@ export async function POST(request: Request) {
     ? (body.status as ProjectStatus)
     : migrateProjectStatus(body.status ?? "Intake");
 
+  const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
+
   try {
-    const project = await insertProjectForUser(supabase, user.id, {
+    const project = await insertProjectForUser(supabase, workspaceOwnerId, {
       name,
       description: body.description?.trim() || null,
       clientId,
@@ -91,8 +94,10 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Patch payload required" }, { status: 400 });
   }
 
+  const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
+
   try {
-    const project = await updateProjectForUser(supabase, user.id, id, body.patch);
+    const project = await updateProjectForUser(supabase, workspaceOwnerId, id, body.patch);
     return NextResponse.json({ ok: true, project });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Update failed";

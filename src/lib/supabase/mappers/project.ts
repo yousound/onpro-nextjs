@@ -1,6 +1,6 @@
 import type { ApprovalStatus, Client, Colorway, DevelopmentUpdate, Project, ProjectStatus } from "@/lib/types/project";
 import type { ProjectRowDb } from "@/lib/supabase/types-db";
-import { migrateProjectStatus } from "@/lib/project-status";
+import { migrateProjectStatus, projectStatusToDb } from "@/lib/project-status";
 
 function iso(v: string | null | undefined): string | null {
   return v ?? null;
@@ -131,7 +131,11 @@ export function splitProjectPatch(patch: Partial<Project>): {
 
 export function projectPatchToDbRow(patch: Partial<Project>): Record<string, unknown> {
   const { db } = splitProjectPatch(patch);
-  return db as Record<string, unknown>;
+  const row = db as Record<string, unknown>;
+  if (typeof row.status === "string") {
+    row.status = projectStatusToDb(migrateProjectStatus(row.status));
+  }
+  return row;
 }
 
 export function readLocalProjectOverlay(saved: Partial<Project> | null | undefined): Partial<Project> {

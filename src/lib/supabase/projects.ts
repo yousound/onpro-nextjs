@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { projectFromRow, projectPatchToDbRow } from "@/lib/supabase/mappers/project";
 import type { ProjectRowDb } from "@/lib/supabase/types-db";
 import type { Project, ProjectStatus } from "@/lib/types/project";
+import { projectStatusToDb } from "@/lib/project-status";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const PROJECT_SELECT = `
@@ -90,7 +91,7 @@ export async function insertProjectForUser(
       description: input.description,
       project_number: input.projectNumber,
       due_date: input.dueDate,
-      status: input.status,
+      status: projectStatusToDb(input.status),
       lead_team_member: input.leadTeamMember,
       lead_vendor: input.leadVendor,
       colorways: [],

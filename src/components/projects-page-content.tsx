@@ -276,6 +276,12 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     setPoTouched(false);
   }, [clientSelect]);
 
+  useEffect(() => {
+    if (!modalOpen || clientSelect.trim()) return;
+    const firstId = clientsSorted[0]?.[0];
+    if (firstId) setClientSelect(String(firstId));
+  }, [modalOpen, clientSelect, clientsSorted]);
+
   const resetForm = useCallback(() => {
     const firstId = clientsSorted[0]?.[0];
     setName("");
@@ -372,7 +378,10 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   async function submit(e: FormEvent) {
     e.preventDefault();
     const trimmedName = name.trim();
-    if (!trimmedName) return;
+    if (!trimmedName) {
+      setCreateError("Enter a project name.");
+      return;
+    }
 
     const contact = directoryClients.find((c) => String(c.id) === clientSelect);
     if (!contact) {

@@ -15,12 +15,26 @@ const LEGACY_STATUS_MAP: Record<string, ProjectStatus> = {
   "IN-PROGRESS": "Production",
   COMPLETED: "Completed",
   DELIVERED: "Completed",
+  "ON HOLD": "On Hold",
   Intake: "Intake",
   "On Hold": "On Hold",
   Development: "Development",
   Production: "Production",
   Completed: "Completed",
 };
+
+/** Supabase / iOS store legacy status strings — map app labels on write. */
+const APP_TO_DB_STATUS: Record<ProjectStatus, string> = {
+  Intake: "PENDING",
+  "On Hold": "ON HOLD",
+  Development: "IN DEVELOPMENT",
+  Production: "IN-PROGRESS",
+  Completed: "COMPLETED",
+};
+
+export function projectStatusToDb(status: ProjectStatus): string {
+  return APP_TO_DB_STATUS[status] ?? "PENDING";
+}
 
 export function migrateProjectStatus(value: string | null | undefined): ProjectStatus {
   const raw = (value ?? "").trim();

@@ -261,21 +261,21 @@ export function NewProjectModal({
                         ))}
                         <option value="__new__">+ Add new client</option>
                       </select>
-                      {clientCodeNotice ? (
-                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-                          <p>{clientCodeNotice}</p>
-                          {onUseResolvedClientCode ? (
-                            <button
-                              type="button"
-                              className="mt-2 font-semibold text-accent hover:underline"
-                              onClick={() => void onUseResolvedClientCode()}
-                            >
-                              Update client to master list code
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
                     </Field>
+                    {clientCodeNotice ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                        <p>{clientCodeNotice}</p>
+                        {onUseResolvedClientCode ? (
+                          <button
+                            type="button"
+                            className="mt-2 font-semibold text-accent hover:underline"
+                            onClick={() => void onUseResolvedClientCode()}
+                          >
+                            Update client to master list code
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <Field label="PO number" icon={<HashIcon />}>
                       <input
                         className={`${fieldClass} font-semibold text-slate-800`}

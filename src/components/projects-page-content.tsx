@@ -212,6 +212,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   }, []);
 
   const [contactsTick, setContactsTick] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
   const [name, setName] = useState("");
   const [clientSelect, setClientSelect] = useState<string>(() => String(initialProjects[0]?.client.id ?? ""));
   const [status, setStatus] = useState<ProjectStatus>("Intake");
@@ -223,7 +224,15 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   const contactsDirectory = useMemo(() => loadContacts(), [contactsTick]);
   const directoryClients = useMemo(() => clientListContacts(contactsDirectory), [contactsDirectory]);
 
-  const boardProjects = mergedProjects.length > 0 ? mergedProjects : projects;
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  const boardProjects = hydrated
+    ? mergedProjects.length > 0
+      ? mergedProjects
+      : projects
+    : initialProjects;
   const k = useMemo(() => computeProjectKpis(boardProjects), [boardProjects]);
 
   const showCoverPage = searchParams.get("cover") === "1";
@@ -383,24 +392,30 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       return;
     }
 
-    const contact = directoryClients.find((c) => String(c.id) === clientSelect);
-    if (!contact) {
+    const clientEntry = clientsSorted.find(([id]) => id === clientSelect);
+    if (!clientEntry) {
       setCreateError("Select a client for this project.");
       return;
     }
 
-    const clientId = Number(contact.id);
+    const clientId = Number(clientSelect);
     if (!Number.isFinite(clientId)) {
       setCreateError("Select a valid client for this project.");
       return;
     }
 
+    const contact = directoryClients.find((c) => String(c.id) === clientSelect);
+    const clientName = contact
+      ? contactDisplayName(contact, contactsDirectory)
+      : clientEntry[1];
     const client: Client = {
       id: clientId,
-      name: contactDisplayName(contact, contactsDirectory),
+      name: clientName,
       avatar_url: null,
     };
-    const clientCode = clientCodeFromContact(contact).effectiveCode;
+    const clientCode = contact
+      ? clientCodeFromContact(contact).effectiveCode
+      : resolveClientCode(clientName);
     const po =
       poNumber.trim() ||
       generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
@@ -425,7 +440,6 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
         setProjects((prev) => mergeProjectLists(prev, [saved]));
         closeModal();
         if (showCoverPage) openProjects();
-        router.refresh();
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : "Could not create project");
       } finally {
@@ -500,17 +514,23 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
         onUseResolvedClientCode={
           selectedClient
             ? async () => {
-                const resolution = clientCodeFromContact(selectedClient);
-                const updated: Contact = {
-                  ...selectedClient,
-                  company_code: resolution.resolvedCode,
-                  company_code_confirmed: false,
-                  updated_at: new Date().toISOString(),
-                };
-                const saved = await commitSingleContact(updated);
-                if (isClientLiveBackend()) upsertLiveContact(saved);
-                setContactsTick((t) => t + 1);
-                setPoTouched(false);
+                try {
+                  const resolution = clientCodeFromContact(selectedClient);
+                  const updated: Contact = {
+                    ...selectedClient,
+                    company_code: resolution.resolvedCode,
+                    company_code_confirmed: false,
+                    updated_at: new Date().toISOString(),
+                  };
+                  const saved = await commitSingleContact(updated);
+                  if (isClientLiveBackend()) upsertLiveContact(saved);
+                  setContactsTick((t) => t + 1);
+                  setPoTouched(false);
+                } catch (err) {
+                  setCreateError(
+                    err instanceof Error ? err.message : "Could not update client code",
+                  );
+                }
               }
             : undefined
         }

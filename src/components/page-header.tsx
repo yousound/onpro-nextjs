@@ -135,7 +135,10 @@ export function PageHeader(props: {
                 >
                   {k.label}
                 </div>
-                <div className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass[k.tone ?? "default"]}`}>
+                <div
+                  className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass[k.tone ?? "default"]}`}
+                  suppressHydrationWarning
+                >
                   {k.value}
                 </div>
               </div>

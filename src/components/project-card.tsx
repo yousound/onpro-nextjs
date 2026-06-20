@@ -60,9 +60,10 @@ export function ProjectCard({ project }: { project: Project }) {
       </div>
       <div
         className={`mt-4 flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${healthBannerClass(band)}`}
+        suppressHydrationWarning
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${healthBarClass(band)}`} aria-hidden />
-        {healthLabel(band)}
+        <span suppressHydrationWarning>{healthLabel(band)}</span>
         <span className="ml-auto text-xs font-normal opacity-80">{project.status}</span>
       </div>
       <div className="mt-4 shrink-0">
@@ -99,7 +100,7 @@ export function ProjectCard({ project }: { project: Project }) {
           </span>
           <MilestoneStrip project={project} />
         </div>
-        <div className="text-right font-medium text-text-primary">
+        <div className="text-right font-medium text-text-primary" suppressHydrationWarning>
           Due {formatShortDate(project.due_date)}
         </div>
       </div>

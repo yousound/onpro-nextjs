@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
+import { gmailReauthPayload, isGmailReauthRequiredError } from "@/lib/gmail/auth-errors";
 import { GMAIL_INBOX_PAGE_SIZE } from "@/lib/gmail/fetch-threads";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
 import { loadMailroomInboxPage } from "@/lib/mailroom/fetch-inbox-page";
@@ -80,6 +81,16 @@ export async function GET(request: Request) {
     return res;
   } catch (e) {
     console.error("[api/mailroom/threads]", e);
+    if (isGmailReauthRequiredError(e)) {
+      return NextResponse.json(
+        gmailReauthPayload({
+          threads: [],
+          source: "live",
+          email: connection.email,
+        }),
+        { status: 403 },
+      );
+    }
     return NextResponse.json(
       {
         error: e instanceof Error ? e.message : "Failed to load Gmail inbox",

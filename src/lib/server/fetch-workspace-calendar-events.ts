@@ -1,4 +1,5 @@
 import { dedupeCalendarEvents } from "@/lib/calendar-google";
+import { isGmailReauthRequiredError } from "@/lib/gmail/auth-errors";
 import { fetchGoogleCalendarEvents } from "@/lib/gmail/fetch-calendar";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
 import {
@@ -15,6 +16,7 @@ export type WorkspaceCalendarSync = {
   events: CalendarEvent[];
   connectedAccounts: Array<{ userId: string; email: string; name: string }>;
   teamUserCount: number;
+  needsReauth?: boolean;
 };
 
 async function resolveWorkspaceUserIds(
@@ -127,26 +129,31 @@ export async function fetchWorkspaceCalendarEvents(
 
   const connectedAccounts: WorkspaceCalendarSync["connectedAccounts"] = [];
   const merged: CalendarEvent[] = [];
+  let needsReauth = false;
 
   for (const conn of connections) {
     const label = labels.get(conn.user_id) ?? {
       email: conn.email,
       name: conn.email.split("@")[0] || "Team",
     };
-    connectedAccounts.push({
-      userId: conn.user_id,
-      email: conn.email,
-      name: label.name,
-    });
     try {
       const events = await fetchEventsForConnection(conn, {
         userId: conn.user_id,
         email: conn.email,
         name: label.name,
       });
+      connectedAccounts.push({
+        userId: conn.user_id,
+        email: conn.email,
+        name: label.name,
+      });
       merged.push(...events);
     } catch (e) {
-      console.warn(`[calendar] sync failed for ${conn.email}`, e);
+      if (isGmailReauthRequiredError(e) && conn.user_id === viewerUserId) {
+        needsReauth = true;
+      } else {
+        console.warn(`[calendar] sync failed for ${conn.email}`, e);
+      }
     }
   }
 
@@ -154,5 +161,6 @@ export async function fetchWorkspaceCalendarEvents(
     events: dedupeCalendarEvents(merged),
     connectedAccounts,
     teamUserCount: teamUserIds.length,
+    needsReauth: needsReauth || undefined,
   };
 }

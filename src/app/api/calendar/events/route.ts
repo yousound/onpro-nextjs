@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
 import { deleteGoogleCalendarEvent } from "@/lib/gmail/fetch-calendar";
+import {
+  GMAIL_REAUTH_USER_MESSAGE,
+  gmailReauthPayload,
+  isGmailReauthRequiredError,
+} from "@/lib/gmail/auth-errors";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
 import { fetchWorkspaceCalendarEvents } from "@/lib/server/fetch-workspace-calendar-events";
 import {
@@ -37,6 +42,17 @@ export async function GET() {
 
   try {
     const sync = await fetchWorkspaceCalendarEvents(user.id);
+    if (sync.needsReauth) {
+      return NextResponse.json(
+        gmailReauthPayload({
+          events: [],
+          source: "live",
+          email: null,
+          teamUserCount: sync.teamUserCount,
+        }),
+        { status: 403 },
+      );
+    }
     const connected = sync.connectedAccounts.length > 0;
     if (!connected) {
       return NextResponse.json({
@@ -59,6 +75,17 @@ export async function GET() {
     });
   } catch (e) {
     console.error("[api/calendar/events]", e);
+    if (isGmailReauthRequiredError(e)) {
+      return NextResponse.json(
+        gmailReauthPayload({
+          events: [],
+          source: "live",
+          email: null,
+          teamUserCount: 0,
+        }),
+        { status: 403 },
+      );
+    }
     const message = e instanceof Error ? e.message : "Failed to load Google Calendar";
     const needsReauth = message.includes("insufficient") || message.includes("403");
     return NextResponse.json(
@@ -68,8 +95,8 @@ export async function GET() {
         connected: false,
         needsReauth,
         message: needsReauth
-          ? "Reconnect Gmail in Mailroom to grant Calendar access."
-          : message,
+          ? GMAIL_REAUTH_USER_MESSAGE
+          : "Could not load Google Calendar. Try again in a moment.",
       },
       { status: needsReauth ? 403 : 502 },
     );
@@ -134,6 +161,9 @@ export async function DELETE(request: Request) {
     await deleteGoogleCalendarEvent(accessToken, externalId);
     return NextResponse.json({ ok: true });
   } catch (e) {
+    if (isGmailReauthRequiredError(e)) {
+      return NextResponse.json(gmailReauthPayload(), { status: 403 });
+    }
     const msg = e instanceof Error ? e.message : "Delete failed";
     const needsReauth =
       msg.includes("insufficient") || msg.includes("403") || msg.includes("calendar.events");
@@ -141,9 +171,7 @@ export async function DELETE(request: Request) {
       {
         error: msg,
         needsReauth,
-        message: needsReauth
-          ? "Reconnect Gmail in Mailroom to grant permission to delete calendar events."
-          : msg,
+        message: needsReauth ? GMAIL_REAUTH_USER_MESSAGE : "Could not delete this calendar event.",
       },
       { status: needsReauth ? 403 : 502 },
     );

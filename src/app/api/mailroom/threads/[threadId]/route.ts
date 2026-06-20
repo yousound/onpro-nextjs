@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
+import { gmailReauthPayload, isGmailReauthRequiredError } from "@/lib/gmail/auth-errors";
 import {
   enrichThreadsWithGoogleProfile,
   fetchGoogleUserProfile,
@@ -69,6 +70,9 @@ export async function GET(
     });
   } catch (e) {
     console.error("[api/mailroom/threads/[threadId]]", e);
+    if (isGmailReauthRequiredError(e)) {
+      return NextResponse.json(gmailReauthPayload(), { status: 403 });
+    }
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Failed to load Gmail thread" },
       { status: 502 },

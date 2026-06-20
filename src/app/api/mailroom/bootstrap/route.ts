@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isLiveBackendEnabled } from "@/lib/config/backend";
+import { gmailReauthPayload, isGmailReauthRequiredError } from "@/lib/gmail/auth-errors";
 import { isGmailOAuthConfigured } from "@/lib/gmail/env";
 import { loadMailroomInboxPage } from "@/lib/mailroom/fetch-inbox-page";
 import {
@@ -98,6 +99,17 @@ export async function GET(request: Request) {
     return res;
   } catch (e) {
     const err = e as { code?: string; message?: string };
+    if (isGmailReauthRequiredError(e)) {
+      return NextResponse.json(
+        gmailReauthPayload({
+          email: null,
+          mode: "gmail",
+          oauthConfigured: true,
+          threads: [],
+        }),
+        { status: 403 },
+      );
+    }
     if (isMissingGmailTableError(err) || err.message?.includes("user_gmail_connections")) {
       return NextResponse.json({
         connected: false,

@@ -83,9 +83,12 @@ export function upsertLiveProject(project: Project): void {
   const idx = projects.findIndex((p) => p.id === project.id);
   if (idx >= 0) {
     projects = projects.map((p, i) => (i === idx ? project : p));
-    return;
+  } else {
+    projects = [...projects, project];
   }
-  projects = [...projects, project];
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("onpro-projects-changed"));
+  }
 }
 
 export function removeLiveProject(projectId: number): void {

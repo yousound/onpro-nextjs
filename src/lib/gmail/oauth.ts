@@ -1,3 +1,7 @@
+import {
+  GmailReauthRequiredError,
+  googleTokenErrorNeedsReauth,
+} from "@/lib/gmail/auth-errors";
 import { GMAIL_SCOPES, gmailRedirectUri } from "@/lib/gmail/env";
 
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -61,6 +65,9 @@ export async function refreshGmailAccessToken(refreshToken: string): Promise<Goo
   });
   if (!res.ok) {
     const text = await res.text();
+    if (googleTokenErrorNeedsReauth(text)) {
+      throw new GmailReauthRequiredError();
+    }
     throw new Error(`Google token refresh failed: ${text.slice(0, 300)}`);
   }
   return res.json() as Promise<GoogleTokenResponse>;

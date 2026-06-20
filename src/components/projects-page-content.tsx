@@ -229,9 +229,11 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   }, []);
 
   const boardProjects = hydrated
-    ? mergedProjects.length > 0
-      ? mergedProjects
-      : projects
+    ? projects.length >= mergedProjects.length
+      ? projects
+      : mergedProjects.length > 0
+        ? mergedProjects
+        : projects
     : initialProjects;
   const k = useMemo(() => computeProjectKpis(boardProjects), [boardProjects]);
 
@@ -438,6 +440,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
         });
         upsertLiveProject(saved);
         setProjects((prev) => mergeProjectLists(prev, [saved]));
+        setCacheTick((t) => t + 1);
         closeModal();
         if (showCoverPage) openProjects();
       } catch (err) {

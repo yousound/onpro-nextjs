@@ -1,6 +1,8 @@
+import { isGmailReauthRequiredError } from "@/lib/gmail/auth-errors";
+import { refreshGmailAccessToken } from "@/lib/gmail/oauth";
+import { clearGmailInboxCache } from "@/lib/supabase/gmail-inbox-cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { refreshGmailAccessToken } from "@/lib/gmail/oauth";
 
 /** PostgREST: 42P01 (relation missing) or PGRST205 (schema cache). */
 export function isMissingGmailTableError(error: { code?: string; message?: string }): boolean {
@@ -82,10 +84,18 @@ export async function upsertGmailConnection(row: {
   }
 }
 
-export async function deleteGmailConnection(userId: string): Promise<void> {
-  const supabase = await createClient();
+export async function deleteGmailConnection(
+  userId: string,
+  opts?: { admin?: boolean },
+): Promise<void> {
+  const supabase = (opts?.admin ? createServiceClient() : null) ?? (await createClient());
   const { error } = await supabase.from("user_gmail_connections").delete().eq("user_id", userId);
   if (error && !isMissingGmailTableError(error)) throw error;
+  try {
+    await clearGmailInboxCache(userId);
+  } catch {
+    /* best effort — session may be missing on service routes */
+  }
 }
 
 /** Returns a valid access token, refreshing when expired. */
@@ -103,7 +113,15 @@ export async function getValidGmailAccessToken(
     return { accessToken: connection.access_token, connection };
   }
 
-  const tokens = await refreshGmailAccessToken(connection.refresh_token);
+  let tokens;
+  try {
+    tokens = await refreshGmailAccessToken(connection.refresh_token);
+  } catch (e) {
+    if (isGmailReauthRequiredError(e)) {
+      await deleteGmailConnection(connection.user_id, { admin: opts?.admin });
+    }
+    throw e;
+  }
   const supabase = (opts?.admin ? createServiceClient() : null) ?? (await createClient());
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
   await supabase

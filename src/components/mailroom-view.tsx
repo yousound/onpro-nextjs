@@ -102,6 +102,7 @@ import {
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import { resolveClientProjectList } from "@/lib/mock/project-session";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { GMAIL_REAUTH_USER_MESSAGE } from "@/lib/gmail/auth-errors";
 import {
   applySuggestionViaApi,
   disconnectGmailViaApi,
@@ -326,6 +327,16 @@ function touchMailroomLastRefreshMs(): void {
   }
 }
 
+function gmailReauthStatus(message?: string) {
+  return {
+    loading: false,
+    connected: false,
+    email: null as string | null,
+    oauthConfigured: true,
+    message: message ?? GMAIL_REAUTH_USER_MESSAGE,
+  };
+}
+
 export function MailroomView() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -493,6 +504,15 @@ export function MailroomView() {
           maxResults: MAILROOM_REFRESH_INBOX_PAGE_SIZE,
           fresh: true,
         });
+        if (bootstrap.needsReauth) {
+          setGmailStatus({
+            ...gmailReauthStatus(bootstrap.message),
+            oauthConfigured: bootstrap.oauthConfigured ?? true,
+          });
+          setGmailThreads([]);
+          if (!opts?.silent) setToast(bootstrap.message ?? GMAIL_REAUTH_USER_MESSAGE);
+          return;
+        }
         if (!bootstrap.connected) return;
         const estimate = bootstrap.resultSizeEstimate ?? null;
         setGmailInboxEstimate(estimate);
@@ -549,6 +569,10 @@ export function MailroomView() {
         setSelectedThreadId(data.threads[0].id);
       }
     } catch (e) {
+      if (e instanceof GmailStatusError && e.status === 403) {
+        setGmailStatus(gmailReauthStatus(e.message));
+        setGmailThreads([]);
+      }
       setToast(e instanceof Error ? e.message : "Gmail search failed");
     } finally {
       setGmailSearching(false);
@@ -572,6 +596,15 @@ export function MailroomView() {
             Date.now() - readMailroomLastRefreshMs() > 60_000,
         });
         if (cancelled) return;
+        if (bootstrap.needsReauth) {
+          setGmailStatus({
+            ...gmailReauthStatus(bootstrap.message),
+            oauthConfigured: bootstrap.oauthConfigured ?? true,
+          });
+          setGmailThreads([]);
+          setToast(bootstrap.message ?? GMAIL_REAUTH_USER_MESSAGE);
+          return;
+        }
         statusConnected = bootstrap.connected;
         const effectiveConnected =
           bootstrap.connected || (gmailOAuthFlag === "connected" && attempt < 2);
@@ -650,17 +683,21 @@ export function MailroomView() {
         console.warn("[mailroom] Mailroom bootstrap failed", e);
         if (!cancelled) {
           const needsSignIn = e instanceof GmailStatusError && e.status === 401;
+          const needsReauth = e instanceof GmailStatusError && e.status === 403;
           setGmailStatus({
             loading: false,
-            connected: statusConnected,
+            connected: false,
             email: null,
             oauthConfigured: true,
-            message: needsSignIn
-              ? "Please sign in to OnPro first, then connect Gmail."
-              : e instanceof Error
-                ? e.message
-                : "Could not reach Mailroom. Refresh and try again.",
+            message: needsReauth
+              ? e.message
+              : needsSignIn
+                ? "Please sign in to OnPro first, then connect Gmail."
+                : e instanceof Error
+                  ? e.message
+                  : "Could not reach Mailroom. Refresh and try again.",
           });
+          if (needsReauth) setToast(e.message);
           if (!statusConnected) setGmailThreads([]);
           if (gmailOAuthFlag === "connected" && attempt < 2 && !statusConnected) {
             await new Promise((r) => setTimeout(r, 500));

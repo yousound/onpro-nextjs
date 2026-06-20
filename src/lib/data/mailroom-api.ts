@@ -1,5 +1,6 @@
 import { isSupabaseBackendEnabled } from "@/lib/config/backend";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { GMAIL_REAUTH_USER_MESSAGE } from "@/lib/gmail/auth-errors";
 import type { AgentApplyResult } from "@/lib/agent-apply-core";
 import type {
   AgentSuggestion,
@@ -25,6 +26,7 @@ export type GmailStatusResponse = {
   mode: string;
   oauthConfigured?: boolean;
   message?: string;
+  needsReauth?: boolean;
 };
 
 export type MailroomThreadsResponse = {
@@ -38,6 +40,7 @@ export type MailroomThreadsResponse = {
   connected?: boolean;
   email?: string | null;
   message?: string;
+  needsReauth?: boolean;
   error?: string;
 };
 
@@ -84,8 +87,19 @@ export async function fetchMailroomBootstrapViaApi(opts?: {
   const body = (await res.json().catch(() => ({}))) as MailroomBootstrapResponse & {
     error?: string;
   };
+  if (res.status === 403 && body.needsReauth) {
+    return {
+      connected: false,
+      email: body.email ?? null,
+      mode: body.mode ?? "gmail",
+      oauthConfigured: body.oauthConfigured ?? true,
+      needsReauth: true,
+      message: body.message ?? GMAIL_REAUTH_USER_MESSAGE,
+      threads: body.threads ?? [],
+    };
+  }
   if (!res.ok) {
-    throw new GmailStatusError(body.error ?? res.statusText, res.status, body.mode);
+    throw new GmailStatusError(body.message ?? body.error ?? res.statusText, res.status, body.mode);
   }
   return body;
 }
@@ -114,11 +128,14 @@ export async function fetchMailroomThreadsViaApi(opts?: {
   if (opts?.resolveImages) params.set("resolveImages", "1");
   const qs = params.toString();
   const res = await fetch(`/api/mailroom/threads${qs ? `?${qs}` : ""}`, { cache: "no-store" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error ?? res.statusText);
+  const body = (await res.json().catch(() => ({}))) as MailroomThreadsResponse;
+  if (res.status === 403 && body.needsReauth) {
+    throw new GmailStatusError(body.message ?? GMAIL_REAUTH_USER_MESSAGE, 403, "gmail");
   }
-  return res.json() as Promise<MailroomThreadsResponse>;
+  if (!res.ok) {
+    throw new Error(body.error ?? body.message ?? res.statusText);
+  }
+  return body;
 }
 
 export type MailroomThreadDetailResponse = {

@@ -6,6 +6,6 @@ Working notes for updating the partner ledger ([`/ledger`](../../src/app/ledger)
 
 | Sprint | File | Status (notes) |
 |--------|------|----------------|
-| **June 2026** (1–30 Jun) | [sprint-2026-06.md](./sprint-2026-06.md) | Caps 94% / ~84%; **pushed Live to Vercel** (4 Jun); migrations **009–013**; Live messages, Google Calendar, Mailroom RFQ, project orders, docs/images — see sprint doc |
+| **June 2026** (1–30 Jun) | [sprint-2026-06.md](./sprint-2026-06.md) | Caps 94% / ~86%; **20 Jun** job entry + project create (client code, status funnel, colorways, team write **021**, hydration); prior **4 Jun** Vercel Live push, migrations **009–021** |
 
 Older filename `week-2026-06-01-to-07.md` was folded into the June sprint doc.

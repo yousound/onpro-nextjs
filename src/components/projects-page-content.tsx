@@ -55,6 +55,7 @@ import { defaultPermissionsForSegment } from "@/lib/project-permissions";
 import type { Contact } from "@/lib/types/contact";
 import { generatePoNumber } from "@/lib/po-number";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
+import { validateProjectPoUnique } from "@/lib/po-duplicate";
 import { PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
 
 function emptyProjectRecord(
@@ -421,6 +422,11 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     const po =
       poNumber.trim() ||
       generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
+    const poConflict = validateProjectPoUnique(po, projects);
+    if (poConflict) {
+      setCreateError(poConflict);
+      return;
+    }
     const dueIso = dueDate ? dateInputToIso(dueDate) : null;
     const creatorName = user?.fullName?.trim() || null;
 

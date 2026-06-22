@@ -84,6 +84,7 @@ import {
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
 import { generatePoForJob } from "@/lib/po-context";
+import { validateJobPoFields, validateJobPoOnProject } from "@/lib/po-duplicate";
 import { COMMON_COLORWAY_NAMES, resolveColorCode, styleColorCode } from "@/lib/style-number";
 import { wipStepLabel } from "@/lib/wip-project-timeline";
 import { JobTimelineStepsEditor } from "@/components/job-timeline-steps-editor";
@@ -560,12 +561,25 @@ export function JobDetailsModal({
   );
 
   function handleGeneratePo() {
-    patch({ po_number: generatePoForJob(project, draft) });
+    const next = generatePoForJob(project, draft);
+    const conflict = validateJobPoOnProject(next, project.id, allJobs, orders, draft.id);
+    if (conflict) {
+      window.alert(conflict);
+      return;
+    }
+    patch({ po_number: next });
   }
 
   function handleLinkPo(fromJobId: string) {
     const source = allJobs.find((j) => j.id === fromJobId);
-    if (source?.po_number) patch({ po_number: source.po_number });
+    const po = source?.po_number?.trim();
+    if (!po) return;
+    const conflict = validateJobPoOnProject(po, project.id, allJobs, orders, draft.id);
+    if (conflict) {
+      window.alert(conflict);
+      return;
+    }
+    patch({ po_number: po });
   }
 
   function handleJumpToSection(section: JobModalSection) {
@@ -624,6 +638,11 @@ export function JobDetailsModal({
         window.alert(`SKU ${sku} is already used on “${dup.name || dup.style_number}”.`);
         return;
       }
+    }
+    const poConflict = validateJobPoFields(draft, allJobs, orders);
+    if (poConflict) {
+      window.alert(poConflict);
+      return;
     }
     const saved: ProjectJob = {
       ...draft,

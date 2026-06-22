@@ -36,6 +36,7 @@ import { resolveClientCode } from "@/lib/reference/client-codes";
 import { PROJECT_STATUS_OPTIONS, projectStatusBadgeClass } from "@/lib/project-status";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
 import { projectPoNumber, rollPoNumberIfNewMonth } from "@/lib/po-number";
+import { validateProjectPoUnique } from "@/lib/po-duplicate";
 import { normalizeJob } from "@/lib/job-defaults";
 import { createNewJobSeed } from "@/lib/project-job-create";
 import type { ProjectModuleId } from "@/lib/project-modules";
@@ -337,6 +338,13 @@ export function ProjectJobsView({
   async function saveProjectModal(e: FormEvent) {
     e.preventDefault();
     const po = draftProject.po_number.trim() || null;
+    if (po) {
+      const poConflict = validateProjectPoUnique(po, allProjectsForOrders, project.id);
+      if (poConflict) {
+        window.alert(poConflict);
+        return;
+      }
+    }
     const modalPatch = {
       name: draftProject.name.trim() || merged.name,
       status: draftProject.status,

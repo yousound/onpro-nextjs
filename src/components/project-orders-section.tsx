@@ -8,6 +8,7 @@ import { createNewOrderSeed } from "@/lib/project-order-create";
 import { jobsForOrder } from "@/lib/project-order-edits";
 import { JOB_TYPE_OPTIONS } from "@/lib/reference/category-codes";
 import { effectiveJobPoDisplay } from "@/lib/effective-po";
+import { validateOrderPoOnProject } from "@/lib/po-duplicate";
 import { JobStatusBadge } from "@/components/job-status-badge";
 
 function effectivePo(order: ProjectOrder): string {
@@ -133,6 +134,26 @@ export function ProjectOrdersSection({
 
   const handleOrderField = useCallback(
     (orderId: string, patch: Partial<ProjectOrder>) => {
+      if (patch.po_number !== undefined) {
+        const po = patch.po_number?.trim();
+        if (po) {
+          const msg = validateOrderPoOnProject(po, orders, orderId);
+          if (msg) {
+            window.alert(msg);
+            return;
+          }
+        }
+      }
+      if (patch.client_po_number !== undefined) {
+        const po = patch.client_po_number?.trim();
+        if (po) {
+          const msg = validateOrderPoOnProject(po, orders, orderId);
+          if (msg) {
+            window.alert(msg);
+            return;
+          }
+        }
+      }
       onOrdersChange(
         orders.map((o) =>
           o.id === orderId ? { ...o, ...patch, updated_at: new Date().toISOString() } : o,

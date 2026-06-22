@@ -6,6 +6,7 @@ import {
   seedLiveContacts,
   seedLiveProjects,
 } from "@/lib/data/live-cache";
+import { migrateAllLegacyWipFromBrowser } from "@/lib/data/migrate-legacy-wip";
 import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
 
@@ -19,6 +20,9 @@ export async function fetchAndSeedLiveProjects(): Promise<Project[] | null> {
     const data = (await res.json()) as { projects?: Project[] };
     if (!Array.isArray(data.projects)) return null;
     seedLiveProjects(data.projects);
+    void migrateAllLegacyWipFromBrowser(data.projects).then((n) => {
+      if (n > 0) window.dispatchEvent(new Event("onpro-jobs-changed"));
+    });
     window.dispatchEvent(new Event("onpro-projects-changed"));
     return data.projects;
   } catch {

@@ -53,25 +53,41 @@ function readStoredProjectJobs(projectId: number, project?: Project): ProjectJob
   return backfillJobNumbers(normalized, project);
 }
 
+/** Browser-only jobs from before Supabase sync — used once to migrate live workspaces. */
+export function readLegacyStoredProjectJobs(projectId: number, project?: Project): ProjectJob[] {
+  return readStoredProjectJobs(projectId, project);
+}
+
 export function loadProjectJobs(projectId: number, project?: Project): ProjectJob[] {
   if (isClientLiveBackend()) {
-    const cached = withoutDemoSeedJobs(getLiveCachedJobs(projectId));
-    if (cached.length > 0) return cached;
-    const stored = readStoredProjectJobs(projectId, project);
-    if (stored.length > 0) {
-      seedLiveJobsForProject(projectId, stored);
-    }
-    return stored;
+    return withoutDemoSeedJobs(getLiveCachedJobs(projectId));
   }
   return readStoredProjectJobs(projectId, project);
 }
 
 export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
   const cleaned = withoutDemoSeedJobs(jobs);
-  writeMockLs(MOCK_LS.projectJobs(projectId), cleaned);
   if (isClientLiveBackend()) {
     seedLiveJobsForProject(projectId, cleaned);
+    void (async () => {
+      try {
+        const { getLiveCachedOrders } = await import("@/lib/data/live-cache");
+        const { syncOrdersToDb } = await import("@/lib/data/persist-orders");
+        const { syncJobsToDb } = await import("@/lib/data/persist-jobs");
+        const orders = getLiveCachedOrders(projectId);
+        if (orders.length > 0) await syncOrdersToDb(projectId, orders);
+        const saved = await syncJobsToDb(projectId, cleaned);
+        if (saved) seedLiveJobsForProject(projectId, saved);
+      } catch (err) {
+        console.error("[saveProjectJobs] sync failed", err);
+      }
+    })();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("onpro-jobs-changed"));
+    }
+    return;
   }
+  writeMockLs(MOCK_LS.projectJobs(projectId), cleaned);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("onpro-jobs-changed"));
   }

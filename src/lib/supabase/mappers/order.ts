@@ -1,5 +1,6 @@
 import type { ProjectOrder } from "@/lib/types/wip";
 import type { ProjectOrderRowDb } from "@/lib/supabase/types-db";
+import { ensureUuid } from "@/lib/id-uuid";
 
 export function projectOrderFromRow(row: ProjectOrderRowDb): ProjectOrder {
   const linked = row.linked_order_ids;
@@ -21,7 +22,7 @@ export function projectOrderToRow(
   userId: string,
 ): Omit<ProjectOrderRowDb, "created_at"> & { created_at?: string } {
   return {
-    id: order.id,
+    id: ensureUuid(order.id),
     user_id: userId,
     project_id: order.project_id,
     order_number: order.order_number,

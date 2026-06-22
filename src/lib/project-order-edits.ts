@@ -8,14 +8,7 @@ import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 
 export function loadProjectOrders(projectId: number, _project?: Project): ProjectOrder[] {
   if (isClientLiveBackend()) {
-    const cached = getLiveCachedOrders(projectId);
-    if (cached.length > 0) return cached;
-    const stored = readStoredProjectOrders(projectId);
-    if (stored.length > 0) {
-      seedLiveOrdersForProject(projectId, stored);
-      return stored;
-    }
-    return [];
+    return getLiveCachedOrders(projectId);
   }
   return readStoredProjectOrders(projectId);
 }
@@ -25,13 +18,30 @@ function readStoredProjectOrders(projectId: number): ProjectOrder[] {
   return Array.isArray(saved) ? saved : [];
 }
 
+/** Browser-only orders from before Supabase sync — used once to migrate live workspaces. */
+export function readLegacyStoredProjectOrders(projectId: number): ProjectOrder[] {
+  return readStoredProjectOrders(projectId);
+}
+
 export function saveProjectOrders(projectId: number, orders: ProjectOrder[]) {
-  writeMockLs(MOCK_LS.projectOrders(projectId), orders);
   if (isClientLiveBackend()) {
     seedLiveOrdersForProject(projectId, orders);
+    void import("@/lib/data/persist-orders")
+      .then(({ syncOrdersToDb }) => syncOrdersToDb(projectId, orders))
+      .then((saved) => {
+        if (saved) seedLiveOrdersForProject(projectId, saved);
+      })
+      .catch((err) => {
+        console.error("[saveProjectOrders] sync failed", err);
+      });
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("onpro-orders-changed"));
     }
+    return;
+  }
+  writeMockLs(MOCK_LS.projectOrders(projectId), orders);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("onpro-orders-changed"));
   }
 }
 

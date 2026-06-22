@@ -1,5 +1,6 @@
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob, ProjectOrder } from "@/lib/types/wip";
+import { effectiveOrderPoDisplay } from "@/lib/effective-po";
 
 export function normalizePo(value: string): string {
   return value.trim().toUpperCase();
@@ -112,7 +113,10 @@ export function validateOrderPoOnProject(
   if (!trimmed) return null;
   const dup = findOrderWithPoOnProject(trimmed, orders, excludeOrderId);
   if (!dup) return null;
-  const label = dup.order_number?.trim() || "another order";
+  const label =
+    effectiveOrderPoDisplay(dup) ||
+    dup.order_number?.trim() ||
+    "another shipment batch";
   return formatPoDuplicateMessage(normalizePo(trimmed), "order", label);
 }
 
@@ -138,7 +142,10 @@ export function validateJobPoOnProject(
 
   const orderDup = findOrderWithPoOnProject(trimmed, orders);
   if (orderDup) {
-    const label = orderDup.order_number?.trim() || "another order";
+    const label =
+      effectiveOrderPoDisplay(orderDup) ||
+      orderDup.order_number?.trim() ||
+      "another shipment batch";
     return `PO ${key} is already used on order “${label}” in this project. Each job needs a unique PO.`;
   }
 

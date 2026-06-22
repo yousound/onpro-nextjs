@@ -17,12 +17,14 @@ ON CONFLICT (id) DO UPDATE SET
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
 -- Anyone can view avatars (public bucket). Use a private bucket + signed URLs if you prefer.
+DROP POLICY IF EXISTS "avatars_public_read" ON storage.objects;
 CREATE POLICY "avatars_public_read"
   ON storage.objects FOR SELECT
   TO public
   USING (bucket_id = 'avatars');
 
 -- Signed-in users upload only into their own folder: {auth.uid()}/...
+DROP POLICY IF EXISTS "avatars_insert_own" ON storage.objects;
 CREATE POLICY "avatars_insert_own"
   ON storage.objects FOR INSERT
   TO authenticated
@@ -31,6 +33,7 @@ CREATE POLICY "avatars_insert_own"
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
+DROP POLICY IF EXISTS "avatars_update_own" ON storage.objects;
 CREATE POLICY "avatars_update_own"
   ON storage.objects FOR UPDATE
   TO authenticated
@@ -43,6 +46,7 @@ CREATE POLICY "avatars_update_own"
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
+DROP POLICY IF EXISTS "avatars_delete_own" ON storage.objects;
 CREATE POLICY "avatars_delete_own"
   ON storage.objects FOR DELETE
   TO authenticated

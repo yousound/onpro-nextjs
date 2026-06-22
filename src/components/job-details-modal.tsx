@@ -86,6 +86,7 @@ import {
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
 import { generatePoForJob } from "@/lib/po-context";
+import { orderDisplayLabel } from "@/lib/effective-po";
 import { projectPoNumber } from "@/lib/po-number";
 import { validateJobPoFields, validateJobPoOnProject } from "@/lib/po-duplicate";
 import { COMMON_COLORWAY_NAMES, resolveColorCode, styleColorCode } from "@/lib/style-number";
@@ -949,9 +950,9 @@ export function JobDetailsModal({
                     onChange={(e) => patch({ order_id: e.target.value || undefined })}
                   >
                     <option value="">—</option>
-                    {orders.map((o) => (
+                    {orders.map((o, i) => (
                       <option key={o.id} value={o.id}>
-                        {o.order_number}
+                        {orderDisplayLabel(o, project, i)}
                         {o.due_date ? ` · due ${isoToDateInput(o.due_date)}` : ""}
                       </option>
                     ))}

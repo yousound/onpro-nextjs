@@ -67,11 +67,11 @@ export function buildClientProjectList(base: Project[]): Project[] {
 
 /** Client project list including session storage and live in-memory cache. */
 export function resolveClientProjectList(base: Project[]): Project[] {
-  let list = dedupeProjectsById(buildClientProjectList(base));
   if (typeof window !== "undefined" && isClientLiveBackend()) {
-    list = dedupeProjectsById(
-      filterVisibleProjects(mergeProjectLists(list, getLiveCachedProjects())),
-    );
+    const cached = getLiveCachedProjects();
+    const merged = cached.length > 0 ? mergeProjectLists(base, cached) : base;
+    return dedupeProjectsById(filterVisibleProjects(merged));
   }
+  let list = dedupeProjectsById(buildClientProjectList(base));
   return list;
 }

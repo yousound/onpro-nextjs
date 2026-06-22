@@ -11,25 +11,25 @@ import type {
 } from "@/lib/types/wip";
 import { dateInputToIso, formatShortDate, isoToDateInput } from "@/lib/format";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
-import { upsertLiveProject } from "@/lib/data/live-cache";
+import { getLiveCachedProjects, seedLiveOrdersForProject, upsertLiveProject } from "@/lib/data/live-cache";
 import { updateProjectInDb } from "@/lib/data/persist-project";
 import { splitProjectPatch, readLocalProjectOverlay } from "@/lib/supabase/mappers/project";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { resolveClientProjectList } from "@/lib/mock/project-session";
 import {
   loadProjectJobs,
+  readLegacyStoredProjectJobs,
   saveProjectJobs,
 } from "@/lib/project-wip-edits";
 import {
   getOrCreateOrderForJob,
   loadProjectOrders,
+  readLegacyStoredProjectOrders,
   saveProjectOrders,
 } from "@/lib/project-order-edits";
 import { ProjectOrdersSection } from "@/components/project-orders-section";
 import { useCurrentUser } from "@/components/profile-provider";
 import { resolveOperatorCompanyCode } from "@/lib/operator-company-code";
-import { getLiveCachedProjects } from "@/lib/data/live-cache";
-import type { UserProfile } from "@/lib/types/profile";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { clientCodeFromContact } from "@/lib/client-code-resolve";
 import { resolveClientCode } from "@/lib/reference/client-codes";
@@ -54,6 +54,8 @@ import { RequestVendorQuotesModal } from "@/components/request-vendor-quotes-mod
 import { parseInspectJob } from "@/lib/job-inspect";
 import { commitDeleteProject } from "@/lib/data/delete-project";
 import { countExtraDocumentsForProject } from "@/lib/documents/delete-documents";
+import { fetchJobsFromDb, syncJobsToDb } from "@/lib/data/persist-jobs";
+import { fetchOrdersFromDb, syncOrdersToDb } from "@/lib/data/persist-orders";
 import { dispatchProjectDeleted, dispatchAppToast } from "@/lib/onpro-events";
 
 type EditModal = { kind: "project" } | { kind: "job"; jobId: string } | null;
@@ -128,23 +130,72 @@ export function ProjectJobsView({
   );
 
   useEffect(() => {
-    const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
-    const patch = saved && typeof saved === "object" ? saved : {};
-    setProjectPatch(readLocalProjectOverlay(saved));
-    const mergedProject = { ...project, ...patch };
+    let cancelled = false;
 
-    if (isClientLiveBackend()) {
-      let loaded = loadProjectJobs(project.id, mergedProject);
-      if (loaded.length === 0 && (initialJobs?.length ?? 0) > 0) {
-        saveProjectJobs(project.id, initialJobs!);
-        loaded = initialJobs!;
+    async function hydrateProjectData() {
+      const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
+      const patch = saved && typeof saved === "object" ? saved : {};
+      setProjectPatch(readLocalProjectOverlay(saved));
+      const mergedProject = { ...project, ...patch };
+
+      if (isClientLiveBackend()) {
+        let apiJobs = await fetchJobsFromDb(project.id);
+        let apiOrders = await fetchOrdersFromDb(project.id);
+        if (cancelled) return;
+
+        if ((apiOrders?.length ?? 0) === 0) {
+          const legacyOrders = readLegacyStoredProjectOrders(project.id);
+          if (legacyOrders.length > 0) {
+            try {
+              apiOrders = (await syncOrdersToDb(project.id, legacyOrders)) ?? legacyOrders;
+            } catch (err) {
+              console.error("[project] legacy order migration failed", err);
+              apiOrders = legacyOrders;
+            }
+          }
+        }
+
+        if ((apiJobs?.length ?? 0) === 0) {
+          const legacyJobs = readLegacyStoredProjectJobs(project.id, mergedProject);
+          if (legacyJobs.length > 0) {
+            try {
+              if (apiOrders?.length) {
+                seedLiveOrdersForProject(project.id, apiOrders);
+              }
+              apiJobs = (await syncJobsToDb(project.id, legacyJobs)) ?? legacyJobs;
+            } catch (err) {
+              console.error("[project] legacy job migration failed", err);
+              apiJobs = legacyJobs;
+            }
+          }
+        }
+
+        const jobsFromServer = apiJobs ?? initialJobs ?? [];
+        const ordersFromServer = apiOrders ?? [];
+        setJobs(jobsFromServer.length > 0 ? jobsFromServer : loadProjectJobs(project.id, mergedProject));
+        setOrders(ordersFromServer.length > 0 ? ordersFromServer : loadProjectOrders(project.id, mergedProject));
+        setHydrated(true);
+        return;
       }
-      setJobs(loaded);
-    } else {
+
       setJobs(loadProjectJobs(project.id, mergedProject));
+      setOrders(loadProjectOrders(project.id, mergedProject));
+      setHydrated(true);
     }
-    setOrders(loadProjectOrders(project.id, mergedProject));
-    setHydrated(true);
+
+    void hydrateProjectData();
+
+    function onWorkspaceChanged() {
+      if (!isClientLiveBackend()) return;
+      setHydrated(false);
+      void hydrateProjectData();
+    }
+
+    window.addEventListener("onpro-workspace-changed", onWorkspaceChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("onpro-workspace-changed", onWorkspaceChanged);
+    };
   }, [project, project.id, initialJobs, currentUser]);
 
   useEffect(() => {

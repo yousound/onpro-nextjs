@@ -226,6 +226,22 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     };
   }, [syncProjectsFromSources]);
 
+  /** Clear stale list immediately when switching workspace, then pull fresh data. */
+  useEffect(() => {
+    if (!isClientLiveBackend()) return;
+    const onWorkspaceChanged = () => {
+      setProjects([]);
+      setCacheTick((t) => t + 1);
+      void fetchAndSeedLiveProjects().then((fresh) => {
+        if (!fresh) return;
+        syncProjectsFromSources(fresh);
+        setCacheTick((t) => t + 1);
+      });
+    };
+    window.addEventListener("onpro-workspace-changed", onWorkspaceChanged);
+    return () => window.removeEventListener("onpro-workspace-changed", onWorkspaceChanged);
+  }, [syncProjectsFromSources]);
+
   useEffect(() => {
     function onDeleted(e: Event) {
       const id = (e as CustomEvent<{ projectId: number }>).detail?.projectId;

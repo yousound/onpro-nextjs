@@ -10,7 +10,7 @@ import {
   type SuggestionResolveContext,
 } from "@/lib/agent-suggestion-resolve";
 import { normalizeRfqProjectPayload } from "@/lib/mailroom/client-from-rfq";
-import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { orderDisplayLabel } from "@/lib/effective-po";
 import { persistProjectToDb, updateProjectInDb } from "@/lib/data/persist-project";
 import { upsertLiveProject } from "@/lib/data/live-cache";
 import { contactDisplayName, loadContacts, newContactId, saveContacts } from "@/lib/contacts-store";
@@ -349,7 +349,7 @@ function execCreateOrder(
   const order = orders[orders.length - 1]!;
   return {
     ok: true,
-    message: `Order ${order.order_number} on ${project.name}.`,
+    message: `Shipment batch ${orderDisplayLabel(order, project, orders.length - 1)} on ${project.name}.`,
     deepLink: projectDeepLink(project.id),
     projectId: project.id,
   };

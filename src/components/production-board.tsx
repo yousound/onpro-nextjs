@@ -30,7 +30,6 @@ import { dispatchAppToast } from "@/lib/onpro-events";
 export type ProductionJobRow = ProjectJob & {
   projectName: string;
   clientName: string;
-  orderNumber: string;
   orderDue: string | null;
   orderPo: string;
   projectPo: string;
@@ -69,7 +68,6 @@ export function ProductionBoard({
           ...j,
           projectName: p.name,
           clientName: p.client.name,
-          orderNumber: order?.order_number ?? "—",
           orderDue: order?.due_date ?? null,
           orderPo,
           projectPo: p.po_number?.trim() || p.project_number?.trim() || "",

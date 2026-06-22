@@ -7,12 +7,12 @@ import { formatShortDate, isoToDateInput, dateInputToIso } from "@/lib/format";
 import { createNewOrderSeed } from "@/lib/project-order-create";
 import { jobsForOrder } from "@/lib/project-order-edits";
 import { JOB_TYPE_OPTIONS } from "@/lib/reference/category-codes";
-import { effectiveJobPoDisplay } from "@/lib/effective-po";
+import { effectiveJobPoDisplay, orderDisplayLabel } from "@/lib/effective-po";
 import { validateOrderPoOnProject } from "@/lib/po-duplicate";
 import { JobStatusBadge } from "@/components/job-status-badge";
 
-function effectivePo(order: ProjectOrder): string {
-  return order.client_po_number?.trim() || order.po_number?.trim() || "—";
+function effectivePo(order: ProjectOrder, project: Project, index: number): string {
+  return orderDisplayLabel(order, project, index);
 }
 
 function jobTypeLabel(job: ProjectJob): string {
@@ -261,13 +261,14 @@ export function ProjectOrdersSection({
 
         {orders.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border-light px-4 py-6 text-sm text-text-secondary">
-            No orders yet. Create an order to assign jobs (MAT-style order numbers).
+            No shipment batches yet. Jobs are grouped here when you add more than one delivery date or PO.
           </p>
         ) : (
           <div className="space-y-4">
-            {orders.map((order) => {
+            {orders.map((order, orderIndex) => {
               const orderJobs = jobsForOrder(order.id, jobs);
               const open = expandedOrders.has(order.id);
+              const orderLabel = effectivePo(order, project, orderIndex);
               return (
                 <div
                   key={order.id}
@@ -278,11 +279,10 @@ export function ProjectOrdersSection({
                     onClick={() => toggleOrder(order.id)}
                     className="flex w-full flex-wrap items-center gap-4 border-b border-border-light bg-white px-4 py-3 text-left"
                   >
-                    <span className="font-mono text-sm font-bold text-accent">{order.order_number}</span>
+                    <span className="font-mono text-sm font-bold text-accent">{orderLabel}</span>
                     <span className="text-sm text-text-secondary">
                       Due {formatShortDate(order.due_date) || "—"}
                     </span>
-                    <span className="text-sm font-mono text-text-primary">PO {effectivePo(order)}</span>
                     <span className="ml-auto text-xs text-text-secondary">
                       {orderJobs.length} job{orderJobs.length === 1 ? "" : "s"} {open ? "▼" : "▶"}
                     </span>

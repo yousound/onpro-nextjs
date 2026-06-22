@@ -33,3 +33,14 @@ export function effectiveOrderPoDisplay(
     ""
   );
 }
+
+/** User-facing order label — PO/project number, not internal CD order numbers. */
+export function orderDisplayLabel(
+  order: Pick<ProjectOrder, "client_po_number" | "po_number">,
+  project?: Pick<Project, "po_number" | "project_number"> | null,
+  index = 0,
+): string {
+  const po = effectiveOrderPoDisplay(order, project);
+  if (po) return po;
+  return `Shipment ${index + 1}`;
+}

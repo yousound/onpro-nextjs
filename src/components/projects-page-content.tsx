@@ -32,6 +32,7 @@ import {
 } from "@/lib/mock/project-session";
 import { commitSingleContact } from "@/lib/data/commit-contacts";
 import { persistProjectToDb } from "@/lib/data/persist-project";
+import { fetchAndSeedLiveProjects } from "@/lib/data/refresh-live-workspace";
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import {
   seedLiveProjects,
@@ -187,21 +188,43 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     }
   }, [projectCount, projects.length, syncProjectsFromSources]);
 
+  /** Live: always re-fetch on mount so teammates' new projects appear (SSR cache is stale). */
   useEffect(() => {
-    if (!isClientLiveBackend() || projectCount > 0) return;
+    if (!isClientLiveBackend()) return;
     let cancelled = false;
-    void fetch("/api/projects", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json: { projects?: Project[] } | null) => {
-        if (cancelled || !json?.projects?.length) return;
-        syncProjectsFromSources(json.projects);
-        setCacheTick((t) => t + 1);
-      })
-      .catch(() => {});
+    void fetchAndSeedLiveProjects().then((fresh) => {
+      if (cancelled || !fresh) return;
+      syncProjectsFromSources(fresh);
+      setCacheTick((t) => t + 1);
+    });
     return () => {
       cancelled = true;
     };
-  }, [projectCount, syncProjectsFromSources]);
+  }, [syncProjectsFromSources]);
+
+  /** Re-fetch when the tab regains focus so shared workspace edits show up. */
+  useEffect(() => {
+    if (!isClientLiveBackend()) return;
+    let lastAt = 0;
+    const refreshFromServer = () => {
+      if (Date.now() - lastAt < 60_000) return;
+      lastAt = Date.now();
+      void fetchAndSeedLiveProjects().then((fresh) => {
+        if (!fresh) return;
+        syncProjectsFromSources(fresh);
+        setCacheTick((t) => t + 1);
+      });
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshFromServer();
+    };
+    window.addEventListener("focus", refreshFromServer);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refreshFromServer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [syncProjectsFromSources]);
 
   useEffect(() => {
     function onDeleted(e: Event) {

@@ -114,6 +114,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setPendingTeams(split.pending);
       }
       setAuthUserId(data.authUserId ?? null);
+
+      const sessionOp = readActiveWorkspaceSession();
+      const serverOp =
+        data.active?.mode === "team" ? data.active.operatorUserId : null;
+      const joined = data.joined ?? [];
+      if (
+        sessionOp &&
+        sessionOp !== serverOp &&
+        joined.some((t) => t.operatorUserId === sessionOp)
+      ) {
+        const switchRes = await fetch("/api/workspace/switch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operator_user_id: sessionOp }),
+        });
+        if (switchRes.ok) {
+          clearLiveCache();
+          router.refresh();
+          window.dispatchEvent(new Event("onpro-workspace-changed"));
+        }
+      }
     } catch {
       setTeams([]);
       setJoinedTeams([]);
@@ -123,7 +144,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       hasLoadedOnceRef.current = true;
       setLoading(false);
     }
-  }, [live]);
+  }, [live, router]);
 
   useEffect(() => {
     void load();

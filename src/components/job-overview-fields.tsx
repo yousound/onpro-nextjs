@@ -285,7 +285,7 @@ export function JobOverviewFields({
       {!isPrimaryJob ? null : (
         <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
           <VendorFieldSelect
-            label="Supplier (optional)"
+            label="Vendor (optional)"
             vendors={vendors}
             value={draft.lead_vendor}
             onChange={(name) => patch({ lead_vendor: name ?? "" })}

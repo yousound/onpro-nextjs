@@ -11,6 +11,7 @@ import {
 } from "@/lib/agent-suggestion-resolve";
 import { normalizeRfqProjectPayload } from "@/lib/mailroom/client-from-rfq";
 import { orderDisplayLabel } from "@/lib/effective-po";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { persistProjectToDb, updateProjectInDb } from "@/lib/data/persist-project";
 import { upsertLiveProject } from "@/lib/data/live-cache";
 import { contactDisplayName, loadContacts, newContactId, saveContacts } from "@/lib/contacts-store";

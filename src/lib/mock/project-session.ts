@@ -1,7 +1,6 @@
 import {
   filterVisibleProjects,
   markProjectDeleted,
-  readDeletedProjectIds,
 } from "@/lib/deleted-projects";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
@@ -72,6 +71,5 @@ export function resolveClientProjectList(base: Project[]): Project[] {
     const merged = cached.length > 0 ? mergeProjectLists(base, cached) : base;
     return dedupeProjectsById(filterVisibleProjects(merged));
   }
-  let list = dedupeProjectsById(buildClientProjectList(base));
-  return list;
+  return dedupeProjectsById(buildClientProjectList(base));
 }

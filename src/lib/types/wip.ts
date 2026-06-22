@@ -65,6 +65,8 @@ export type JobEstimateFields = {
 };
 
 /** Inbound pricing line from a vendor for this job (the vendor's "estimate" to us). */
+export type VendorQuoteStatus = "draft" | "sent" | "received";
+
 export type VendorQuote = {
   id: string;
   vendor: string;
@@ -74,6 +76,13 @@ export type VendorQuote = {
   notes?: string;
   received_at: ISODate;
   source?: { kind: "email"; email_id: string } | { kind: "manual" };
+  /** Vendor-facing PO assigned when the quote request is sent (e.g. DW260607-02-01). */
+  po_number?: string | null;
+  status?: VendorQuoteStatus;
+  sent_at?: ISODate;
+  /** Job sequence suffix within the project (02 → DW260607-02-01). */
+  job_seq?: number;
+  line_item_ids?: string[];
 };
 
 /** A single row on the internal Costing Sheet (becomes a line on the client Estimate). */
@@ -249,7 +258,7 @@ export type ProjectJob = {
   project_id: number;
   /** Parent production order. */
   order_id?: string;
-  /** Human-readable job identifier per project, e.g. "GG-26-001". Auto-assigned. */
+  /** Human-readable job identifier — compact ClientCode+YYMM+Seq (e.g. GG260601, YOU2606100). */
   job_number?: string;
   /** Style name (UI label; stored in `name`). */
   name: string;

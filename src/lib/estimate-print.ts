@@ -18,6 +18,7 @@ export function buildEstimateHtml(
   job: ProjectJob,
   est: Estimate,
   clientName?: string,
+  projectNumber?: string | null,
 ): string {
   const sheet = est.costing_sheet_snapshot;
   const totals = costingTotals(sheet);
@@ -43,6 +44,7 @@ export function buildEstimateHtml(
         <div class="right">
           <p>Date: ${est.created_at ? new Date(est.created_at).toLocaleDateString() : "—"}</p>
           <p>Job: ${escapeHtml(job.job_number ?? "")}</p>
+          ${projectNumber ? `<p>Project: ${escapeHtml(projectNumber)}</p>` : ""}
           ${clientName ? `<p>Client: ${escapeHtml(clientName)}</p>` : ""}
         </div>
       </header>
@@ -116,7 +118,7 @@ const PRINT_STYLES = `
 export function openEstimatePrintWindow(
   job: ProjectJob,
   est: Estimate,
-  options?: { autoPrint?: boolean; documentTitle?: string; clientName?: string },
+  options?: { autoPrint?: boolean; documentTitle?: string; clientName?: string; projectNumber?: string | null },
 ): Window | null {
   const w = window.open("", "_blank", "noopener,noreferrer");
   if (!w) return null;
@@ -131,7 +133,7 @@ export function openEstimatePrintWindow(
     <button type="button" class="primary" onclick="window.print()">Print</button>
   </div>
 </div>
-<div class="sheet-wrap">${buildEstimateHtml(job, est, options?.clientName)}</div>
+<div class="sheet-wrap">${buildEstimateHtml(job, est, options?.clientName, options?.projectNumber)}</div>
 ${options?.autoPrint ? "<script>setTimeout(function(){window.print();},400);</script>" : ""}
 </body></html>`);
   w.document.close();
@@ -141,7 +143,7 @@ ${options?.autoPrint ? "<script>setTimeout(function(){window.print();},400);</sc
 export function printEstimate(
   job: ProjectJob,
   est: Estimate,
-  options?: { documentTitle?: string; clientName?: string },
+  options?: { documentTitle?: string; clientName?: string; projectNumber?: string | null },
 ): void {
   openEstimatePrintWindow(job, est, { ...options, autoPrint: true });
 }

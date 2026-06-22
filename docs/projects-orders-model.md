@@ -1,53 +1,58 @@
-# Projects, Orders, and Jobs
+# Projects, orders, jobs, and numbering
 
-This document explains how the three layers relate in OnPro and the options under consideration after the June 2026 Projects & Jobs UX sprint.
+This document describes how OnPro layers relate and how **project numbers**, **job numbers**, and **vendor POs** work after the June 2026 quoting flow sprint.
 
-## Concepts
+## Three identifiers (do not conflate)
+
+| Concept | When assigned | Format | Example |
+|---------|---------------|--------|---------|
+| **Project number** | Project create | `ClientCode` + `YYMM` + shop monthly seq | `DW260607` |
+| **Job number** | Each job added to a project | Project number + per-project suffix | `DW260607-01`, `DW260607-02` |
+| **Vendor PO** | When sending a vendor quote request | `{projectNumber}-{jobSeq}{letter}` | `DW260607-1A` (embroidery), `DW260607-1B` (print), `DW260607-2A` (job 2) |
+
+**Rules**
+
+- Project numbers are unique shop-wide.
+- Vendor POs are unique shop-wide — one PO per vendor quote request.
+- The same job split across embroidery and print vendors gets **two POs** (e.g. `DW260607-02-01` and `DW260607-02-02`).
+
+## Layers
 
 | Layer | Purpose | Key fields |
 |-------|---------|------------|
-| **Project** | Client engagement / style family | `po_number`, client, season, shared defaults |
-| **Order** | PO or delivery batch under a project | `po_number`, `client_po_number`, optional delivery notes |
-| **Job** | Unit of production work (colorway, type, timeline) | `job_number`, `order_id` (optional), WIP fields |
+| **Project** | Client engagement | `project_number`, client, status, dates |
+| **Order** | Internal grouping / shipment batch (optional UI) | `order_number`, legacy `po_number` |
+| **Job** | Production unit (WIP, costing, approvals) | `job_number`, `vendor_quotes`, `estimates` |
 
-Projects hold the client-level PO. Orders group jobs that ship or bill together. Jobs carry Development, Costing, Approvals, and Bulk Production detail.
+Projects hold the **project number**. Jobs hold **job numbers** under that project. **Vendor POs** live on `VendorQuote` records when quote requests are sent.
 
-## Current behavior (after Phase 1 fixes)
+## Quote-to-invoice flow
 
-1. **Default order PO** — When a project is first opened, the seeded order inherits the project PO instead of generating a new sequence number.
-2. **Job visibility** — The project Jobs overview lists all jobs for the project, not only those linked to an order.
-3. **Orphan backfill** — Jobs created without an `order_id` are linked to the first order when orders exist.
-4. **PO display** — Jobs list and production board show PO via fallback: job PO → order PO → project PO.
+```
+Create project (project number)
+  → Add jobs (job numbers DW260607-01, -02, …)
+  → Request vendor quotes (select jobs + vendors → unique vendor POs)
+  → Vendor pricing received → pull into costing sheet
+  → Generate client estimate → send to client → acceptance
+  → Bulk production (soft gate: accepted estimate recommended)
+  → Create invoice from accepted estimate
+```
 
-## Why Orders still exist
+Entry points:
 
-The team questioned whether Orders are redundant now that Jobs exist. For this sprint we **kept Orders** and fixed data/visibility bugs so Cami Tees and similar projects can be tested without a schema migration.
+- **Request vendor quotes** — project Jobs header (`request-vendor-quotes-modal.tsx`)
+- **Vendor quotes / costing / estimates** — job details modal, Costing section
+- **Invoice** — “Create invoice” on accepted estimate → ledger invoice editor
 
-Orders still provide:
+## Orders (internal)
 
-- Grouping multiple jobs under one client PO or ex-factory batch
-- A place to attach order-level notes without duplicating on every job
-- Backward compatibility with imports and existing `order_id` references
-
-## Options after team testing
-
-### Option A — Keep Orders (current UI)
-
-- Project detail shows Orders section with expandable rows and jobs nested per order
-- **+ Add job** on the Jobs header creates a job on the default/first order
-- **+ Add job to order** remains inside each order row
-
-### Option B — Simplify UI (future)
-
-- Flat **Jobs** list on project detail; hide or collapse Orders accordion
-- Keep `order_id` on jobs internally for PO grouping and reporting
-- Default order may remain auto-seeded but invisible
-
-No decision is required until the team validates Phase 1–3 in production. If simplification is chosen, Option B can ship as a UI-only change.
+Orders remain for grouping jobs that ship or bill together. Vendor-facing POs are on quotes, not on project create. Legacy order/job `po_number` fields are kept for backward compatibility; new work uses project number + vendor quote POs.
 
 ## Related files
 
-- `src/lib/project-order-create.ts` — order seed PO inheritance
-- `src/lib/project-order-edits.ts` — default orders + orphan job backfill
-- `src/lib/effective-po.ts` — PO display fallback chain
-- `src/components/project-orders-section.tsx` — project Jobs / Orders UI
+- `src/lib/po-number.ts` — project number format and shop monthly counter
+- `src/lib/job-number.ts` — per-project job suffix (`DW260607-01`)
+- `src/lib/vendor-po-number.ts` — vendor PO allocation (`DW260607-1A`, `DW260607-1B`, …)
+- `src/lib/po-duplicate.ts` — uniqueness validation
+- `src/components/request-vendor-quotes-modal.tsx` — quote send UX
+- `src/lib/ledger/invoice-draft.ts` — `buildInvoiceDraftFromAcceptedEstimate`

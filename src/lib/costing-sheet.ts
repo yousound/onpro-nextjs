@@ -151,6 +151,11 @@ export function newVendorQuote(partial: Partial<VendorQuote> = {}): VendorQuote 
     notes: partial.notes,
     received_at: partial.received_at ?? new Date().toISOString(),
     source: partial.source ?? { kind: "manual" },
+    po_number: partial.po_number ?? null,
+    status: partial.status ?? "draft",
+    sent_at: partial.sent_at,
+    job_seq: partial.job_seq,
+    line_item_ids: partial.line_item_ids,
   };
 }
 

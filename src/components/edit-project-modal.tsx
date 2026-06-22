@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type FormEvent } from "react";
+import { InlineFieldMessage } from "@/components/inline-field-message";
 import type { ProjectStatus } from "@/lib/types/project";
 import {
   CalendarIcon,
@@ -42,6 +43,8 @@ type Props = {
   onSubmit: (e: FormEvent) => void;
   onDelete: () => void;
   deleting?: boolean;
+  projectNumberMessage?: string | null;
+  projectNumberConflict?: boolean;
 };
 
 export function EditProjectModal({
@@ -55,6 +58,8 @@ export function EditProjectModal({
   onSubmit,
   onDelete,
   deleting = false,
+  projectNumberMessage,
+  projectNumberConflict = false,
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -67,7 +72,7 @@ export function EditProjectModal({
 
   if (!open) return null;
 
-  const canSave = Boolean(draft.name.trim());
+  const canSave = Boolean(draft.name.trim()) && !projectNumberConflict;
 
   return (
     <ProjectModalOverlay titleId={titleId} onClose={onClose} aside={
@@ -115,16 +120,19 @@ export function EditProjectModal({
             />
           </ProjectModalField>
 
-          <ProjectModalField label="PO number" icon={<HashIcon />}>
+          <ProjectModalField label="Project number" icon={<HashIcon />}>
             <input
-              className={projectModalFieldClass}
+              className={`${projectModalFieldClass}${projectNumberConflict ? " border-red-400 focus:border-red-500 focus:ring-red-500/15" : ""}`}
               value={draft.po_number}
               onChange={(e) => onDraftChange({ po_number: e.target.value.toUpperCase() })}
               placeholder="e.g. DW260607"
               autoComplete="off"
+              aria-invalid={projectNumberConflict}
             />
+            <InlineFieldMessage message={projectNumberMessage ?? undefined} />
             <p className="mt-1.5 text-xs font-normal normal-case text-slate-400">
-              ClientCode+YYMM+Seq with no dashes. A new number is suggested when the month changes.
+              ClientCode+YYMM+Seq with no dashes. Shop-wide monthly counter (01, 02 … 99, 100, 101).
+              A new number is suggested when the month changes.
             </p>
           </ProjectModalField>
 

@@ -53,7 +53,7 @@ import {
 import { resolveClientCode } from "@/lib/reference/client-codes";
 import { defaultPermissionsForSegment } from "@/lib/project-permissions";
 import type { Contact } from "@/lib/types/contact";
-import { generatePoNumber } from "@/lib/po-number";
+import { generatePoNumber, shouldValidateProjectNumber } from "@/lib/po-number";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
 import { validateProjectPoUnique } from "@/lib/po-duplicate";
 import { PROJECT_STATUS_OPTIONS } from "@/lib/project-status";
@@ -221,6 +221,9 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   const [description, setDescription] = useState("");
   const [poNumber, setPoNumber] = useState("");
   const [poTouched, setPoTouched] = useState(false);
+  const [projectNumberMessage, setProjectNumberMessage] = useState<string | null>(null);
+
+  const projectNumberConflict = Boolean(projectNumberMessage);
 
   const contactsDirectory = useMemo(() => loadContacts(), [contactsTick]);
   const directoryClients = useMemo(() => clientListContacts(contactsDirectory), [contactsDirectory]);
@@ -286,7 +289,20 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
 
   useEffect(() => {
     setPoTouched(false);
+    setProjectNumberMessage(null);
   }, [clientSelect]);
+
+  useEffect(() => {
+    if (!shouldValidateProjectNumber(poNumber)) {
+      setProjectNumberMessage(null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      const msg = validateProjectPoUnique(poNumber, projects);
+      setProjectNumberMessage(msg);
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [poNumber, projects]);
 
   useEffect(() => {
     if (!modalOpen || clientSelect.trim()) return;
@@ -303,6 +319,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     setDescription("");
     setPoNumber("");
     setPoTouched(false);
+    setProjectNumberMessage(null);
   }, [clientsSorted]);
 
   async function saveNewClient(draft: NewClientDraft): Promise<SavedNewClient | { error: string }> {
@@ -425,6 +442,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     const poConflict = validateProjectPoUnique(po, projects);
     if (poConflict) {
       setCreateError(poConflict);
+      setProjectNumberMessage(poConflict);
       return;
     }
     const dueIso = dueDate ? dateInputToIso(dueDate) : null;
@@ -555,6 +573,8 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
         onSubmit={submit}
         submitError={createError}
         submitting={creating}
+        projectNumberMessage={projectNumberMessage}
+        projectNumberConflict={projectNumberConflict}
       />
     </div>
   );

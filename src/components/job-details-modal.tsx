@@ -84,6 +84,7 @@ import {
   updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
 import { generatePoForJob } from "@/lib/po-context";
+import { projectPoNumber } from "@/lib/po-number";
 import { validateJobPoFields, validateJobPoOnProject } from "@/lib/po-duplicate";
 import { COMMON_COLORWAY_NAMES, resolveColorCode, styleColorCode } from "@/lib/style-number";
 import { wipStepLabel } from "@/lib/wip-project-timeline";
@@ -522,6 +523,15 @@ export function JobDetailsModal({
     patchCostingSheet({ ...sheet, lines: [...sheet.lines, costingLineFromVendorQuote(q)] });
   }
 
+  function handleVendorQuoteReceived() {
+    const now = new Date().toISOString();
+    patchEstimate({ vendor_costing_received_date: now });
+  }
+
+  function handleEstimateSent() {
+    patchCosting({ estimate_sent_date: new Date().toISOString() });
+  }
+
   function handleGenerateEstimate() {
     const sheet = draft.costing_sheet;
     if (!sheet || sheet.lines.length === 0) return;
@@ -689,6 +699,8 @@ export function JobDetailsModal({
   const fulfillment = draft.fulfillment!;
   const bulkTracks = draft.bulk_production_tracks ?? [];
   const primaryBulk = bulkTracks[0]!;
+  const hasAcceptedEstimate = (draft.estimates ?? []).some((e) => e.status === "accepted");
+  const projectNumber = projectPoNumber(project);
 
   const development = developmentFromJob(draft);
   const dyeTracks = development.dye_costing_tracks;
@@ -1725,6 +1737,7 @@ export function JobDetailsModal({
                         vendors={vendors}
                         onChange={patchVendorQuotes}
                         onPullToCosting={pullVendorQuoteIntoSheet}
+                        onQuoteReceived={handleVendorQuoteReceived}
                       />
                     </SectionCard>
 
@@ -1742,9 +1755,15 @@ export function JobDetailsModal({
                     <SectionCard title="Estimates (client-facing snapshots)">
                       <EstimatesList
                         estimates={draft.estimates ?? []}
-                        onChange={patchEstimates}
+                        onChange={(next) => {
+                          const wasSent = (draft.estimates ?? []).some((e) => e.status === "sent");
+                          const nowSent = next.some((e) => e.status === "sent");
+                          patchEstimates(next);
+                          if (!wasSent && nowSent) handleEstimateSent();
+                        }}
                         job={draft}
                         clientName={project.client.name}
+                        projectNumber={projectNumber}
                       />
                     </SectionCard>
 
@@ -2178,6 +2197,13 @@ export function JobDetailsModal({
 
                 {section === "bulk" ? (
                   <>
+                    {!hasAcceptedEstimate ? (
+                      <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                        Client estimate approval is recommended before bulk production. Mark an
+                        estimate as <strong>accepted</strong> in the Costing section when the client
+                        signs off.
+                      </p>
+                    ) : null}
                     <WipStepFieldBlock
                       stepId="barcodes"
                       title="Barcodes sent to vendor"

@@ -57,6 +57,8 @@ type Props = {
   onUseResolvedClientCode?: () => void | Promise<void>;
   submitError?: string | null;
   submitting?: boolean;
+  projectNumberMessage?: string | null;
+  projectNumberConflict?: boolean;
 };
 
 export function NewProjectModal({
@@ -83,6 +85,8 @@ export function NewProjectModal({
   onUseResolvedClientCode,
   submitError,
   submitting = false,
+  projectNumberMessage,
+  projectNumberConflict = false,
 }: Props) {
   type ModalView = "project" | "addClient";
   const [view, setView] = useState<ModalView>("project");
@@ -124,7 +128,9 @@ export function NewProjectModal({
     });
   }, [clientDraft.kind, clientDraft.companyName]);
 
-  const canCreateProject = Boolean(clientSelect.trim() && name.trim());
+  const canCreateProject = Boolean(
+    clientSelect.trim() && name.trim() && !projectNumberConflict,
+  );
 
   const clientFieldMessages = validateClientContactFields(loadContacts(), {
     kind: clientDraft.kind,
@@ -276,17 +282,19 @@ export function NewProjectModal({
                         ) : null}
                       </div>
                     ) : null}
-                    <Field label="PO number" icon={<HashIcon />}>
+                    <Field label="Project number" icon={<HashIcon />}>
                       <input
-                        className={`${fieldClass} font-semibold text-slate-800`}
+                        className={`${fieldClass} font-semibold text-slate-800${projectNumberConflict ? " border-red-400 focus:border-red-500 focus:ring-red-500/15" : ""}`}
                         value={poNumber}
                         onChange={(e) => onPoNumberChange(e.target.value.toUpperCase())}
-                        placeholder="Select a client to preview PO"
+                        placeholder="Select a client to preview project number"
                         autoComplete="off"
+                        aria-invalid={projectNumberConflict}
                       />
+                      <InlineFieldMessage message={projectNumberMessage ?? undefined} />
                       <p className="mt-1.5 text-xs font-normal normal-case text-slate-400">
-                        Auto-filled as ClientCode+YYMM+Seq (e.g. DW260601). Edit anytime — a new
-                        number is assigned when the month changes.
+                        Auto-filled as ClientCode+YYMM+Seq (e.g. DW260601 — continues 100, 101 after 99).
+                        Edit anytime — counter resets each month.
                       </p>
                     </Field>
                     <Field label="Status" icon={<StatusDot />}>
@@ -422,7 +430,7 @@ export function NewProjectModal({
                       />
                       <InlineFieldMessage message={clientFieldMessages.companyCode} />
                       <p className="mt-1 text-xs font-normal normal-case text-slate-400">
-                        Used in PO numbers (e.g. AD260601).
+                        Used in project numbers (e.g. AD260601).
                       </p>
                     </Field>
                     <Field label="Email">

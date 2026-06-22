@@ -35,7 +35,7 @@ import { clientCodeFromContact } from "@/lib/client-code-resolve";
 import { resolveClientCode } from "@/lib/reference/client-codes";
 import { PROJECT_STATUS_OPTIONS, projectStatusBadgeClass } from "@/lib/project-status";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
-import { projectPoNumber, rollPoNumberIfNewMonth } from "@/lib/po-number";
+import { projectPoNumber, rollPoNumberIfNewMonth, shouldValidateProjectNumber } from "@/lib/po-number";
 import { validateProjectPoUnique } from "@/lib/po-duplicate";
 import { normalizeJob } from "@/lib/job-defaults";
 import { createNewJobSeed } from "@/lib/project-job-create";
@@ -50,6 +50,7 @@ import {
 import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
 import { JobDetailsModal } from "@/components/job-details-modal";
 import { EditProjectModal } from "@/components/edit-project-modal";
+import { RequestVendorQuotesModal } from "@/components/request-vendor-quotes-modal";
 import { parseInspectJob } from "@/lib/job-inspect";
 import { commitDeleteProject } from "@/lib/data/delete-project";
 import { countExtraDocumentsForProject } from "@/lib/documents/delete-documents";
@@ -93,6 +94,8 @@ export function ProjectJobsView({
   const [jobDetailsFocus, setJobDetailsFocus] = useState<JobDetailsFocus | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
   const [deletingJob, setDeletingJob] = useState(false);
+  const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [projectNumberMessage, setProjectNumberMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const mod = searchParams.get("module");
@@ -266,6 +269,23 @@ export function ProjectJobsView({
     });
   }, [editModal, merged]);
 
+  useEffect(() => {
+    if (editModal?.kind !== "project") {
+      setProjectNumberMessage(null);
+      return;
+    }
+    const po = draftProject.po_number;
+    if (!shouldValidateProjectNumber(po)) {
+      setProjectNumberMessage(null);
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      const msg = validateProjectPoUnique(po, allProjectsForOrders, project.id);
+      setProjectNumberMessage(msg);
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [editModal, draftProject.po_number, allProjectsForOrders, project.id]);
+
   function openJobEdit(jobId: string) {
     setEditModal({ kind: "job", jobId });
     setJobDetailsFocus(null);
@@ -341,6 +361,7 @@ export function ProjectJobsView({
     if (po) {
       const poConflict = validateProjectPoUnique(po, allProjectsForOrders, project.id);
       if (poConflict) {
+        setProjectNumberMessage(poConflict);
         window.alert(poConflict);
         return;
       }
@@ -462,7 +483,7 @@ export function ProjectJobsView({
             <h1 className="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">{merged.name}</h1>
             {projectPoNumber(merged) ? (
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-text-secondary">
-                PO {projectPoNumber(merged)}
+                {projectPoNumber(merged)}
               </span>
             ) : null}
             <span
@@ -472,13 +493,24 @@ export function ProjectJobsView({
             </span>
           </div>
           {activeModule === "details" ? (
-            <button
-              type="button"
-              onClick={openProjectEdit}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
-            >
-              Edit project
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {jobs.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setQuoteModalOpen(true)}
+                  className="rounded-lg border border-accent/40 px-4 py-2 text-sm font-semibold text-accent hover:bg-violet-50"
+                >
+                  Request vendor quotes
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={openProjectEdit}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+              >
+                Edit project
+              </button>
+            </div>
           ) : null}
         </header>
 
@@ -546,6 +578,37 @@ export function ProjectJobsView({
           onSubmit={saveProjectModal}
           onDelete={() => void handleDeleteProject()}
           deleting={deletingProject}
+          projectNumberMessage={projectNumberMessage}
+          projectNumberConflict={Boolean(projectNumberMessage)}
+        />
+      ) : null}
+
+      {quoteModalOpen ? (
+        <RequestVendorQuotesModal
+          project={merged}
+          jobs={jobs}
+          vendors={vendors}
+          onClose={() => setQuoteModalOpen(false)}
+          onSend={(updates) => {
+            const now = new Date().toISOString();
+            persistJobs((prev) =>
+              prev.map((j) => {
+                const added = updates.get(j.id);
+                if (!added?.length) return j;
+                const quoteRequested = j.estimate?.quote_requested_date ?? now;
+                return {
+                  ...j,
+                  vendor_quotes: [...(j.vendor_quotes ?? []), ...added],
+                  estimate: j.estimate
+                    ? { ...j.estimate, quote_requested_date: quoteRequested }
+                    : j.estimate,
+                  updated_at: now,
+                };
+              }),
+            );
+            setQuoteModalOpen(false);
+            dispatchAppToast("Vendor quote requests sent");
+          }}
         />
       ) : null}
 

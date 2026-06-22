@@ -1,6 +1,11 @@
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
-import { collectAllPoNumbers, generatePoNumber } from "@/lib/po-number";
+import { loadProjectOrders } from "@/lib/project-order-edits";
+import {
+  collectAllPoNumbers,
+  generatePoNumber,
+  projectPoNumber,
+} from "@/lib/po-number";
 import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
 import { loadProjectJobs } from "@/lib/project-wip-edits";
 import { resolveClientCode } from "@/lib/reference/client-codes";
@@ -15,22 +20,44 @@ function allProjects(extra: Project[] = []): Project[] {
   return mergeProjectLists([], [...readSessionProjects(), ...extra]);
 }
 
-/** Collect all PO strings from projects and persisted jobs (for sequence deduping). */
-export function collectAllAppPoNumbers(extraProjects: Project[] = []): string[] {
+function recordValuesFromJob(job: ProjectJob): string[] {
+  const out: string[] = [];
+  if (job.job_number?.trim()) out.push(job.job_number.trim());
+  if (job.po_number?.trim()) out.push(job.po_number.trim());
+  if (job.client_po_number?.trim()) out.push(job.client_po_number.trim());
+  return out;
+}
+
+/** All compact record numbers in the workspace (projects, jobs, orders) for monthly seq dedupe. */
+export function collectAllAppRecordNumbers(extraProjects: Project[] = []): string[] {
   const projects = allProjects(extraProjects);
-  const jobPos: string[] = [];
+  const out: string[] = [];
+
   for (const p of projects) {
+    const po = projectPoNumber(p);
+    if (po) out.push(po);
     const jobs = loadProjectJobs(p.id, p);
     for (const j of jobs) {
-      if (j.po_number) jobPos.push(j.po_number);
+      out.push(...recordValuesFromJob(j));
+    }
+    const orders = loadProjectOrders(p.id, p);
+    for (const o of orders) {
+      if (o.po_number?.trim()) out.push(o.po_number.trim());
+      if (o.client_po_number?.trim()) out.push(o.client_po_number.trim());
     }
   }
-  return collectAllPoNumbers(projects, jobPos);
+
+  return out;
+}
+
+/** Collect all PO strings from projects and persisted jobs (for sequence deduping). */
+export function collectAllAppPoNumbers(extraProjects: Project[] = []): string[] {
+  return collectAllAppRecordNumbers(extraProjects);
 }
 
 export function generatePoForProject(project: Project, extraProjects: Project[] = []): string {
   const clientCode = resolveClientCode(project.client.name);
-  return generatePoNumber(clientCode, collectAllAppPoNumbers(extraProjects));
+  return generatePoNumber(clientCode, collectAllAppRecordNumbers(extraProjects));
 }
 
 /**

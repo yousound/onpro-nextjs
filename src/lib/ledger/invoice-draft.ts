@@ -5,6 +5,8 @@ import type {
   LedgerInvoiceLineDraft,
   LedgerPrintableInvoice,
 } from "@/lib/ledger/invoice-types";
+import { costingTotals } from "@/lib/costing-sheet";
+import type { Estimate } from "@/lib/types/wip";
 
 export const DEFAULT_BILL_TO = {
   name: "Connect Dots",
@@ -165,5 +167,75 @@ export function syncLedgerSummaryFields(
     paidToDate: formatUsdDetailed(metrics.paidCents),
     capRemainingBefore: formatUsdDetailed(metrics.remainingCapCents),
     memoNotes: buildMemoNotes(metrics),
+  };
+}
+
+export const INVOICE_PREFILL_SESSION_KEY = "onpro-invoice-prefill";
+
+export function storeInvoicePrefill(draft: LedgerPrintableInvoice): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(INVOICE_PREFILL_SESSION_KEY, JSON.stringify(draft));
+}
+
+export function readInvoicePrefill(): LedgerPrintableInvoice | null {
+  if (typeof window === "undefined") return null;
+  const raw = sessionStorage.getItem(INVOICE_PREFILL_SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as LedgerPrintableInvoice;
+  } catch {
+    return null;
+  }
+}
+
+export function clearInvoicePrefill(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(INVOICE_PREFILL_SESSION_KEY);
+}
+
+/** Build a client invoice draft from an accepted job estimate (production billing). */
+export function buildInvoiceDraftFromAcceptedEstimate(input: {
+  projectName: string;
+  projectNumber?: string | null;
+  clientName: string;
+  jobNumber?: string | null;
+  estimate: Estimate;
+}): LedgerPrintableInvoice {
+  const now = todayUs();
+  const sheet = input.estimate.costing_sheet_snapshot;
+  const totals = costingTotals(sheet);
+  const lines: LedgerInvoiceLineDraft[] = sheet.lines.map((line) => ({
+    id: newLineId(),
+    description: [line.description, line.vendor ? `(${line.vendor})` : ""].filter(Boolean).join(" "),
+    quantity: String(line.qty || 1),
+    rate: formatUsdDetailed(Math.round(line.price * 100)),
+  }));
+  while (lines.length < 3) lines.push(emptyInvoiceLine());
+
+  const projectLabel = [input.projectName, input.projectNumber].filter(Boolean).join(" · ");
+  const jobRef = input.jobNumber ? `Job ${input.jobNumber}` : input.estimate.document_number;
+
+  return {
+    issuerName: "Connect Dots",
+    billToName: input.clientName,
+    billToEmail: "",
+    billToAddress1: "",
+    billToAddress2: "",
+    invoiceNumber: invoiceNumberFromDate(),
+    invoiceDate: now,
+    terms: "Net 30",
+    dueDate: now,
+    scheduledPaymentDate: now,
+    projectName: projectLabel || input.projectName,
+    ledgerReference: jobRef,
+    projectValue: formatUsdDetailed(Math.round(totals.final_cost_to_quote_client * 100)),
+    valueAccrued: formatUsdDetailed(Math.round(totals.total_price * 100)),
+    workFinishedPercent: "0%",
+    paidToDate: formatUsdDetailed(0),
+    capRemainingBefore: formatUsdDetailed(Math.round(totals.final_cost_to_quote_client * 100)),
+    lines,
+    paid: formatUsdDetailed(0),
+    memoNotes: `Invoice from accepted estimate ${input.estimate.document_number}.`,
+    paymentScheduleNote: DEFAULT_PAYMENT_SCHEDULE_NOTE,
   };
 }

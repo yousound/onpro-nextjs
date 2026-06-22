@@ -8,6 +8,8 @@ import {
   buildInvoiceDraftFromLedger,
   computeInvoiceTotals,
   emptyInvoiceLine,
+  readInvoicePrefill,
+  clearInvoicePrefill,
   syncLedgerSummaryFields,
 } from "@/lib/ledger/invoice-draft";
 import {
@@ -75,6 +77,11 @@ export function LedgerInvoiceEditor({ sourceInvoiceId }: { sourceInvoiceId?: str
     : undefined;
 
   const [draft, setDraft] = useState<LedgerPrintableInvoice>(() => {
+    const prefill = readInvoicePrefill();
+    if (prefill) {
+      clearInvoicePrefill();
+      return prefill;
+    }
     const nextPendingOnProInvoice = state.invoices.find(
       (i) => i.projectId === "onpro" && i.status === "pending",
     );

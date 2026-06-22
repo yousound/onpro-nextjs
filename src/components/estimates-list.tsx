@@ -2,6 +2,10 @@
 
 import type { Estimate, EstimateStatus, ProjectJob } from "@/lib/types/wip";
 import { costingTotals } from "@/lib/costing-sheet";
+import {
+  buildInvoiceDraftFromAcceptedEstimate,
+  storeInvoicePrefill,
+} from "@/lib/ledger/invoice-draft";
 import { openEstimatePrintWindow } from "@/lib/estimate-print";
 
 const STATUS_OPTIONS: EstimateStatus[] = ["draft", "sent", "accepted", "rejected"];
@@ -23,11 +27,13 @@ export function EstimatesList({
   onChange,
   job,
   clientName,
+  projectNumber,
 }: {
   estimates: Estimate[];
   onChange: (next: Estimate[]) => void;
   job: ProjectJob;
   clientName?: string;
+  projectNumber?: string | null;
 }) {
   if (estimates.length === 0) {
     return (
@@ -47,6 +53,25 @@ export function EstimatesList({
 
   function markSent(id: string) {
     patch(id, { status: "sent", sent_at: new Date().toISOString() });
+  }
+
+  function sendToClient(id: string) {
+    const est = estimates.find((e) => e.id === id);
+    if (!est) return;
+    openEstimatePrintWindow(job, est, { clientName, projectNumber });
+    markSent(id);
+  }
+
+  function createInvoice(est: Estimate) {
+    const draft = buildInvoiceDraftFromAcceptedEstimate({
+      projectName: projectNumber ? `Project ${projectNumber}` : job.name?.trim() || "Project",
+      projectNumber,
+      clientName: clientName ?? "Client",
+      jobNumber: job.job_number ?? null,
+      estimate: est,
+    });
+    storeInvoicePrefill(draft);
+    window.open("/ledger/financial/invoices/new", "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -85,18 +110,36 @@ export function EstimatesList({
                   </option>
                 ))}
               </select>
+              {est.status === "draft" || est.status === "sent" ? (
+                <button
+                  type="button"
+                  onClick={() => sendToClient(est.id)}
+                  className="rounded-lg border border-accent/40 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-violet-50"
+                >
+                  {est.status === "draft" ? "Send to client" : "Resend"}
+                </button>
+              ) : null}
               {est.status === "draft" ? (
                 <button
                   type="button"
                   onClick={() => markSent(est.id)}
-                  className="rounded-lg border border-accent/40 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-violet-50"
+                  className="rounded-lg border border-border-light px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-slate-50"
                 >
                   Mark sent
                 </button>
               ) : null}
+              {est.status === "accepted" ? (
+                <button
+                  type="button"
+                  onClick={() => createInvoice(est)}
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                >
+                  Create invoice
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={() => openEstimatePrintWindow(job, est, { clientName })}
+                onClick={() => openEstimatePrintWindow(job, est, { clientName, projectNumber })}
                 className="rounded-lg border border-border-light px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-slate-50"
                 title="Open print preview in a new tab"
               >

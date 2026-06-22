@@ -283,7 +283,7 @@ export function NewJobModal({
 
           <p className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
             <span className="mr-1 inline-block text-slate-400">ⓘ</span>
-            PO number can be assigned after create. Timeline steps are seeded from the job type you pick.
+            Vendor POs are assigned when you send quote requests. Timeline steps are seeded from the job type you pick.
           </p>
         </div>
 

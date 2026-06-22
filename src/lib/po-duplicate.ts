@@ -83,7 +83,7 @@ export function formatPoDuplicateMessage(
   existingLabel: string,
 ): string {
   if (kind === "project") {
-    return `PO ${po} is already used on project “${existingLabel}”. Each project must have a unique PO number.`;
+    return `Project number ${po} is already used on project “${existingLabel}”. Each project must have a unique project number.`;
   }
   if (kind === "order") {
     return `PO ${po} is already used on order “${existingLabel}” in this project. Each order needs a unique PO.`;

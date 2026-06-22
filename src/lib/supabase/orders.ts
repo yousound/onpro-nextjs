@@ -8,8 +8,20 @@ export async function fetchOrdersForProjectFromSupabase(
   projectId: number,
 ): Promise<ProjectOrder[]> {
   const { createClient } = await import("@/lib/supabase/server");
+  const { fetchAccessibleProjectOperator } = await import("@/lib/server/project-workspace-access");
+  const { resolveWipWriteClient } = await import("@/lib/server/wip-write-client");
+
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const access = await fetchAccessibleProjectOperator(supabase, projectId);
+  if (!access) return [];
+
+  const readClient = resolveWipWriteClient(supabase);
+  const { data, error } = await readClient
     .from("project_orders")
     .select("*")
     .eq("project_id", projectId)

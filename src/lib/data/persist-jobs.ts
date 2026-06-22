@@ -30,7 +30,11 @@ export async function fetchJobsFromDb(projectId: number): Promise<ProjectJob[] |
   if (!isClientLiveBackend()) return null;
 
   const res = await fetch(`/api/projects/${projectId}/jobs`, { cache: "no-store" });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    console.error("[fetchJobsFromDb]", data.error ?? res.statusText);
+    return null;
+  }
   const data = (await res.json()) as { jobs?: ProjectJob[] };
   if (!Array.isArray(data.jobs)) return null;
   seedLiveJobsForProject(projectId, data.jobs);

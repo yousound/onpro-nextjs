@@ -170,7 +170,12 @@ export function ProjectJobsView({
           }
         }
 
-        const jobsFromServer = apiJobs ?? initialJobs ?? [];
+        const jobsFromServer =
+          apiJobs != null
+            ? apiJobs.length > 0
+              ? apiJobs
+              : (initialJobs?.length ? initialJobs : apiJobs)
+            : (initialJobs ?? []);
         const ordersFromServer = apiOrders ?? [];
         setJobs(jobsFromServer);
         setOrders(

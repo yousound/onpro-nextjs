@@ -14,6 +14,7 @@ WHERE o.project_id = p.id
   AND o.user_id IS DISTINCT FROM p.user_id;
 
 -- Read jobs/orders when you can read the parent project (covers owner + team + client members).
+DROP POLICY IF EXISTS "project_jobs_select_via_project" ON project_jobs;
 CREATE POLICY "project_jobs_select_via_project" ON project_jobs
   FOR SELECT USING (
     EXISTS (
@@ -28,6 +29,7 @@ CREATE POLICY "project_jobs_select_via_project" ON project_jobs
     )
   );
 
+DROP POLICY IF EXISTS "project_orders_select_via_project" ON project_orders;
 CREATE POLICY "project_orders_select_via_project" ON project_orders
   FOR SELECT USING (
     EXISTS (

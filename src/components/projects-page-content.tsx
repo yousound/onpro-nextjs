@@ -32,6 +32,7 @@ import {
 } from "@/lib/mock/project-session";
 import { commitSingleContact } from "@/lib/data/commit-contacts";
 import { persistProjectToDb } from "@/lib/data/persist-project";
+import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import {
   seedLiveProjects,
   upsertLiveContact,
@@ -239,6 +240,12 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
         ? mergedProjects
         : projects
     : initialProjects;
+
+  const projectsForPoValidation = useMemo(() => {
+    void cacheTick;
+    return mergeProjectLists(boardProjects, getLiveCachedProjects());
+  }, [boardProjects, cacheTick]);
+
   const k = useMemo(() => computeProjectKpis(boardProjects), [boardProjects]);
 
   const showCoverPage = searchParams.get("cover") === "1";
@@ -273,8 +280,8 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   const projectPoPreview = useMemo(() => {
     if (!selectedClient) return "";
     const resolution = clientCodeFromContact(selectedClient);
-    return generatePoNumber(resolution.effectiveCode, collectAllAppPoNumbers(projects));
-  }, [selectedClient, projects]);
+    return generatePoNumber(resolution.effectiveCode, collectAllAppPoNumbers(boardProjects));
+  }, [selectedClient, boardProjects]);
 
   const clientCodeNotice = useMemo(() => {
     if (!selectedClient) return null;
@@ -298,11 +305,11 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       return;
     }
     const handle = window.setTimeout(() => {
-      const msg = validateProjectPoUnique(poNumber, projects);
+      const msg = validateProjectPoUnique(poNumber, projectsForPoValidation);
       setProjectNumberMessage(msg);
-    }, 300);
+    }, 200);
     return () => window.clearTimeout(handle);
-  }, [poNumber, projects]);
+  }, [poNumber, projectsForPoValidation]);
 
   useEffect(() => {
     if (!modalOpen || clientSelect.trim()) return;
@@ -438,8 +445,8 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
       : resolveClientCode(clientName);
     const po =
       poNumber.trim() ||
-      generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
-    const poConflict = validateProjectPoUnique(po, projects);
+      generatePoNumber(clientCode, collectAllAppPoNumbers(boardProjects));
+    const poConflict = validateProjectPoUnique(po, projectsForPoValidation);
     if (poConflict) {
       setCreateError(poConflict);
       setProjectNumberMessage(poConflict);

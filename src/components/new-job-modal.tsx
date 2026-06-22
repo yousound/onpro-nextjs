@@ -4,11 +4,10 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
 import type { JobScopeKind, JobType, ProjectJob } from "@/lib/types/wip";
-import { VendorFieldSelect } from "@/components/vendor-select";
+import { JobOverviewFields } from "@/components/job-overview-fields";
 import {
   CalendarIcon,
   FolderIcon,
-  HashIcon,
   NotesIcon,
   ProjectModalAside,
   ProjectModalBadge,
@@ -19,7 +18,6 @@ import {
   RocketMini,
   StatusDot,
   projectModalFieldClass,
-  projectModalLabelClass,
   projectModalTextareaClass,
 } from "@/components/project-modal-ui";
 import { normalizeJob } from "@/lib/job-defaults";
@@ -29,6 +27,9 @@ import {
   JOB_TYPE_OPTIONS,
   dropdownLabelForCategoryCode,
 } from "@/lib/reference/category-codes";
+import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
+import { effectiveJobPrice, priceFromCostingSheet } from "@/lib/job-price";
+
 function resolveCategoryDropdown(category: string): string {
   const trimmed = category.trim();
   if (!trimmed) return CATEGORY_CODES[0]?.dropdownLabel ?? "Tee";
@@ -117,7 +118,8 @@ export function NewJobModal({
     e.preventDefault();
     const saved: ProjectJob = {
       ...draft,
-      name: draft.name.trim() || "Untitled job",
+      name: draft.name.trim() || "Untitled style",
+      style_name: draft.style_name?.trim() || draft.name.trim() || "Untitled style",
       category: categoryDropdown,
       po_number: draft.po_number?.trim() || null,
       scope_note: draft.scope_note?.trim() || undefined,
@@ -125,6 +127,14 @@ export function NewJobModal({
     };
     onSave(normalizeJob(saved, project));
   }
+
+  const colorwayRows = useMemo(
+    () => draft.colorway_rows ?? normalizeColorwayRows(draft),
+    [draft.colorway_rows, draft.colorway, draft.color_code],
+  );
+  const isPrimaryJob = allJobs.length === 0;
+  const displayPrice = effectiveJobPrice(draft);
+  const costingPrice = priceFromCostingSheet(draft.costing_sheet);
 
   const canCreate = Boolean(draft.name.trim());
   const subtitleParts = [
@@ -151,7 +161,7 @@ export function NewJobModal({
               the run.
             </>
           }
-          body="Set up the production job — style, type, and vendor. You can fill in costing, timeline, and labels after it’s created."
+          body="Set up style, category, and sizing — same layout as the client quote. Costing and timeline come after create."
         />
       }
     >
@@ -177,57 +187,23 @@ export function NewJobModal({
             </select>
           </ProjectModalField>
 
-          <ProjectModalField label="Job name" icon={<FolderIcon />}>
-            <input
-              className={projectModalFieldClass}
-              value={draft.name}
-              onChange={(e) => patch({ name: e.target.value })}
-              placeholder="e.g. Summer tee run"
-              required
-              autoComplete="off"
-              autoFocus
-            />
-          </ProjectModalField>
-
-          <ProjectModalField label="Subtitle (optional)" icon={<NotesIcon />}>
-            <input
-              className={projectModalFieldClass}
-              value={draft.subtitle}
-              onChange={(e) => patch({ subtitle: e.target.value })}
-              placeholder="Short label for the team"
-              autoComplete="off"
-            />
-          </ProjectModalField>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <ProjectModalField label="Job type" icon={<StatusDot />}>
-              <select
-                className={projectModalFieldClass}
-                value={draft.job_type ?? "print_production"}
-                onChange={(e) => handleJobTypeChange(e.target.value as JobType)}
-              >
-                {JOB_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </ProjectModalField>
-
-            <ProjectModalField label="Category" icon={<StatusDot />}>
-              <select
-                className={projectModalFieldClass}
-                value={categoryDropdown}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-              >
-                {CATEGORY_CODES.map((c) => (
-                  <option key={c.code} value={c.dropdownLabel}>
-                    {c.dropdownLabel}
-                  </option>
-                ))}
-              </select>
-            </ProjectModalField>
-          </div>
+          <JobOverviewFields
+            draft={draft}
+            patch={patch}
+            vendors={vendors}
+            categoryDropdown={categoryDropdown}
+            onCategoryChange={handleCategoryChange}
+            onJobTypeChange={handleJobTypeChange}
+            isPrimaryJob={isPrimaryJob}
+            colorwayRows={colorwayRows}
+            onColorwayChange={(rows) =>
+              patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))
+            }
+            displayPrice={displayPrice}
+            costingPrice={costingPrice}
+            fieldClass={projectModalFieldClass}
+            textareaClass={projectModalTextareaClass}
+          />
 
           <ProjectModalField label="Scope" icon={<StatusDot />}>
             <select
@@ -240,16 +216,6 @@ export function NewJobModal({
             </select>
           </ProjectModalField>
 
-          <ProjectModalField label="Style #" icon={<HashIcon />}>
-            <input
-              className={projectModalFieldClass}
-              value={draft.style_number}
-              placeholder="e.g. GGT01"
-              onChange={(e) => patch({ style_number: e.target.value.toUpperCase() })}
-              autoComplete="off"
-            />
-          </ProjectModalField>
-
           <ProjectModalField label="Due date (optional)" icon={<CalendarIcon />}>
             <input
               type="date"
@@ -258,16 +224,6 @@ export function NewJobModal({
               onChange={(e) => patch({ due_date: dateInputToIso(e.target.value) })}
             />
           </ProjectModalField>
-
-          <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
-            <VendorFieldSelect
-              label="Lead vendor (optional)"
-              vendors={vendors}
-              value={draft.lead_vendor}
-              onChange={(name) => patch({ lead_vendor: name ?? "" })}
-              labelClassName={projectModalLabelClass}
-            />
-          </div>
 
           {draft.scope_kind === "addon" ? (
             <ProjectModalField label="Reorder note (optional)" icon={<NotesIcon />}>
@@ -283,7 +239,7 @@ export function NewJobModal({
 
           <p className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
             <span className="mr-1 inline-block text-slate-400">ⓘ</span>
-            Vendor POs are assigned when you send quote requests. Timeline steps are seeded from the job type you pick.
+            Vendor POs are assigned when you send quote requests. Timeline steps seed from the job type.
           </p>
         </div>
 

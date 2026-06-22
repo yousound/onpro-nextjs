@@ -3,6 +3,7 @@ import { colorwayAbbrev, resolveColorCode } from "@/lib/style-number";
 import type { JobColorwayRow, ProjectJob } from "@/lib/types/wip";
 
 export const SIZE_RUN_PRESETS: { id: string; label: string; sizes: string[] }[] = [
+  { id: "osfa", label: "OSFA (One Size Fits All)", sizes: ["OSFA"] },
   { id: "standard", label: "S – XL", sizes: ["S", "M", "L", "XL"] },
   { id: "extended", label: "S – 2XL", sizes: ["S", "M", "L", "XL", "2XL"] },
   { id: "full", label: "S – 5XL", sizes: ["S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL"] },

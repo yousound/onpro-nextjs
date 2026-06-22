@@ -607,7 +607,7 @@ export function ProjectJobsView({
               }),
             );
             setQuoteModalOpen(false);
-            dispatchAppToast("Vendor quote requests sent");
+            dispatchAppToast("Vendor quote requests sent — open each job to Preview / Send PO");
           }}
         />
       ) : null}

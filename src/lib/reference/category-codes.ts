@@ -39,6 +39,7 @@ export function dropdownLabelForCategoryCode(code: string): string {
 
 export const JOB_TYPE_OPTIONS = [
   { value: "print_production", label: "Print Production" },
+  { value: "embroidery", label: "Embroidery" },
   { value: "cut_sew", label: "Cut & Sew" },
   { value: "full_package", label: "Full Package" },
   { value: "design", label: "Design" },

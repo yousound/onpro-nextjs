@@ -42,7 +42,9 @@ Entry points:
 
 - **Request vendor quotes** — project Jobs header (`request-vendor-quotes-modal.tsx`)
 - **Vendor quotes / costing / estimates** — job details modal, Costing section
-- **Invoice** — “Create invoice” on accepted estimate → ledger invoice editor
+- **Vendor PO PDF** — **Preview / Send PO** on each quote row (Connect Dots branded)
+- **Client estimate PDF** — **Preview / Send** on each estimate row (same editor layout)
+- **Client invoice** — **Client invoice** on accepted estimate (same production document)
 
 ## Orders (internal)
 
@@ -55,4 +57,5 @@ Orders remain for grouping jobs that ship or bill together. Vendor-facing POs ar
 - `src/lib/vendor-po-number.ts` — vendor PO allocation (`DW260607-1A`, `DW260607-1B`, …)
 - `src/lib/po-duplicate.ts` — uniqueness validation
 - `src/components/request-vendor-quotes-modal.tsx` — quote send UX
-- `src/lib/ledger/invoice-draft.ts` — `buildInvoiceDraftFromAcceptedEstimate`
+- `src/lib/documents/production-document-print.ts` — Connect Dots PDF preview / print
+- `src/components/documents/production-document-editor.tsx` — shared editor (vendor PO + client estimate)

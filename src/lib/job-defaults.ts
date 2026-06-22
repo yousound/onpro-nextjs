@@ -10,6 +10,7 @@ import {
 import { defaultSampleApprovalStages, resolveSampleApprovalStages } from "@/lib/job-development";
 import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
 import { syncJobPriceFromCosting } from "@/lib/job-price";
+import { inferJobVendorNames } from "@/lib/job-vendors";
 import { repairJobTimelineWithTemplate } from "@/lib/job-timeline-templates";
 
 export function defaultJobEstimate(project?: Project): NonNullable<ProjectJob["estimate"]> {
@@ -167,6 +168,7 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
         ? job.bulk_production_tracks
         : defaultJobBulkTracks(project),
     vendor_quotes: job.vendor_quotes ?? [],
+    job_vendors: job.job_vendors ?? inferJobVendorNames(job),
     costing_sheet: job.costing_sheet ?? defaultCostingSheet(job),
     estimates: job.estimates ?? [],
     timeline: repairJobTimelineWithTemplate(job.timeline, job.job_type ?? "print_production"),

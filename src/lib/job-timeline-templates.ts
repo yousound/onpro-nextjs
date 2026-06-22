@@ -31,6 +31,19 @@ export const JOB_TIMELINE_TEMPLATES: Record<JobType, string[]> = {
     "arrange_delivery",
     "completion",
   ],
+  embroidery: [
+    "vendor_inquiries",
+    "mock_up",
+    "cost_sheets",
+    "costing_summary",
+    "deposit_payment",
+    "tp_setup",
+    "sent_to_contractors",
+    "strike_off",
+    "packing",
+    "arrange_delivery",
+    "completion",
+  ],
   cut_sew: [
     "vendor_inquiries",
     "mock_up",
@@ -152,6 +165,7 @@ export function accordionSectionsFor(type: JobType | undefined): AccordionSectio
     case "cut_sew":
       return ["estimate", "development", "costing", "approvals", "bulk"];
     case "print_production":
+    case "embroidery":
     case "custom":
     default:
       return ["estimate", "development", "costing", "approvals", "bulk"];

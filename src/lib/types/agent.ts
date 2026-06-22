@@ -38,6 +38,10 @@ export type EmailMessage = {
   at: ISODate;
   /** Plain text or simple Markdown. */
   body: string;
+  /** Outbound recipients (OnPro compose / mock send). */
+  to?: { name: string; email: string }[];
+  cc?: { name: string; email: string }[];
+  subject?: string;
   /** Inline images from Gmail MIME parts (Live inbox). */
   inlineImages?: EmailInlineImage[];
   /** Mock attachments — generated items referenced from this message. */

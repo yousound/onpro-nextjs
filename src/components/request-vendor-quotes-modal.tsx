@@ -195,7 +195,8 @@ export function RequestVendorQuotesModal({
           {step === "confirm" ? (
             <div className="space-y-3">
               <p className="text-sm text-text-secondary">
-                {preview.length} quote request{preview.length === 1 ? "" : "s"} will be created:
+                {preview.length} quote request{preview.length === 1 ? "" : "s"} will be created.
+                Open each job to preview and send — one separate email per vendor.
               </p>
               <ul className="space-y-2 text-sm">
                 {preview.map((row, i) => (
@@ -260,7 +261,7 @@ export function RequestVendorQuotesModal({
                 onClick={handleSend}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
-                Send quote requests
+                Create quote requests
               </button>
             ) : null}
           </div>

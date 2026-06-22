@@ -33,21 +33,21 @@ import {
 } from "@/lib/vendor-price-book";
 import { VendorFieldSelect } from "@/components/vendor-select";
 
-const fieldClass =
-  "w-full min-w-0 rounded-md border border-border-light px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
-
-const numFieldClass = `${fieldClass} min-w-[4.75rem] text-right tabular-nums`;
-
 const tableTextFieldClass =
-  "w-full min-w-[9rem] rounded-md border border-border-light px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
+  "w-full min-w-[9rem] rounded-md border border-border-light px-2.5 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
 const tableNumFieldClass =
-  "w-full min-w-[4.75rem] rounded-md border border-border-light px-2 py-1.5 text-right text-sm tabular-nums text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
+  "w-full min-w-[5.5rem] rounded-md border border-border-light px-2.5 py-2 text-right text-sm tabular-nums text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
 const tableNoteFieldClass =
-  "w-full min-w-[8rem] rounded-md border border-border-light px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
+  "w-full min-w-[11rem] rounded-md border border-border-light px-2.5 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
-const labelClass = "block text-[11px] font-semibold uppercase tracking-wide text-text-secondary";
+const labelClass = "block text-xs font-semibold uppercase tracking-wide text-text-secondary";
+
+const formFieldClass =
+  "mt-1.5 w-full rounded-md border border-border-light px-2.5 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
+
+const formNumFieldClass = `${formFieldClass} tabular-nums`;
 
 function currency(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -170,74 +170,76 @@ export function CostingSheetEditor({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className={labelClass}>
-          Costing type
-          <select
-            className={`${fieldClass} mt-1 font-semibold uppercase`}
-            value={sheet.costing_type}
-            onChange={(e) => patch({ costing_type: e.target.value as CostingType })}
-          >
-            <option value="print_production">Print Production</option>
-            <option value="full_package">Full Package</option>
-          </select>
-        </label>
-        <label className={labelClass}>
-          Made in
-          <select
-            className={`${fieldClass} mt-1 font-semibold uppercase`}
-            value={sheet.made_in ?? "USA"}
-            onChange={(e) => patch({ made_in: e.target.value as CostingMadeIn })}
-          >
-            <option value="USA">USA</option>
-            <option value="China">China</option>
-            <option value="Other">Other</option>
-          </select>
-        </label>
-        <label className={labelClass}>
-          Estimated qty
-          <input
-            type="number"
-            min={0}
-            className={`${numFieldClass} mt-1`}
-            value={sheet.estimated_qty || ""}
-            onChange={(e) => patch({ estimated_qty: parseNumber(e.target.value) })}
-            placeholder="100"
-          />
-        </label>
-        <div className="flex items-end gap-2">
+    <div className="space-y-5">
+      <div className="space-y-3">
+        <div className="grid grid-cols-3 gap-3">
+          <label className={`${labelClass} whitespace-nowrap`}>
+            Costing type
+            <select
+              className={`${formFieldClass} font-semibold uppercase`}
+              value={sheet.costing_type}
+              onChange={(e) => patch({ costing_type: e.target.value as CostingType })}
+            >
+              <option value="print_production">Print Production</option>
+              <option value="full_package">Full Package</option>
+            </select>
+          </label>
+          <label className={`${labelClass} whitespace-nowrap`}>
+            Made in
+            <select
+              className={`${formFieldClass} font-semibold uppercase`}
+              value={sheet.made_in ?? "USA"}
+              onChange={(e) => patch({ made_in: e.target.value as CostingMadeIn })}
+            >
+              <option value="USA">USA</option>
+              <option value="China">China</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+          <label className={`${labelClass} whitespace-nowrap`}>
+            Estimated qty
+            <input
+              type="number"
+              min={0}
+              className={formNumFieldClass}
+              value={sheet.estimated_qty || ""}
+              onChange={(e) => patch({ estimated_qty: parseNumber(e.target.value) })}
+              placeholder="100"
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
           {onGenerateEstimate ? (
             <button
               type="button"
               onClick={onGenerateEstimate}
               disabled={sheet.lines.length === 0}
-              className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="whitespace-nowrap rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Generate Estimate
+              Generate estimate
             </button>
           ) : null}
           <button
             type="button"
             onClick={() => printCostingSheet(job, sheet)}
             disabled={sheet.lines.length === 0}
-            className="rounded-lg border border-border-light px-3 py-2 text-xs font-semibold text-text-secondary hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            className="whitespace-nowrap rounded-lg border border-border-light px-4 py-2.5 text-sm font-semibold text-text-secondary hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Print
           </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border-light bg-slate-50 px-3 py-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border-light bg-slate-50 px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
           Templates
           {categoryCode ? <span className="ml-1 font-mono text-text-primary">({categoryCode})</span> : null}
         </p>
         {templates.length === 0 ? (
-          <p className="text-[11px] text-text-secondary">No templates saved yet.</p>
+          <p className="text-sm text-text-secondary">No templates saved yet.</p>
         ) : (
           <select
-            className="rounded-md border border-border-light bg-white px-2 py-1 text-xs"
+            className="rounded-md border border-border-light bg-white px-2.5 py-2 text-sm"
             defaultValue=""
             onChange={(e) => {
               const val = e.target.value;
@@ -255,7 +257,7 @@ export function CostingSheetEditor({
         )}
         {templates.length > 0 ? (
           <select
-            className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-700"
+            className="rounded-md border border-red-200 bg-white px-2.5 py-2 text-sm text-red-700"
             defaultValue=""
             onChange={(e) => {
               const val = e.target.value;
@@ -275,24 +277,24 @@ export function CostingSheetEditor({
           type="button"
           onClick={handleSaveAsTemplate}
           disabled={sheet.lines.length === 0}
-          className="ml-auto rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40"
+          className="ml-auto rounded-md border border-accent/40 px-3 py-2 text-sm font-semibold text-accent hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Save as template
         </button>
       </div>
 
       {vendorQuotes.length > 0 ? (
-        <div className="rounded-lg border border-violet-100/90 bg-violet-50/50 px-3 py-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+        <div className="rounded-lg border border-violet-100/90 bg-violet-50/50 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
             Pull from vendor quotes
           </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2.5 flex flex-wrap gap-2">
             {vendorQuotes.map((q) => (
               <button
                 key={q.id}
                 type="button"
                 onClick={() => pullFromQuote(q.id)}
-                className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-accent ring-1 ring-accent/30 hover:bg-violet-100"
+                className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-accent ring-1 ring-accent/30 hover:bg-violet-100"
               >
                 {q.vendor || "Vendor"} · {q.item_description || "—"} · ${q.unit_cost.toFixed(2)}
               </button>
@@ -301,33 +303,33 @@ export function CostingSheetEditor({
         </div>
       ) : null}
 
-      <div className="-mx-1 overflow-x-auto rounded-lg border border-border-light bg-white px-1 pb-1">
-        <p className="px-2 py-1.5 text-[10px] text-text-secondary sm:hidden">
+      <div className="overflow-x-auto rounded-lg border border-border-light bg-white">
+        <p className="px-3 py-2 text-xs text-text-secondary sm:hidden">
           Swipe sideways to see all columns
         </p>
-        <table className="w-full min-w-[920px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <colgroup>
             <col className="w-[11rem]" />
             <col className="w-[9rem]" />
-            <col className="w-[5.5rem]" />
+            <col className="w-[6.5rem]" />
             <col className="w-[7.5rem]" />
             <col className="w-[5.5rem]" />
-            <col className="w-[4.25rem]" />
+            <col className="w-[5rem]" />
             <col className="w-[5.5rem]" />
-            <col className="w-[9rem]" />
+            <col className="w-[11rem]" />
             <col className="w-[2.5rem]" />
           </colgroup>
-          <thead className="bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
+          <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
             <tr>
-              <th className="min-w-[11rem] px-2 py-2">Item</th>
-              <th className="min-w-[9rem] px-2 py-2">Vendor</th>
-              <th className="min-w-[5.5rem] px-2 py-2 text-right">Cost</th>
-              <th className="min-w-[7.5rem] px-2 py-2 text-right">Margin</th>
-              <th className="min-w-[5.5rem] px-2 py-2 text-right">Price</th>
-              <th className="min-w-[4.25rem] px-2 py-2 text-right">Qty</th>
-              <th className="min-w-[5.5rem] px-2 py-2 text-right">Total</th>
-              <th className="min-w-[9rem] px-2 py-2">Note</th>
-              <th className="min-w-[2.5rem] px-2 py-2" aria-label="Remove" />
+              <th className="min-w-[11rem] px-3 py-2.5">Item</th>
+              <th className="min-w-[9rem] px-3 py-2.5">Vendor</th>
+              <th className="min-w-[6.5rem] px-3 py-2.5 text-right">Cost</th>
+              <th className="min-w-[7.5rem] px-3 py-2.5 text-right">Margin</th>
+              <th className="min-w-[5.5rem] px-3 py-2.5 text-right">Price</th>
+              <th className="min-w-[5rem] px-3 py-2.5 text-right">Qty</th>
+              <th className="min-w-[5.5rem] px-3 py-2.5 text-right">Total</th>
+              <th className="min-w-[11rem] px-3 py-2.5">Note</th>
+              <th className="min-w-[2.5rem] px-3 py-2.5" aria-label="Remove" />
             </tr>
           </thead>
           <tbody>
@@ -345,7 +347,7 @@ export function CostingSheetEditor({
                 const lineTotal = l.price * l.qty;
                 return (
                   <tr key={l.id} className="border-t border-border-light/70 align-top">
-                    <td className="min-w-[11rem] px-2 py-1.5">
+                    <td className="min-w-[11rem] px-3 py-2">
                       <input
                         className={tableTextFieldClass}
                         value={l.description}
@@ -353,7 +355,7 @@ export function CostingSheetEditor({
                         onChange={(e) => patchLine(l.id, { description: e.target.value })}
                       />
                     </td>
-                    <td className="min-w-[9rem] px-2 py-1.5">
+                    <td className="min-w-[9rem] px-3 py-2">
                       <VendorFieldSelect
                         label=""
                         labelClassName="sr-only"
@@ -362,7 +364,7 @@ export function CostingSheetEditor({
                         onChange={(v) => patchLine(l.id, { vendor: v })}
                       />
                     </td>
-                    <td className="min-w-[5.5rem] px-2 py-1.5">
+                    <td className="min-w-[6.5rem] px-3 py-2">
                       <input
                         type="number"
                         step="0.01"
@@ -382,10 +384,10 @@ export function CostingSheetEditor({
                         }
                       />
                     </td>
-                    <td className="min-w-[7.5rem] px-2 py-1.5">
+                    <td className="min-w-[7.5rem] px-3 py-2">
                       <div className="flex min-w-[7rem] gap-1">
                         <select
-                          className="w-11 shrink-0 rounded-md border border-border-light bg-white px-1 py-1.5 text-center text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                          className="w-12 shrink-0 rounded-md border border-border-light bg-white px-1.5 py-2 text-center text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                           value={l.margin_mode}
                           onChange={(e) =>
                             patchLine(l.id, { margin_mode: e.target.value as "percent" | "amount" })
@@ -407,7 +409,7 @@ export function CostingSheetEditor({
                         />
                       </div>
                     </td>
-                    <td className="min-w-[5.5rem] px-2 py-1.5">
+                    <td className="min-w-[5.5rem] px-3 py-2">
                       <input
                         type="number"
                         step="0.01"
@@ -417,7 +419,7 @@ export function CostingSheetEditor({
                         placeholder="0.00"
                       />
                     </td>
-                    <td className="min-w-[4.25rem] px-2 py-1.5">
+                    <td className="min-w-[5rem] px-3 py-2">
                       <input
                         type="number"
                         min={0}
@@ -427,18 +429,18 @@ export function CostingSheetEditor({
                         placeholder="1"
                       />
                     </td>
-                    <td className="min-w-[5.5rem] whitespace-nowrap px-2 py-1.5 text-right font-semibold tabular-nums text-text-primary">
+                    <td className="min-w-[5.5rem] whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-text-primary">
                       {currency(lineTotal)}
                     </td>
-                    <td className="min-w-[9rem] px-2 py-1.5">
+                    <td className="min-w-[11rem] px-3 py-2">
                       <input
                         className={tableNoteFieldClass}
                         value={l.note ?? ""}
                         onChange={(e) => patchLine(l.id, { note: e.target.value || undefined })}
-                        placeholder="Note"
+                        placeholder="Optional note"
                       />
                     </td>
-                    <td className="px-2 py-1.5 text-right">
+                    <td className="px-3 py-2 text-right">
                       <button
                         type="button"
                         onClick={() => removeLine(l.id)}
@@ -457,31 +459,31 @@ export function CostingSheetEditor({
             <tr>
               <td
                 colSpan={5}
-                className="px-2 py-2 text-right text-[11px] font-semibold uppercase text-text-secondary"
+                className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-text-secondary"
               >
                 Total
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-text-primary">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-primary">
                 {currency(totals.total_cost)}
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-text-primary">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-text-primary">
                 {currency(totals.total_price)}
               </td>
-              <td colSpan={2} className="whitespace-nowrap px-2 py-2 text-right text-[11px] text-text-secondary">
+              <td colSpan={2} className="whitespace-nowrap px-3 py-2.5 text-right text-xs text-text-secondary">
                 FOB {sheet.made_in === "China" ? "FACTORY" : "LOS ANGELES"}
               </td>
             </tr>
             <tr className="bg-yellow-200/80">
               <td
                 colSpan={5}
-                className="px-2 py-2 text-right text-[11px] font-bold uppercase text-yellow-950"
+                className="px-3 py-2.5 text-right text-xs font-bold uppercase text-yellow-950"
               >
                 Margin (aggregate override)
               </td>
-              <td className="px-2 py-2">
-                <div className="flex min-w-[7rem] justify-end gap-1">
+              <td className="px-3 py-2.5">
+                <div className="flex min-w-[7.5rem] justify-end gap-1.5">
                   <select
-                    className="w-11 shrink-0 rounded-md border border-border-light bg-white px-1 py-1.5 text-center text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                    className="w-12 shrink-0 rounded-md border border-border-light bg-white px-1.5 py-2 text-center text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                     value={sheet.aggregate_margin_mode ?? "percent"}
                     onChange={(e) =>
                       patch({ aggregate_margin_mode: e.target.value as "percent" | "amount" })
@@ -494,17 +496,17 @@ export function CostingSheetEditor({
                   <input
                     type="number"
                     step="0.01"
-                    className={`${tableNumFieldClass} min-w-[5rem] bg-white`}
+                    className={`${tableNumFieldClass} min-w-[5.5rem] bg-white`}
                     value={sheet.aggregate_margin_value || ""}
                     onChange={(e) => patch({ aggregate_margin_value: parseNumber(e.target.value) })}
                     placeholder="0"
                   />
                 </div>
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-yellow-950">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-yellow-950">
                 <span className="font-bold">{totals.aggregate_margin_percent.toFixed(1)}%</span>
               </td>
-              <td colSpan={2} className="px-2 py-2 text-right">
+              <td colSpan={2} className="px-3 py-2.5 text-right">
                 <button
                   type="button"
                   onClick={() =>
@@ -513,7 +515,7 @@ export function CostingSheetEditor({
                       sheet.aggregate_margin_value,
                     )
                   }
-                  className="whitespace-nowrap rounded-md bg-yellow-900 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-yellow-950"
+                  className="whitespace-nowrap rounded-md bg-yellow-900 px-3 py-2 text-xs font-bold text-white hover:bg-yellow-950"
                 >
                   Apply to lines
                 </button>
@@ -522,19 +524,19 @@ export function CostingSheetEditor({
             <tr>
               <td
                 colSpan={5}
-                className="px-2 py-2 text-right text-[11px] font-semibold uppercase text-text-secondary"
+                className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-text-secondary"
               >
                 Estimated buy
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-text-secondary">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
                 {sheet.estimated_qty || 0}
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-text-secondary">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
                 {currency(totals.total_price)}
               </td>
               <td
                 colSpan={2}
-                className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-text-primary"
+                className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-text-primary"
               >
                 {currency(totals.estimated_buy_total)}
               </td>
@@ -542,19 +544,19 @@ export function CostingSheetEditor({
             <tr>
               <td
                 colSpan={5}
-                className="px-2 py-2 text-right text-[11px] font-semibold uppercase text-text-secondary"
+                className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-text-secondary"
               >
                 Estimated CD profit
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-text-secondary">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
                 {sheet.estimated_qty || 0}
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-text-secondary">
+              <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
                 {currency(totals.cd_profit_unit)}
               </td>
               <td
                 colSpan={2}
-                className="whitespace-nowrap px-2 py-2 text-right font-semibold tabular-nums text-text-primary"
+                className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-text-primary"
               >
                 {currency(totals.cd_profit_total)}
               </td>
@@ -562,13 +564,13 @@ export function CostingSheetEditor({
             <tr className="bg-emerald-200/80">
               <td
                 colSpan={6}
-                className="px-2 py-2 text-right text-[11px] font-bold uppercase text-emerald-950"
+                className="px-3 py-2.5 text-right text-xs font-bold uppercase text-emerald-950"
               >
                 Final cost to quote client
               </td>
               <td
                 colSpan={3}
-                className="whitespace-nowrap px-2 py-2 text-right text-base font-extrabold tabular-nums text-emerald-950"
+                className="whitespace-nowrap px-3 py-2.5 text-right text-base font-extrabold tabular-nums text-emerald-950"
               >
                 {currency(totals.final_cost_to_quote_client)}
               </td>
@@ -577,24 +579,24 @@ export function CostingSheetEditor({
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={addLine}
-          className="rounded-lg border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-violet-50"
+          className="rounded-lg border border-accent/40 px-3 py-2 text-sm font-semibold text-accent hover:bg-violet-50"
         >
           + Add line
         </button>
-        <p className="text-[11px] text-text-secondary">
-          Margin column overrides per line; the aggregate row recalculates ALL lines.
+        <p className="text-sm text-text-secondary">
+          Margin column overrides per line; the aggregate row recalculates all lines.
         </p>
       </div>
 
       <label className={labelClass}>
         Notes
         <textarea
-          rows={2}
-          className={`${fieldClass} mt-1`}
+          rows={3}
+          className={formFieldClass}
           value={sheet.notes ?? ""}
           onChange={(e) => patch({ notes: e.target.value || undefined })}
           placeholder="Optional notes — appear under the table on print."

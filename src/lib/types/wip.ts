@@ -13,6 +13,7 @@ import type { FileRef } from "@/lib/types/contact";
 
 export type JobType =
   | "print_production"
+  | "embroidery"
   | "cut_sew"
   | "full_package"
   | "design"
@@ -83,6 +84,10 @@ export type VendorQuote = {
   /** Job sequence suffix within the project (02 → DW260607-02-01). */
   job_seq?: number;
   line_item_ids?: string[];
+  sent_to_email?: string | null;
+  cc_emails?: string[];
+  mailroom_thread_id?: string | null;
+  outbound_message_id?: string | null;
 };
 
 /** A single row on the internal Costing Sheet (becomes a line on the client Estimate). */
@@ -123,6 +128,10 @@ export type Estimate = {
   sent_at?: ISODate;
   status: EstimateStatus;
   created_at: ISODate;
+  sent_to_email?: string | null;
+  cc_emails?: string[];
+  mailroom_thread_id?: string | null;
+  outbound_message_id?: string | null;
 };
 
 export type JobCostingFields = {
@@ -269,6 +278,13 @@ export type ProjectJob = {
   size_breakdown?: string;
   /** Unit or line price summary. */
   price?: string | null;
+  /** Optional client-quote line extras (show when include_* is true). */
+  quote_discount?: string | null;
+  quote_sales_tax?: string | null;
+  quote_days_or_hours?: string | null;
+  quote_include_discount?: boolean;
+  quote_include_sales_tax?: boolean;
+  quote_include_days_or_hours?: boolean;
   /** When true, overview price is manual even if costing exists. */
   price_manual_override?: boolean;
   /** Human-readable style name (defaults from job name for non-apparel). */
@@ -282,6 +298,8 @@ export type ProjectJob = {
   type: string;
   job_type?: JobType;
   lead_vendor: string;
+  /** Vendors assigned to this job (from People). Filters costing / quote pickers when set. */
+  job_vendors?: string[];
   category: string;
   style_number: string;
   colorway?: string;

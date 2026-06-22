@@ -46,6 +46,7 @@ import {
 import { VendorFieldSelect } from "@/components/vendor-select";
 import { sanitizeJobDisplayName } from "@/lib/job-display-name";
 import { normalizeJob } from "@/lib/job-defaults";
+import { jobVendorNames, vendorsForJobPicker } from "@/lib/job-vendors";
 import {
   applyDevelopmentPatch,
   applyTechPackPatch,
@@ -59,6 +60,7 @@ import {
   sampleApprovalFieldLabels,
 } from "@/lib/job-development";
 import { duplicateJobSeed } from "@/lib/project-job-create";
+import { clientListContacts, loadContacts } from "@/lib/contacts-store";
 import { DuplicateJobDialog, type DuplicateJobFormValues } from "@/components/duplicate-job-dialog";
 import {
   accordionSectionsFor,
@@ -93,11 +95,12 @@ import { WipTimeline } from "@/components/wip-timeline";
 import { JobLabelsSection } from "@/components/job-labels-section";
 import { TechPackArtworkSection } from "@/components/tech-pack-artwork-section";
 import { CostingSheetEditor } from "@/components/costing-sheet-editor";
-import { JobColorwayEditor } from "@/components/job-colorway-editor";
+import { JobOverviewFields } from "@/components/job-overview-fields";
 import { useCurrentUser } from "@/components/profile-provider";
 import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
 import { effectiveJobPrice, priceFromCostingSheet } from "@/lib/job-price";
 import { isApparelWorkspace } from "@/lib/workspace-industry";
+import { JobVendorsSection } from "@/components/job-vendors-section";
 import { VendorQuotesSection } from "@/components/vendor-quotes-section";
 import { EstimatesList } from "@/components/estimates-list";
 import {
@@ -209,6 +212,7 @@ function cloneJob(job: ProjectJob): ProjectJob {
     label_files: job.label_files?.map((f) => ({ ...f })),
     label_lines: job.label_lines?.map((l) => ({ ...l })),
     vendor_quotes: job.vendor_quotes?.map((q) => ({ ...q })),
+    job_vendors: job.job_vendors ? [...job.job_vendors] : undefined,
     costing_sheet: job.costing_sheet
       ? {
           ...job.costing_sheet,
@@ -431,9 +435,26 @@ export function JobDetailsModal({
     () => draft.colorway_rows ?? normalizeColorwayRows(draft),
     [draft.colorway_rows, draft.colorway, draft.color_code],
   );
+  const isPrimaryJob = useMemo(() => {
+    if (!allJobs.length) return true;
+    const sorted = [...allJobs].sort((a, b) =>
+      (a.job_number ?? a.name).localeCompare(b.job_number ?? b.name, undefined, { numeric: true }),
+    );
+    return sorted[0]?.id === draft.id;
+  }, [allJobs, draft.id, draft.name]);
   const costingPrice = useMemo(
     () => priceFromCostingSheet(draft.costing_sheet),
     [draft.costing_sheet],
+  );
+  const assignedJobVendors = useMemo(() => jobVendorNames(draft), [draft]);
+  const jobPickerVendors = useMemo(
+    () =>
+      vendorsForJobPicker(
+        vendors,
+        assignedJobVendors,
+        (draft.vendor_quotes ?? []).map((q) => q.vendor),
+      ),
+    [vendors, assignedJobVendors, draft.vendor_quotes],
   );
   const displayPrice = useMemo(() => effectiveJobPrice(draft), [draft]);
 
@@ -701,6 +722,13 @@ export function JobDetailsModal({
   const primaryBulk = bulkTracks[0]!;
   const hasAcceptedEstimate = (draft.estimates ?? []).some((e) => e.status === "accepted");
   const projectNumber = projectPoNumber(project);
+  const clientContact = useMemo(() => {
+    const clients = clientListContacts(loadContacts());
+    return (
+      clients.find((c) => String(c.id) === String(project.client.id)) ??
+      clients.find((c) => c.name.trim() === project.client.name.trim())
+    );
+  }, [project.client.id, project.client.name]);
 
   const development = developmentFromJob(draft);
   const dyeTracks = development.dye_costing_tracks;
@@ -854,44 +882,25 @@ export function JobDetailsModal({
               title="Job details"
               highlight={highlightId === "job-section-overview"}
             >
-              <label className={labelClass}>
-                Job name
-                <input
-                  className={fieldClass}
-                  value={draft.name}
-                  placeholder="Style name"
-                  onChange={(e) => {
-                    const name = e.target.value;
-                    if (!apparelWorkspace && !draft.style_name?.trim()) {
-                      patch({ name, style_name: name });
-                    } else {
-                      patch({ name });
-                    }
-                  }}
-                />
-              </label>
-
-              <label className={labelClass}>
-                Style name
-                <input
-                  className={fieldClass}
-                  value={draft.style_name ?? draft.name ?? ""}
-                  placeholder={apparelWorkspace ? "Product or style name" : "Defaults from job name"}
-                  onChange={(e) => patch({ style_name: e.target.value })}
-                />
-              </label>
-
-              {apparelWorkspace ? (
-                <label className={labelClass}>
-                  Style #
-                  <input
-                    className={fieldClass}
-                    value={draft.style_number}
-                    placeholder="e.g. GGT01"
-                    onChange={(e) => patch({ style_number: e.target.value.toUpperCase() })}
-                  />
-                </label>
-              ) : null}
+              <JobOverviewFields
+                draft={draft}
+                patch={patch}
+                vendors={vendors}
+                categoryDropdown={categoryDropdown}
+                onCategoryChange={handleCategoryChange}
+                onJobTypeChange={handleJobTypeChange}
+                isPrimaryJob={isPrimaryJob}
+                colorwayRows={colorwayRows}
+                onColorwayChange={(rows) =>
+                  patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))
+                }
+                displayPrice={displayPrice}
+                costingPrice={costingPrice}
+                fieldClass={fieldClass}
+                textareaClass={textareaClass}
+                showLeadTimesLink
+                onApplyTimelineTemplate={applyTimelineTemplateForType}
+              />
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className={labelClass}>
@@ -950,52 +959,6 @@ export function JobDetailsModal({
                 </label>
               ) : null}
 
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label className={labelClass}>
-                  Job type
-                  <select
-                    className={fieldClass}
-                    value={draft.job_type ?? "print_production"}
-                    onChange={(e) => handleJobTypeChange(e.target.value as JobType)}
-                  >
-                    {JOB_TYPE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={labelClass}>
-                  Category
-                  <select
-                    className={fieldClass}
-                    value={categoryDropdown}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                  >
-                    {CATEGORY_CODES.map((c) => (
-                      <option key={c.code} value={c.dropdownLabel}>
-                        {c.dropdownLabel}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="flex flex-col justify-end">
-                  <VendorFieldSelect
-                    label="Supplier"
-                    vendors={vendors}
-                    value={draft.lead_vendor}
-                    onChange={(name) => patch({ lead_vendor: name ?? "" })}
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={applyTimelineTemplateForType}
-                className="text-[11px] font-semibold text-accent hover:underline"
-              >
-                Lead times — apply template for this job type
-              </button>
-
               <label className={labelClass}>
                 Scope
                 <select
@@ -1006,64 +969,6 @@ export function JobDetailsModal({
                   <option value="original">Original deliverable</option>
                   <option value="addon">Reorder</option>
                 </select>
-              </label>
-
-              <div>
-                <p className={labelClass}>Colorways & size breakdown</p>
-                <div className="mt-2">
-                  <JobColorwayEditor
-                    rows={colorwayRows}
-                    onChange={(rows) => patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))}
-                  />
-                </div>
-              </div>
-
-              <label className={labelClass}>
-                Description
-                <textarea
-                  className={textareaClass}
-                  rows={2}
-                  value={draft.description ?? ""}
-                  onChange={(e) => patch({ description: e.target.value })}
-                />
-              </label>
-
-              <label className={labelClass}>
-                Price
-                <input
-                  className={fieldClass}
-                  value={displayPrice}
-                  readOnly={Boolean(costingPrice && !draft.price_manual_override)}
-                  onChange={(e) =>
-                    patch({ price: e.target.value, price_manual_override: true })
-                  }
-                  placeholder="Unit or line price"
-                />
-                {costingPrice ? (
-                  <p className="mt-1 text-[11px] text-text-secondary">
-                    {draft.price_manual_override
-                      ? "Manual override — clear override to use costing tab again."
-                      : `From costing sheet · $${costingPrice}`}
-                    {!draft.price_manual_override ? null : (
-                      <button
-                        type="button"
-                        className="ml-2 font-semibold text-accent hover:underline"
-                        onClick={() =>
-                          patch({
-                            price_manual_override: false,
-                            price: costingPrice,
-                          })
-                        }
-                      >
-                        Use costing
-                      </button>
-                    )}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-[11px] text-text-secondary">
-                    Enter manually or add lines on the Costing tab.
-                  </p>
-                )}
               </label>
 
               <label className={labelClass}>
@@ -1215,17 +1120,9 @@ export function JobDetailsModal({
 
               <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                  Brand & garment style
+                  Garment blanks (optional)
                 </p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className={labelClass}>
-                      Brand
-                      <input
-                        className={fieldClass}
-                        value={draft.garment_brand ?? ""}
-                        onChange={(e) => patch({ garment_brand: e.target.value })}
-                      />
-                    </label>
                     <label className={labelClass}>
                       Garment style #
                       <input
@@ -1731,8 +1628,20 @@ export function JobDetailsModal({
 
                 {section === "costing" ? (
                   <>
+                    <SectionCard title="Job vendors">
+                      <JobVendorsSection
+                        assignedNames={draft.job_vendors ?? assignedJobVendors}
+                        allVendors={vendors}
+                        leadVendor={draft.lead_vendor}
+                        onChange={(names) => patch({ job_vendors: names })}
+                        onLeadVendorChange={(name) => patch({ lead_vendor: name })}
+                      />
+                    </SectionCard>
+
                     <SectionCard title="Vendor quotes (their cost to us)">
                       <VendorQuotesSection
+                        project={project}
+                        job={draft}
                         quotes={draft.vendor_quotes ?? []}
                         vendors={vendors}
                         onChange={patchVendorQuotes}
@@ -1745,7 +1654,7 @@ export function JobDetailsModal({
                       <CostingSheetEditor
                         job={draft}
                         sheet={draft.costing_sheet ?? emptyCostingSheet()}
-                        vendors={vendors}
+                        vendors={jobPickerVendors}
                         vendorQuotes={draft.vendor_quotes ?? []}
                         onChange={patchCostingSheet}
                         onGenerateEstimate={handleGenerateEstimate}
@@ -1754,6 +1663,7 @@ export function JobDetailsModal({
 
                     <SectionCard title="Estimates (client-facing snapshots)">
                       <EstimatesList
+                        project={project}
                         estimates={draft.estimates ?? []}
                         onChange={(next) => {
                           const wasSent = (draft.estimates ?? []).some((e) => e.status === "sent");
@@ -1763,7 +1673,8 @@ export function JobDetailsModal({
                         }}
                         job={draft}
                         clientName={project.client.name}
-                        projectNumber={projectNumber}
+                        clientContact={clientContact}
+                        onSent={handleEstimateSent}
                       />
                     </SectionCard>
 

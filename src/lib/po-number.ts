@@ -151,11 +151,9 @@ export function isPoNumber(value: string): boolean {
   return parsePoParts(value) !== null;
 }
 
-/** True when the value is complete enough to check for duplicates while typing. */
+/** True when the value is worth checking for duplicates while typing. */
 export function shouldValidateProjectNumber(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  return parsePoParts(trimmed) !== null || trimmed.length >= 8;
+  return value.trim().length > 0;
 }
 
 export function projectPoNumber(project: {

@@ -1,12 +1,14 @@
 "use client";
 
+import { useState } from "react";
+import type { Contact } from "@/lib/types/contact";
+import type { Project } from "@/lib/types/project";
 import type { Estimate, EstimateStatus, ProjectJob } from "@/lib/types/wip";
 import { costingTotals } from "@/lib/costing-sheet";
-import {
-  buildInvoiceDraftFromAcceptedEstimate,
-  storeInvoicePrefill,
-} from "@/lib/ledger/invoice-draft";
-import { openEstimatePrintWindow } from "@/lib/estimate-print";
+import { buildClientEstimateDocument } from "@/lib/documents/production-document-draft";
+import type { ProductionDocument } from "@/lib/documents/production-document-types";
+import { MailroomThreadLink } from "@/components/documents/document-compose-modal";
+import { ProductionDocumentModal } from "@/components/documents/production-document-modal";
 
 const STATUS_OPTIONS: EstimateStatus[] = ["draft", "sent", "accepted", "rejected"];
 
@@ -23,18 +25,25 @@ const statusClass: Record<EstimateStatus, string> = {
 };
 
 export function EstimatesList({
+  project,
   estimates,
   onChange,
   job,
   clientName,
-  projectNumber,
+  clientContact,
+  onSent,
 }: {
+  project: Project;
   estimates: Estimate[];
   onChange: (next: Estimate[]) => void;
   job: ProjectJob;
   clientName?: string;
-  projectNumber?: string | null;
+  clientContact?: Contact | null;
+  onSent?: () => void;
 }) {
+  const [docDraft, setDocDraft] = useState<ProductionDocument | null>(null);
+  const [activeEstimateId, setActiveEstimateId] = useState<string | null>(null);
+
   if (estimates.length === 0) {
     return (
       <p className="rounded-xl border border-dashed border-border-light bg-slate-50/80 px-4 py-6 text-center text-sm text-text-secondary">
@@ -51,112 +60,132 @@ export function EstimatesList({
     onChange(estimates.filter((e) => e.id !== id));
   }
 
-  function markSent(id: string) {
-    patch(id, { status: "sent", sent_at: new Date().toISOString() });
-  }
-
-  function sendToClient(id: string) {
-    const est = estimates.find((e) => e.id === id);
-    if (!est) return;
-    openEstimatePrintWindow(job, est, { clientName, projectNumber });
-    markSent(id);
-  }
-
-  function createInvoice(est: Estimate) {
-    const draft = buildInvoiceDraftFromAcceptedEstimate({
-      projectName: projectNumber ? `Project ${projectNumber}` : job.name?.trim() || "Project",
-      projectNumber,
-      clientName: clientName ?? "Client",
-      jobNumber: job.job_number ?? null,
-      estimate: est,
+  function handleEstimateSent(
+    id: string,
+    result: { threadId: string; messageId: string; toEmail: string; ccEmails: string[] },
+  ) {
+    const now = new Date().toISOString();
+    patch(id, {
+      status: "sent",
+      sent_at: now,
+      sent_to_email: result.toEmail,
+      cc_emails: result.ccEmails.length > 0 ? result.ccEmails : undefined,
+      mailroom_thread_id: result.threadId,
+      outbound_message_id: result.messageId,
     });
-    storeInvoicePrefill(draft);
-    window.open("/ledger/financial/invoices/new", "_blank", "noopener,noreferrer");
+    onSent?.();
+  }
+
+  function openEstimateEditor(est: Estimate) {
+    setActiveEstimateId(est.id);
+    setDocDraft(
+      buildClientEstimateDocument({
+        project,
+        job,
+        estimate: est,
+        clientName: clientName ?? project.client.name,
+        clientContact,
+      }),
+    );
   }
 
   return (
-    <div className="space-y-2">
-      {estimates.map((est) => {
-        const totals = costingTotals(est.costing_sheet_snapshot);
-        return (
-          <div
-            key={est.id}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-light bg-white px-4 py-3"
-          >
-            <div className="min-w-0">
-              <p className="font-mono text-sm font-bold text-text-primary">
-                {est.document_number}
-              </p>
-              <p className="text-[11px] text-text-secondary">
-                Created {est.created_at ? new Date(est.created_at).toLocaleDateString() : "—"}
-                {est.sent_at ? ` · Sent ${new Date(est.sent_at).toLocaleDateString()}` : null}
-                {" · "}
-                {est.costing_sheet_snapshot.lines.length} line
-                {est.costing_sheet_snapshot.lines.length === 1 ? "" : "s"}
-              </p>
+    <>
+      <div className="space-y-2">
+        {estimates.map((est) => {
+          const totals = costingTotals(est.costing_sheet_snapshot);
+          return (
+            <div
+              key={est.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-light bg-white px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="font-mono text-sm font-bold text-text-primary">
+                  {est.document_number}
+                </p>
+                <p className="text-[11px] text-text-secondary">
+                  Created {est.created_at ? new Date(est.created_at).toLocaleDateString() : "—"}
+                  {est.sent_at ? ` · Sent ${new Date(est.sent_at).toLocaleDateString()}` : null}
+                  {" · "}
+                  {est.costing_sheet_snapshot.lines.length} line
+                  {est.costing_sheet_snapshot.lines.length === 1 ? "" : "s"}
+                </p>
+                {est.mailroom_thread_id ? (
+                  <MailroomThreadLink threadId={est.mailroom_thread_id} />
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold text-emerald-700">
+                  {currency(totals.final_cost_to_quote_client)}
+                </span>
+                <select
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ring-1 ${statusClass[est.status]}`}
+                  value={est.status}
+                  onChange={(e) => patch(est.id, { status: e.target.value as EstimateStatus })}
+                >
+                  {STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => openEstimateEditor(est)}
+                  className="whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white hover:bg-accent/90"
+                >
+                  {est.status === "draft" ? "Send estimate" : "Resend estimate"}
+                </button>
+                {est.status === "draft" ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patch(est.id, { status: "sent", sent_at: new Date().toISOString() })
+                    }
+                    className="whitespace-nowrap rounded-lg border border-border-light px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-slate-50"
+                  >
+                    Mark sent
+                  </button>
+                ) : null}
+                {est.status === "accepted" ? (
+                  <button
+                    type="button"
+                    onClick={() => openEstimateEditor(est)}
+                    className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                  >
+                    Client invoice
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => remove(est.id)}
+                  className="rounded-md px-2 py-1 text-[10px] font-bold text-red-600 hover:bg-red-50"
+                  aria-label="Remove estimate"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-emerald-700">
-                {currency(totals.final_cost_to_quote_client)}
-              </span>
-              <select
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase ring-1 ${statusClass[est.status]}`}
-                value={est.status}
-                onChange={(e) => patch(est.id, { status: e.target.value as EstimateStatus })}
-              >
-                {STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              {est.status === "draft" || est.status === "sent" ? (
-                <button
-                  type="button"
-                  onClick={() => sendToClient(est.id)}
-                  className="rounded-lg border border-accent/40 px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-violet-50"
-                >
-                  {est.status === "draft" ? "Send to client" : "Resend"}
-                </button>
-              ) : null}
-              {est.status === "draft" ? (
-                <button
-                  type="button"
-                  onClick={() => markSent(est.id)}
-                  className="rounded-lg border border-border-light px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-slate-50"
-                >
-                  Mark sent
-                </button>
-              ) : null}
-              {est.status === "accepted" ? (
-                <button
-                  type="button"
-                  onClick={() => createInvoice(est)}
-                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
-                >
-                  Create invoice
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => openEstimatePrintWindow(job, est, { clientName, projectNumber })}
-                className="rounded-lg border border-border-light px-2.5 py-1 text-[11px] font-semibold text-text-secondary hover:bg-slate-50"
-                title="Open print preview in a new tab"
-              >
-                Print preview
-              </button>
-              <button
-                type="button"
-                onClick={() => remove(est.id)}
-                className="rounded-md px-2 py-1 text-[10px] font-bold text-red-600 hover:bg-red-50"
-                aria-label="Remove estimate"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+
+      {docDraft && activeEstimateId ? (
+        <ProductionDocumentModal
+          open
+          draft={docDraft}
+          onClose={() => {
+            setDocDraft(null);
+            setActiveEstimateId(null);
+          }}
+          mailroomSend={{
+            category: "client",
+            projectId: project.id,
+            jobId: job.id,
+            onSent: (result) => handleEstimateSent(activeEstimateId, result),
+          }}
+        />
+      ) : null}
+    </>
   );
 }

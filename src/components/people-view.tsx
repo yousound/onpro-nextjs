@@ -53,6 +53,8 @@ import { addInternalTeamMemberToProject } from "@/lib/internal-team-roster";
 import { resolveClientProjectList } from "@/lib/mock/project-session";
 import type { Project } from "@/lib/types/project";
 import { YourTeamsSection } from "@/components/your-teams-section";
+import { useWorkspace } from "@/components/workspace-provider";
+import { canManageWorkspacePermissions } from "@/lib/workspace-permissions-admin";
 
 function inviteHasCustomPermissions(inv: PendingInvite): boolean {
   if (!inv.permissions) return false;
@@ -847,6 +849,7 @@ function PersonDetailModal({
   onDeleted: () => void;
 }) {
   const { user } = useCurrentUser();
+  const { isTeamView } = useWorkspace();
   const access = projectsForPerson(p.id);
   const contact = p.contact;
   const teamPending = isTeamMemberPending(contact, user?.selfContactId);
@@ -890,7 +893,7 @@ function PersonDetailModal({
   }, [contact.id, p.segment, p.isCompanyMember]);
 
   async function savePermissions() {
-    if (p.isCompanyMember) return;
+    if (p.isCompanyMember || !canManageWorkspacePermissions(isTeamView)) return;
     const targetId = contact.id;
     try {
       await commitContactPermissions(targetId, permDraft);
@@ -918,7 +921,7 @@ function PersonDetailModal({
     }
   }
 
-  const canEditPermissions = !p.isCompanyMember;
+  const canEditPermissions = !p.isCompanyMember && canManageWorkspacePermissions(isTeamView);
   const canMoveSegment =
     !p.isCompanyMember && (p.segment === "vendor" || p.segment === "client");
   const moveSegmentTarget: ConvertibleSegment | null =
@@ -1205,7 +1208,11 @@ function PersonDetailModal({
                 <div>
                   <p className="text-xs text-text-secondary">
                     {permissionsLabel(effective.source, effective.company)}
-                    {p.isCompanyMember ? " — edit the company to change these for all members." : ""}
+                    {p.isCompanyMember
+                      ? " — edit the company to change these for all members."
+                      : !canEditPermissions
+                        ? " — only the workspace owner can change these."
+                        : ""}
                   </p>
                   <div className="mt-3 rounded-xl border border-border-light bg-surface-body/40 p-3">
                     <PermissionsEditor
@@ -1224,7 +1231,7 @@ function PersonDetailModal({
                     >
                       {permSaved ? "Saved" : "Save permissions"}
                     </button>
-                  ) : (
+                  ) : p.isCompanyMember ? (
                     <button
                       type="button"
                       onClick={openEdit}
@@ -1232,7 +1239,7 @@ function PersonDetailModal({
                     >
                       Edit company permissions →
                     </button>
-                  )}
+                  ) : null}
                 </div>
               ) : null}
 

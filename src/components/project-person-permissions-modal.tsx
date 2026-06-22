@@ -19,6 +19,8 @@ import {
 } from "@/lib/project-permissions";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { PermissionsEditor } from "@/components/permissions-editor";
+import { useWorkspace } from "@/components/workspace-provider";
+import { canManageWorkspacePermissions } from "@/lib/workspace-permissions-admin";
 
 function sourceHint(source: PersonProjectFlagsSource, segment: PeopleSegment): string {
   switch (source) {
@@ -46,6 +48,8 @@ export function ProjectPersonPermissionsModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { isTeamView } = useWorkspace();
+  const readOnly = !canManageWorkspacePermissions(isTeamView);
   const contacts = loadContacts();
   const baseline = resolvePersonProjectFlags(project.id, person, contacts, roleDefaults);
   const [draft, setDraft] = useState<ProjectPermissionFlags>(baseline.flags);
@@ -122,13 +126,33 @@ export function ProjectPersonPermissionsModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <p className="text-xs text-text-secondary">{sourceHint(baseline.source, person.segment)}</p>
+          <p className="text-xs text-text-secondary">
+            {readOnly
+              ? "View only — only the workspace owner can change permissions."
+              : sourceHint(baseline.source, person.segment)}
+          </p>
           <div className="mt-4 max-h-[min(420px,50vh)] overflow-y-auto rounded-xl border border-border-light bg-surface-body/40 p-3">
-            <PermissionsEditor segment={person.segment} flags={draft} onChange={setDraft} dense />
+            <PermissionsEditor
+              segment={person.segment}
+              flags={draft}
+              onChange={setDraft}
+              dense
+              readOnly={readOnly}
+            />
           </div>
         </div>
 
         <div className="shrink-0 space-y-2 border-t border-border-light px-5 py-3">
+          {readOnly ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-xl border border-border-light bg-white py-2.5 text-sm font-semibold text-text-primary hover:bg-surface-body"
+            >
+              Close
+            </button>
+          ) : (
+            <>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -168,6 +192,8 @@ export function ProjectPersonPermissionsModal({
           >
             Close
           </button>
+            </>
+          )}
         </div>
       </div>
     </div>

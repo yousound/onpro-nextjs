@@ -21,6 +21,8 @@ import { PackingSlipSection } from "@/components/packing-slip-section";
 import { loadContacts } from "@/lib/contacts-store";
 import { DirectoryAvatar } from "@/components/directory-avatar";
 import { useCurrentUser } from "@/components/profile-provider";
+import { useWorkspace } from "@/components/workspace-provider";
+import { canManageWorkspacePermissions } from "@/lib/workspace-permissions-admin";
 import { peopleForProject, type ProjectPersonRow } from "@/lib/project-people";
 import {
   mergeRoleDrafts,
@@ -1853,6 +1855,8 @@ function peopleFilterPillClass(active: boolean, filter: PeopleAccessFilter): str
 
 export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
   const { user, loading, refresh } = useCurrentUser();
+  const { isTeamView } = useWorkspace();
+  const canEditPermissions = canManageWorkspacePermissions(isTeamView);
   const [filter, setFilter] = useState<PeopleAccessFilter>("all");
   const [drafts, setDrafts] = useState<Record<PeopleSegment, ProjectPermissionFlags>>(() => mergeRoleDrafts(null));
   const [hydrated, setHydrated] = useState(false);
@@ -1979,7 +1983,7 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
                     type="button"
                     onClick={() => setSelectedPerson(person)}
                     className="flex w-full gap-3 rounded-lg px-3 py-4 text-left transition hover:bg-surface-body/80"
-                    aria-label={`Edit permissions for ${person.displayName}`}
+                    aria-label={`${canEditPermissions ? "Edit" : "View"} permissions for ${person.displayName}`}
                   >
                     <DirectoryAvatar
                       name={person.displayName}
@@ -2011,7 +2015,9 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
                           <span className="text-text-secondary"> · {summary.text}</span>
                         ) : null}
                       </p>
-                      <p className="mt-1 text-[11px] font-semibold text-accent">Edit permissions →</p>
+                      <p className="mt-1 text-[11px] font-semibold text-accent">
+                        {canEditPermissions ? "Edit permissions →" : "View permissions →"}
+                      </p>
                     </div>
                   </button>
                 </li>
@@ -2047,16 +2053,24 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
           ) : (
             <>
               <p className="text-sm text-text-secondary">
-                Baseline for everyone in the {segmentLabel(filter).toLowerCase()} segment on this project. Override per
-                person from{" "}
-                <Link href="/people" className="font-semibold text-accent hover:underline">
-                  People
-                </Link>
-                .
+                Baseline for everyone in the {segmentLabel(filter).toLowerCase()} segment on this project.
+                {canEditPermissions ? (
+                  <>
+                    {" "}
+                    Override per person from{" "}
+                    <Link href="/people" className="font-semibold text-accent hover:underline">
+                      People
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  " View only — only the workspace owner can change defaults."
+                )}
               </p>
               <PermissionsEditor
                 segment={filter}
                 flags={flags}
+                readOnly={!canEditPermissions}
                 onChange={(next) =>
                   setDrafts((prev) => ({
                     ...prev,
@@ -2064,6 +2078,7 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
                   }))
                 }
               />
+              {canEditPermissions ? (
               <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border-light pt-4">
                 <button
                   type="button"
@@ -2088,6 +2103,7 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
                   <span className="text-sm font-medium text-emerald-700">Saved for this project.</span>
                 ) : null}
               </div>
+              ) : null}
             </>
           )}
         </SectionCard>

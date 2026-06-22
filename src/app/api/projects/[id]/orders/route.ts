@@ -6,8 +6,7 @@ import {
   upsertProjectOrderForUser,
 } from "@/lib/supabase/orders";
 import { createClient } from "@/lib/supabase/server";
-import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
-import { assertCanWriteOperatorWorkspace } from "@/lib/server/workspace-write-access";
+import { resolveProjectWriteOperator } from "@/lib/server/project-workspace-access";
 import { resolveWipWriteClient } from "@/lib/server/wip-write-client";
 import { supabaseErrorMessage } from "@/lib/id-uuid";
 import type { ProjectOrder } from "@/lib/types/wip";
@@ -52,12 +51,10 @@ export async function POST(
     return NextResponse.json({ error: "Invalid order payload" }, { status: 400 });
   }
 
-  const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
-
   try {
-    await assertCanWriteOperatorWorkspace(supabase, user.id, workspaceOwnerId);
+    const operatorUserId = await resolveProjectWriteOperator(supabase, user.id, projectId);
     const writeClient = resolveWipWriteClient(supabase);
-    const saved = await upsertProjectOrderForUser(writeClient, order, workspaceOwnerId);
+    const saved = await upsertProjectOrderForUser(writeClient, order, operatorUserId);
     return NextResponse.json({ order: saved });
   } catch (e) {
     const msg = supabaseErrorMessage(e);
@@ -93,12 +90,10 @@ export async function PUT(
     return NextResponse.json({ error: "Order project_id mismatch" }, { status: 400 });
   }
 
-  const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
-
   try {
-    await assertCanWriteOperatorWorkspace(supabase, user.id, workspaceOwnerId);
+    const operatorUserId = await resolveProjectWriteOperator(supabase, user.id, projectId);
     const writeClient = resolveWipWriteClient(supabase);
-    const saved = await syncProjectOrdersForUser(writeClient, projectId, workspaceOwnerId, orders);
+    const saved = await syncProjectOrdersForUser(writeClient, projectId, operatorUserId, orders);
     return NextResponse.json({ ok: true, orders: saved });
   } catch (e) {
     const msg = supabaseErrorMessage(e);

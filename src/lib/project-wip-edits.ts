@@ -4,6 +4,7 @@ import { normalizeJob } from "@/lib/job-defaults";
 import { generateJobNumberForProject } from "@/lib/job-number";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { getLiveCachedJobs, seedLiveJobsForProject } from "@/lib/data/live-cache";
+import { dispatchAppToast } from "@/lib/onpro-events";
 import { withoutDemoSeedJobs } from "@/lib/mock/demo-seed-jobs";
 import { readSessionProjects } from "@/lib/mock/project-session";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
@@ -80,6 +81,8 @@ export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
         if (saved) seedLiveJobsForProject(projectId, saved);
       } catch (err) {
         console.error("[saveProjectJobs] sync failed", err);
+        const msg = err instanceof Error ? err.message : "Could not save jobs to the team workspace.";
+        dispatchAppToast(`Jobs not saved for the team: ${msg}`);
       }
     })();
     if (typeof window !== "undefined") {

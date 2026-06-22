@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
 
 /** Team/vendor members who switched into an operator workspace (not the owner). */
 export async function isOperatorWorkspaceTeamMember(
@@ -35,6 +36,18 @@ export async function assertCanWriteOperatorWorkspace(
   if (!allowed) {
     throw new Error("You do not have permission to change data in this workspace.");
   }
+}
+
+/** Permission profiles are owner-only — teammates may view but not edit. */
+export async function assertCanManageWorkspacePermissions(
+  supabase: SupabaseClient,
+  authUserId: string,
+): Promise<string> {
+  const operatorUserId = await resolveWorkspaceOwnerId(supabase, authUserId);
+  if (authUserId !== operatorUserId) {
+    throw new Error("Only the workspace owner can change permissions.");
+  }
+  return operatorUserId;
 }
 
 export async function assertClientBelongsToOperator(

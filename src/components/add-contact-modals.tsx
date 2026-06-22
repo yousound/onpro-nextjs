@@ -170,6 +170,7 @@ function VendorBadgeIcon() {
 
 export function AddClientModal({ onClose, onSaved, existing, onInviteSent }: ClientModalProps) {
   const router = useRouter();
+  const { isTeamView } = useWorkspace();
   const [saving, setSaving] = useState(false);
   const { deleting, deleteError, clearDeleteError, handleDelete } = useDeleteContact({
     onSuccess: () => {
@@ -467,7 +468,7 @@ export function AddClientModal({ onClose, onSaved, existing, onInviteSent }: Cli
                   : "Workspace permissions for this contact. Per-project access is set on each project."}
               </p>
               <div className="mt-3 max-h-[min(360px,50vh)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3">
-                <PermissionsEditor segment="client" flags={permissions} onChange={setPermissions} dense />
+                <PermissionsEditor segment="client" flags={permissions} onChange={setPermissions} dense readOnly={isTeamView} />
               </div>
             </fieldset>
           </ModalSectionPanel>
@@ -763,7 +764,7 @@ export function AddTeamMemberModal({ onClose, onSaved, existing, onInviteSent }:
                 Workspace permissions for this teammate. Per-project access is set on each project.
               </p>
               <div className="mt-3 max-h-[min(360px,50vh)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3">
-                <PermissionsEditor segment="team" flags={permissions} onChange={setPermissions} dense />
+                <PermissionsEditor segment="team" flags={permissions} onChange={setPermissions} dense readOnly={isTeamView} />
               </div>
             </fieldset>
           </ModalSectionPanel>
@@ -845,6 +846,7 @@ const VENDOR_MODAL_SECTIONS: ModalSectionItem[] = [
 
 export function AddVendorModal({ onClose, onSaved, existing, onInviteSent }: ClientModalProps) {
   const router = useRouter();
+  const { isTeamView } = useWorkspace();
   const [saving, setSaving] = useState(false);
   const { deleting, deleteError, clearDeleteError, handleDelete } = useDeleteContact({
     onSuccess: () => {
@@ -1055,7 +1057,7 @@ export function AddVendorModal({ onClose, onSaved, existing, onInviteSent }: Cli
                 People at this vendor inherit these permissions. Per-project access is set on each project.
               </p>
               <div className="mt-3 max-h-[min(360px,50vh)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3">
-                <PermissionsEditor segment="vendor" flags={permissions} onChange={setPermissions} dense />
+                <PermissionsEditor segment="vendor" flags={permissions} onChange={setPermissions} dense readOnly={isTeamView} />
               </div>
             </fieldset>
           </ModalSectionPanel>

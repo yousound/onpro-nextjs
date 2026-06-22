@@ -3,8 +3,7 @@ import { isLiveBackendEnabled } from "@/lib/config/backend";
 import { fetchJobsForProjectFromSupabase, syncProjectJobsForUser } from "@/lib/supabase/jobs";
 import { syncProjectOrdersForUser } from "@/lib/supabase/orders";
 import { createClient } from "@/lib/supabase/server";
-import { resolveWorkspaceOwnerId } from "@/lib/server/resolve-workspace-context";
-import { assertCanWriteOperatorWorkspace } from "@/lib/server/workspace-write-access";
+import { resolveProjectWriteOperator } from "@/lib/server/project-workspace-access";
 import { resolveWipWriteClient } from "@/lib/server/wip-write-client";
 import { supabaseErrorMessage } from "@/lib/id-uuid";
 import type { ProjectJob, ProjectOrder } from "@/lib/types/wip";
@@ -60,17 +59,15 @@ export async function PUT(
     return NextResponse.json({ error: "Order project_id mismatch" }, { status: 400 });
   }
 
-  const workspaceOwnerId = await resolveWorkspaceOwnerId(supabase, user.id);
-
   try {
-    await assertCanWriteOperatorWorkspace(supabase, user.id, workspaceOwnerId);
+    const operatorUserId = await resolveProjectWriteOperator(supabase, user.id, projectId);
     const writeClient = resolveWipWriteClient(supabase);
 
     if (orders && orders.length > 0) {
-      await syncProjectOrdersForUser(writeClient, projectId, workspaceOwnerId, orders);
+      await syncProjectOrdersForUser(writeClient, projectId, operatorUserId, orders);
     }
 
-    const saved = await syncProjectJobsForUser(writeClient, projectId, workspaceOwnerId, jobs);
+    const saved = await syncProjectJobsForUser(writeClient, projectId, operatorUserId, jobs);
     return NextResponse.json({ ok: true, jobs: saved });
   } catch (e) {
     const msg = supabaseErrorMessage(e);

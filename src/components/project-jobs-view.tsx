@@ -172,8 +172,10 @@ export function ProjectJobsView({
 
         const jobsFromServer = apiJobs ?? initialJobs ?? [];
         const ordersFromServer = apiOrders ?? [];
-        setJobs(jobsFromServer.length > 0 ? jobsFromServer : loadProjectJobs(project.id, mergedProject));
-        setOrders(ordersFromServer.length > 0 ? ordersFromServer : loadProjectOrders(project.id, mergedProject));
+        setJobs(jobsFromServer);
+        setOrders(
+          ordersFromServer.length > 0 ? ordersFromServer : loadProjectOrders(project.id, mergedProject),
+        );
         setHydrated(true);
         return;
       }
@@ -201,12 +203,24 @@ export function ProjectJobsView({
   useEffect(() => {
     if (!hydrated) return;
     function reloadJobs() {
+      if (isClientLiveBackend()) {
+        void fetchJobsFromDb(project.id).then((apiJobs) => {
+          if (apiJobs != null) setJobs(apiJobs);
+        });
+        return;
+      }
       const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
       const patch = saved && typeof saved === "object" ? saved : {};
       const mergedProject = { ...project, ...patch };
       setJobs(loadProjectJobs(project.id, mergedProject));
     }
     function reloadOrders() {
+      if (isClientLiveBackend()) {
+        void fetchOrdersFromDb(project.id).then((apiOrders) => {
+          if (apiOrders != null) setOrders(apiOrders);
+        });
+        return;
+      }
       const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
       const patch = saved && typeof saved === "object" ? saved : {};
       const mergedProject = { ...project, ...patch };

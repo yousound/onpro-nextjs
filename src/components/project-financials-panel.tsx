@@ -30,6 +30,8 @@ import {
 } from "@/lib/project-financials-seed";
 import {
   consolidateDuplicateProjectEstimates,
+  jobsOnSameOrder,
+  refreshProjectEstimateSnapshot,
 } from "@/lib/project-estimate-merge";
 import { projectPoNumber } from "@/lib/po-number";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
@@ -171,12 +173,25 @@ function formatShortDate(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
 }
 
-function buildEstimateDocument(project: Project, job: ProjectJob, estimate?: Estimate): ProductionDocument {
+function buildEstimateDocument(
+  project: Project,
+  job: ProjectJob,
+  estimate?: Estimate,
+  allJobs?: ProjectJob[],
+): ProductionDocument {
   const contacts = loadContacts();
   const clientContact = findClientContactForProject(contacts, project.client);
   const clientName = project.client.name;
+  const orderJobs = allJobs ? jobsOnSameOrder(allJobs, job) : undefined;
   if (estimate) {
-    return buildClientEstimateDocument({ project, job, estimate, clientName, clientContact });
+    return buildClientEstimateDocument({
+      project,
+      job,
+      estimate,
+      clientName,
+      clientContact,
+      orderJobs,
+    });
   }
   return buildJobPreviewEstimateDocument({ project, job, clientName, clientContact });
 }
@@ -224,7 +239,7 @@ function itemToDraftEntry(
   let draft: ProductionDocument;
   if (item.estimateId) {
     const est = job.estimates?.find((e) => e.id === item.estimateId);
-    draft = buildEstimateDocument(project, job, est);
+    draft = buildEstimateDocument(project, job, est, jobs);
     if (item.uiKind === "invoice" && est) {
       draft = { ...draft, documentNumber: est.document_number.replace(/^EST-/, "INV-") };
     }
@@ -397,16 +412,21 @@ export function ProjectFinancialsPanel({
   );
 
   useEffect(() => {
-    const jobsWithEstimates = jobs.filter((j) => (j.estimates?.length ?? 0) > 0);
-    if (jobsWithEstimates.length <= 1) return;
     const docBase =
       projectPoNumber(project)?.trim() ||
       jobs[0]?.job_number?.trim()?.replace(/-\d{2}$/, "") ||
       String(project.id);
-    const consolidated = consolidateDuplicateProjectEstimates(jobs, docBase);
-    const before = jobs.reduce((n, j) => n + (j.estimates?.length ?? 0), 0);
-    const after = consolidated.reduce((n, j) => n + (j.estimates?.length ?? 0), 0);
-    if (after < before) persistJobs(consolidated);
+    let next = jobs;
+    const jobsWithEstimates = jobs.filter((j) => (j.estimates?.length ?? 0) > 0);
+    if (jobsWithEstimates.length > 1) {
+      next = consolidateDuplicateProjectEstimates(next, docBase);
+    }
+    next = refreshProjectEstimateSnapshot(next, docBase);
+    const changed =
+      next !== jobs &&
+      JSON.stringify(next.map((j) => ({ id: j.id, estimates: j.estimates }))) !==
+        JSON.stringify(jobs.map((j) => ({ id: j.id, estimates: j.estimates })));
+    if (changed) persistJobs(next);
   }, [jobs, project, persistJobs]);
 
   function openWorkspace() {

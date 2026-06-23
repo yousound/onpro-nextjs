@@ -7,6 +7,7 @@ import type {
   ProjectJob,
   VendorQuote,
 } from "@/lib/types/wip";
+import { colorwayRowTotal } from "@/lib/job-colorways";
 
 /** Build a fresh empty costing sheet. */
 export function emptyCostingSheet(
@@ -192,38 +193,66 @@ function workingCostingSheet(job: ProjectJob): CostingSheet {
   };
 }
 
+function jobLabelForMerge(job: ProjectJob): string {
+  return job.style_number?.trim() || job.name?.trim() || job.job_number?.trim() || job.id;
+}
+
+function parseJobUnitPrice(job: ProjectJob): number {
+  return parseFloat(String(job.price ?? "").replace(/[^0-9.\-]/g, "")) || 0;
+}
+
+function jobLineQuantity(job: ProjectJob): number {
+  const rows = job.colorway_rows ?? [];
+  if (rows.length > 0) {
+    const total = rows.reduce((sum, row) => sum + colorwayRowTotal(row), 0);
+    if (total > 0) return total;
+  }
+  return 1;
+}
+
+/** One costing line from job metadata when no sheet / vendor quotes exist yet. */
+export function syntheticCostingLineFromJob(job: ProjectJob, multiJob: boolean): CostingLine {
+  const desc = [job.style_number?.trim(), job.name?.trim()].filter(Boolean).join(" — ")
+    || job.name?.trim()
+    || "Line item";
+  return newCostingLine({
+    description: multiJob ? `${jobLabelForMerge(job)}: ${desc}`.trim() : desc,
+    qty: jobLineQuantity(job),
+    price: parseJobUnitPrice(job),
+    cost: 0,
+  });
+}
+
 /** Merge costing lines from multiple jobs into one client-facing sheet. */
 export function mergeProjectJobCostingSheets(jobs: ProjectJob[]): CostingSheet | null {
-  const working = jobs.map((job) => ({ job, sheet: workingCostingSheet(job) }));
-  const withLines = working.filter((entry) => entry.sheet.lines.length > 0);
-  if (withLines.length === 0) return null;
+  if (jobs.length === 0) return null;
 
-  const [first, ...rest] = withLines;
-  const multiJob = withLines.length > 1;
-  const lines = withLines.flatMap(({ job, sheet }) =>
-    sheet.lines.map((line) =>
-      newCostingLine({
-        ...line,
-        description: multiJob
-          ? `${jobLabelForMerge(job)}: ${line.description}`.trim()
-          : line.description,
-      }),
-    ),
-  );
+  const multiJob = jobs.length > 1;
+  const lines = jobs.flatMap((job) => {
+    const sheet = workingCostingSheet(job);
+    if (sheet.lines.length > 0) {
+      return sheet.lines.map((line) =>
+        newCostingLine({
+          ...line,
+          description: multiJob
+            ? `${jobLabelForMerge(job)}: ${line.description}`.trim()
+            : line.description,
+        }),
+      );
+    }
+    return [syntheticCostingLineFromJob(job, multiJob)];
+  });
 
-  const notes = [first!.sheet.notes, ...rest.map((entry) => entry.sheet.notes)]
-    .map((n) => n?.trim())
+  const notes = jobs
+    .map((job) => workingCostingSheet(job).notes?.trim())
     .filter(Boolean)
     .join("\n");
 
+  const base = workingCostingSheet(jobs[0]!);
   return {
-    ...first!.sheet,
+    ...(base.lines.length > 0 ? base : emptyCostingSheet()),
     lines,
-    estimated_qty: withLines.reduce((sum, entry) => sum + (entry.sheet.estimated_qty || 0), 0),
+    estimated_qty: jobs.reduce((sum, job) => sum + jobLineQuantity(job), 0),
     notes,
   };
-}
-
-function jobLabelForMerge(job: ProjectJob): string {
-  return job.style_number?.trim() || job.name?.trim() || job.job_number?.trim() || job.id;
 }

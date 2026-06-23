@@ -208,27 +208,49 @@ export function buildClientEstimateDocument(input: {
   estimate: Estimate;
   clientName: string;
   clientContact?: Contact | null;
+  orderJobs?: ProjectJob[];
 }): ProductionDocument {
-  const { project, job, estimate, clientName, clientContact } = input;
+  const { project, job, estimate, clientName, clientContact, orderJobs } = input;
   const pn = projectPoNumber(project) ?? "";
   const addr = formatContactAddress(clientContact);
   const sheet = estimate.costing_sheet_snapshot;
+  const jobsForLines = orderJobs?.length ? orderJobs : [job];
 
-  const lines: ProductionDocumentLine[] = sheet.lines.map((line) => ({
+  let lines: ProductionDocumentLine[] = sheet.lines.map((line) => ({
     id: newLineId(),
     description: [line.description, line.vendor ? `(${line.vendor})` : ""].filter(Boolean).join(" "),
     quantity: String(line.qty || 1),
     rate: formatUsdDetailed(Math.round(line.price * 100)),
   }));
-  if (lines.length === 0) {
-    lines.push({
-      id: newLineId(),
-      description: job.name?.trim() || "Estimate line",
-      quantity: "1",
-      rate: "",
+
+  if (lines.length === 0 || (jobsForLines.length > 1 && lines.length < jobsForLines.length)) {
+    lines = jobsForLines.map((orderJob) => {
+      const rows = orderJob.colorway_rows ?? [];
+      const qtyTotal = rows.reduce((sum, row) => sum + colorwayRowTotal(row), 0);
+      const unitPrice = parseFloat(String(orderJob.price ?? "").replace(/[^0-9.\-]/g, "")) || 0;
+      const colorSummary = formatJobSizeBreakdown(rows).replace(/\n/g, "; ");
+      const description = [
+        orderJob.name?.trim(),
+        orderJob.style_number?.trim() ? `Style ${orderJob.style_number.trim()}` : null,
+        colorSummary || null,
+      ]
+        .filter(Boolean)
+        .join(" — ");
+      return {
+        id: newLineId(),
+        description: description || orderJob.name?.trim() || "Line item",
+        quantity: String(qtyTotal || 1),
+        rate: unitPrice > 0 ? formatUsdDetailed(Math.round(unitPrice * 100)) : "",
+      };
     });
   }
+
   while (lines.length < 3) lines.push(emptyProductionLine());
+
+  const jobNumbers = jobsForLines
+    .map((j) => j.job_number?.trim())
+    .filter(Boolean)
+    .join(", ");
 
   return baseDocument("client_estimate", {
     billToName: clientName,
@@ -238,7 +260,7 @@ export function buildClientEstimateDocument(input: {
     documentNumber: estimate.document_number,
     projectName: project.name?.trim() ?? "",
     projectNumber: pn,
-    jobNumber: job.job_number?.trim() ?? "",
+    jobNumber: jobNumbers || (job.job_number?.trim() ?? ""),
     referenceNotes: estimate.document_number,
     lines,
     memoNotes: sheet.notes?.trim() ?? "",

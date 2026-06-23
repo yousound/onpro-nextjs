@@ -6,6 +6,7 @@ import type { Project } from "@/lib/types/project";
 import type { Estimate, EstimateStatus, ProjectJob } from "@/lib/types/wip";
 import { costingTotals } from "@/lib/costing-sheet";
 import { buildClientEstimateDocument } from "@/lib/documents/production-document-draft";
+import { jobsOnSameOrder } from "@/lib/project-estimate-merge";
 import type { ProductionDocument } from "@/lib/documents/production-document-types";
 import { MailroomThreadLink } from "@/components/documents/document-compose-modal";
 import { ProductionDocumentModal } from "@/components/documents/production-document-modal";
@@ -29,6 +30,7 @@ export function EstimatesList({
   estimates,
   onChange,
   job,
+  allJobs,
   clientName,
   clientContact,
   onSent,
@@ -37,6 +39,7 @@ export function EstimatesList({
   estimates: Estimate[];
   onChange: (next: Estimate[]) => void;
   job: ProjectJob;
+  allJobs?: ProjectJob[];
   clientName?: string;
   clientContact?: Contact | null;
   onSent?: () => void;
@@ -85,6 +88,7 @@ export function EstimatesList({
         estimate: est,
         clientName: clientName ?? project.client.name,
         clientContact,
+        orderJobs: allJobs ? jobsOnSameOrder(allJobs, job) : undefined,
       }),
     );
   }

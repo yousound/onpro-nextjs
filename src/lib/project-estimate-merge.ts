@@ -77,9 +77,9 @@ export function consolidateDuplicateProjectEstimates(
   const jobsWithEstimates = jobs.filter((job) => (job.estimates?.length ?? 0) > 0);
   if (jobsWithEstimates.length <= 1) return jobs;
 
-  const sorted = sortJobsForEstimate(jobs);
-  const primary = sorted[0]!;
-  const mergedSheet = mergeProjectJobCostingSheets(sorted) ?? emptyCostingSheet();
+  const primary = primaryEstimateHost(jobs) ?? sortJobsForEstimate(jobs)[0]!;
+  const mergeTargets = jobsOnSameOrder(jobs, primary);
+  const mergedSheet = mergeProjectJobCostingSheets(mergeTargets) ?? emptyCostingSheet();
 
   const existingOnPrimary = primary.estimates?.[0];
   const estimate: Estimate = existingOnPrimary
@@ -100,6 +100,56 @@ export function consolidateDuplicateProjectEstimates(
         costing_sheet: mergedSheet,
         estimates: [estimate],
       };
+    }
+    return { ...job, estimates: [] };
+  });
+}
+
+export function jobsOnSameOrder(allJobs: ProjectJob[], anchor: ProjectJob): ProjectJob[] {
+  const orderId = anchor.order_id;
+  if (!orderId) {
+    return sortJobsForEstimate(allJobs);
+  }
+
+  const onOrder = allJobs.filter((job) => job.order_id === orderId);
+  const orderIdsUsed = new Set(allJobs.map((job) => job.order_id).filter(Boolean));
+  const orphans = allJobs.filter((job) => !job.order_id);
+  if (orphans.length > 0 && orderIdsUsed.size <= 1) {
+    const merged = [...onOrder, ...orphans];
+    const unique = Array.from(new Map(merged.map((job) => [job.id, job])).values());
+    return sortJobsForEstimate(unique.length > 0 ? unique : [anchor]);
+  }
+
+  return sortJobsForEstimate(onOrder.length > 0 ? onOrder : [anchor]);
+}
+
+/** Refresh a single project estimate so its snapshot includes every job on the order. */
+export function refreshProjectEstimateSnapshot(
+  jobs: ProjectJob[],
+  documentNumberBase: string,
+): ProjectJob[] {
+  const host = primaryEstimateHost(jobs);
+  const estimate = host?.estimates?.[0];
+  if (!host || !estimate) return jobs;
+
+  const orderJobs = jobsOnSameOrder(jobs, host);
+  const mergedSheet = mergeProjectJobCostingSheets(orderJobs);
+  if (!mergedSheet) return jobs;
+
+  const snapshotLines = estimate.costing_sheet_snapshot?.lines?.length ?? 0;
+  if (orderJobs.length <= 1 && snapshotLines >= 1) return jobs;
+  if (orderJobs.length > 1 && snapshotLines >= orderJobs.length) return jobs;
+
+  const updated: Estimate = {
+    ...estimate,
+    costing_sheet_snapshot: JSON.parse(JSON.stringify(mergedSheet)) as typeof mergedSheet,
+    document_number: estimate.document_number || `EST-${documentNumberBase}-01`,
+    job_id: host.id,
+  };
+
+  return jobs.map((job) => {
+    if (job.id === host.id) {
+      return { ...job, costing_sheet: mergedSheet, estimates: [updated] };
     }
     return { ...job, estimates: [] };
   });

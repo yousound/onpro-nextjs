@@ -1502,6 +1502,7 @@ export function JobDetailsModal({
                           if (!wasSent && nowSent) handleEstimateSent();
                         }}
                         job={draft}
+                        allJobs={allJobs}
                         clientName={project.client.name}
                         clientContact={clientContact}
                         onSent={handleEstimateSent}

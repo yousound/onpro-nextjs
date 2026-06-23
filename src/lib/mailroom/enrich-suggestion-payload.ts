@@ -9,7 +9,6 @@ const UPDATE_KINDS: AgentSuggestionKind[] = [
   "log_packing_list",
   "add_vendor_quote",
   "add_costing_line",
-  "generate_estimate",
   "create_invoice",
   "create_order",
   "create_job",

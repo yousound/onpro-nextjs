@@ -28,6 +28,10 @@ import {
   seedFinancialDocumentsForJobs,
   type FinancialSeedOptions,
 } from "@/lib/project-financials-seed";
+import {
+  consolidateDuplicateProjectEstimates,
+} from "@/lib/project-estimate-merge";
+import { projectPoNumber } from "@/lib/po-number";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 import { dispatchAppToast } from "@/lib/onpro-events";
 import type { FinancialsDeepLink } from "@/lib/project-financials-nav";
@@ -392,7 +396,28 @@ export function ProjectFinancialsPanel({
     [project.id],
   );
 
+  useEffect(() => {
+    const jobsWithEstimates = jobs.filter((j) => (j.estimates?.length ?? 0) > 0);
+    if (jobsWithEstimates.length <= 1) return;
+    const docBase =
+      projectPoNumber(project)?.trim() ||
+      jobs[0]?.job_number?.trim()?.replace(/-\d{2}$/, "") ||
+      String(project.id);
+    const consolidated = consolidateDuplicateProjectEstimates(jobs, docBase);
+    const before = jobs.reduce((n, j) => n + (j.estimates?.length ?? 0), 0);
+    const after = consolidated.reduce((n, j) => n + (j.estimates?.length ?? 0), 0);
+    if (after < before) persistJobs(consolidated);
+  }, [jobs, project, persistJobs]);
+
   function openWorkspace() {
+    const docBase =
+      projectPoNumber(project)?.trim() ||
+      jobs[0]?.job_number?.trim()?.replace(/-\d{2}$/, "") ||
+      String(project.id);
+    const jobsWithEstimates = jobs.filter((j) => (j.estimates?.length ?? 0) > 0);
+    if (jobsWithEstimates.length > 1) {
+      persistJobs(consolidateDuplicateProjectEstimates(jobs, docBase));
+    }
     setWorkspace({
       jobPickerMode: "selected",
       selectedJobIds: new Set(jobs.map((j) => j.id)),
@@ -430,6 +455,7 @@ export function ProjectFinancialsPanel({
       jobs,
       target,
       workspace.seedOptions,
+      project,
     );
     const createdCount = results.reduce((n, r) => n + r.created.length, 0);
     persistJobs(nextJobs);

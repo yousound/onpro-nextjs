@@ -24,6 +24,11 @@ import {
   newCostingLine,
   newVendorQuote,
 } from "@/lib/costing-sheet";
+import {
+  applyMergedProjectEstimate,
+  projectHasClientEstimate,
+  sortJobsForEstimate,
+} from "@/lib/project-estimate-merge";
 import { sanitizeJobDisplayName } from "@/lib/job-display-name";
 import { defaultJobApprovals, defaultJobFulfillment, normalizeJob } from "@/lib/job-defaults";
 import { reassignMailroomDocumentJobs } from "@/lib/documents/import-mailroom-images";
@@ -496,88 +501,64 @@ function execGenerateEstimate(
   const project = resolveProjectForSuggestion(suggestion, ctx);
   if (!project) return { ok: false, message: "No project found for estimate." };
 
-  const allJobs = sortJobsForEstimate(loadProjectJobs(project.id, project));
-  const existingEstimate = allJobs
-    .flatMap((job) => job.estimates ?? [])
-    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
-  if (existingEstimate) {
+  const allJobs = loadProjectJobs(project.id, project);
+  if (projectHasClientEstimate(allJobs)) {
+    const existing = allJobs
+      .flatMap((job) => job.estimates ?? [])
+      .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
     const host =
-      allJobs.find((job) => job.estimates?.some((est) => est.id === existingEstimate.id)) ??
-      allJobs[0];
+      allJobs.find((job) => job.estimates?.some((est) => est.id === existing?.id)) ??
+      sortJobsForEstimate(allJobs)[0];
     return {
       ok: true,
-      message: `Estimate ${existingEstimate.document_number} already covers ${project.name}.`,
+      message: `Estimate ${existing?.document_number ?? ""} already covers ${project.name}.`,
       deepLink: host ? projectDeepLink(project.id, host.id) : projectDeepLink(project.id),
       projectId: project.id,
     };
   }
 
-  if (allJobs.length > 1) {
-    const mergedSheet = mergeProjectJobCostingSheets(allJobs);
-    if (!mergedSheet || mergedSheet.lines.length === 0) {
-      return {
-        ok: false,
-        message: "Add vendor quotes or costing lines on at least one job before generating an estimate.",
-      };
-    }
-    const primary = allJobs[0]!;
-    const docBase =
-      projectPoNumber(project)?.trim() ||
-      primary.job_number?.trim() ||
-      String(project.id);
-    const estimate = generateEstimateFromSheet(
-      primary,
-      mergedSheet,
-      primary.estimates ?? [],
-      docBase,
-    );
-    saveJob(project, {
-      ...primary,
-      costing_sheet: mergedSheet,
-      estimates: [...(primary.estimates ?? []), estimate],
-      updated_at: nowIso(),
-    });
-    const labels = allJobs
-      .map((job) => job.job_number ?? job.style_number ?? job.name)
-      .filter(Boolean)
-      .join(", ");
+  const resolved = resolveJobForSuggestion(suggestion, ctx, project);
+  const targetJobs =
+    allJobs.length > 1 ? sortJobsForEstimate(allJobs) : resolved ? [resolved] : allJobs.slice(0, 1);
+  if (targetJobs.length === 0) {
+    return { ok: false, message: "Add a job with costing before generating an estimate." };
+  }
+
+  const mergedSheet = mergeProjectJobCostingSheets(targetJobs);
+  if (!mergedSheet || mergedSheet.lines.length === 0) {
     return {
-      ok: true,
-      message: `Generated estimate ${estimate.document_number} covering ${labels || project.name}.`,
-      deepLink: projectDeepLink(project.id, primary.id),
-      projectId: project.id,
+      ok: false,
+      message: "Add vendor quotes or costing lines on at least one job before generating an estimate.",
     };
   }
 
-  const job = resolveJobForSuggestion(suggestion, ctx, project) ?? allJobs[0];
-  if (!job) return { ok: false, message: "Add a job with costing before generating an estimate." };
+  const docBase =
+    projectPoNumber(project)?.trim() ||
+    targetJobs[0]!.job_number?.trim()?.replace(/-\d{2}$/, "") ||
+    String(project.id);
 
-  const workingSheet = mergeProjectJobCostingSheets([job]);
-  if (!workingSheet || workingSheet.lines.length === 0) {
-    return { ok: false, message: "Add vendor quotes or costing lines on the job first." };
+  const { jobs: nextJobs, estimate, created } = applyMergedProjectEstimate(
+    allJobs,
+    targetJobs,
+    docBase,
+  );
+  if (!created || !estimate) {
+    return { ok: false, message: "Could not generate estimate." };
   }
 
-  const estimate = generateEstimateFromSheet(job, workingSheet, job.estimates ?? []);
-  saveJob(project, {
-    ...job,
-    costing_sheet: workingSheet,
-    estimates: [...(job.estimates ?? []), estimate],
-    updated_at: nowIso(),
-  });
+  saveProjectJobs(project.id, nextJobs);
+  const primary = targetJobs[0]!;
+  const labels = targetJobs
+    .map((job) => job.job_number ?? job.style_number ?? job.name)
+    .filter(Boolean)
+    .join(", ");
 
   return {
     ok: true,
-    message: `Generated estimate ${estimate.document_number} on ${job.job_number ?? job.name}.`,
-    deepLink: projectDeepLink(project.id, job.id),
+    message: `Generated estimate ${estimate.document_number} covering ${labels || project.name}.`,
+    deepLink: projectDeepLink(project.id, primary.id),
+    projectId: project.id,
   };
-}
-
-function sortJobsForEstimate(jobs: ProjectJob[]): ProjectJob[] {
-  return [...jobs].sort((a, b) => {
-    const left = a.job_number?.trim() || a.style_number?.trim() || a.id;
-    const right = b.job_number?.trim() || b.style_number?.trim() || b.id;
-    return left.localeCompare(right, undefined, { numeric: true });
-  });
 }
 
 function appendExtraDocument(row: DocumentRow): void {

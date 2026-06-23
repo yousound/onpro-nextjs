@@ -136,6 +136,7 @@ import { emailBodyPreview, normalizeEmailBody } from "@/lib/email-body";
 import { importMailroomImagesToDocuments } from "@/lib/documents/import-mailroom-images";
 import { getDocuments } from "@/lib/mock/documents";
 import { loadProjectJobs } from "@/lib/project-wip-edits";
+import { projectHasClientEstimate } from "@/lib/project-estimate-merge";
 
 const CATEGORY_DOT: Record<NonNullable<EmailThread["category"]>, string> = {
   vendor_quote: "bg-violet-500",
@@ -1309,6 +1310,31 @@ export function MailroomView() {
     if (workflowStepNeedsProject(liveStep.kind) && missingProject) {
       setToast(missingProject);
       return;
+    }
+
+    if (liveStep.kind === "generate_estimate") {
+      const pendingJobs = workflow.steps.filter(
+        (s) => s.kind === "create_job" && s.status === "pending",
+      );
+      if (pendingJobs.length > 0) {
+        setToast("Create all jobs first — one estimate will cover the whole project.");
+        return;
+      }
+      const projectId = resolveWorkflowProjectId(workflow) ?? workflow.link_existing_project_id;
+      if (projectId != null) {
+        const project = resolveClientProjectList(getLiveCachedProjects()).find(
+          (p) => p.id === projectId,
+        );
+        if (project && projectHasClientEstimate(loadProjectJobs(project.id, project))) {
+          let next = updateMailroomWorkflow(selectedThread.id, (wf) =>
+            patchWorkflowStep(wf, liveStep.step_id, { status: "applied" }),
+          );
+          next = setSuggestionStatus(liveStep.suggestion_id, "applied");
+          setState(next);
+          setToast("Estimate already exists for this project.");
+          return;
+        }
+      }
     }
 
     if (

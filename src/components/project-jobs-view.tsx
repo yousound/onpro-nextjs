@@ -19,6 +19,7 @@ import { resolveClientProjectList } from "@/lib/mock/project-session";
 import {
   loadProjectJobs,
   readLegacyStoredProjectJobs,
+  resolveHydratedProjectJobs,
   saveProjectJobs,
 } from "@/lib/project-wip-edits";
 import {
@@ -170,12 +171,12 @@ export function ProjectJobsView({
           }
         }
 
-        const jobsFromServer =
-          apiJobs != null
-            ? apiJobs.length > 0
-              ? apiJobs
-              : (initialJobs?.length ? initialJobs : apiJobs)
-            : (initialJobs ?? []);
+        const jobsFromServer = resolveHydratedProjectJobs(
+          project.id,
+          mergedProject,
+          apiJobs,
+          initialJobs,
+        );
         const ordersFromServer = apiOrders ?? [];
         setJobs(jobsFromServer);
         setOrders(
@@ -203,15 +204,18 @@ export function ProjectJobsView({
       cancelled = true;
       window.removeEventListener("onpro-workspace-changed", onWorkspaceChanged);
     };
-  }, [project, project.id, initialJobs, currentUser]);
+  }, [project, project.id, initialJobs]);
 
   useEffect(() => {
     if (!hydrated) return;
-    function reloadJobs() {
+    function mergedProjectForReload(): Project {
       const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
       const patch = saved && typeof saved === "object" ? saved : {};
-      const mergedProject = { ...project, ...patch };
-      setJobs(loadProjectJobs(project.id, mergedProject));
+      return { ...project, ...patch };
+    }
+    function reloadJobs() {
+      const loaded = loadProjectJobs(project.id, mergedProjectForReload());
+      if (loaded.length > 0) setJobs(loaded);
     }
     function reloadOrders() {
       if (isClientLiveBackend()) {
@@ -220,15 +224,15 @@ export function ProjectJobsView({
         });
         return;
       }
-      const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
-      const patch = saved && typeof saved === "object" ? saved : {};
-      const mergedProject = { ...project, ...patch };
+      const mergedProject = mergedProjectForReload();
       setOrders(loadProjectOrders(project.id, mergedProject));
     }
     window.addEventListener("onpro-jobs-changed", reloadJobs);
+    window.addEventListener("onpro-live-cache-seeded", reloadJobs);
     window.addEventListener("onpro-orders-changed", reloadOrders);
     return () => {
       window.removeEventListener("onpro-jobs-changed", reloadJobs);
+      window.removeEventListener("onpro-live-cache-seeded", reloadJobs);
       window.removeEventListener("onpro-orders-changed", reloadOrders);
     };
   }, [project, project.id, hydrated]);

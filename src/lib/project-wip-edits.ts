@@ -66,6 +66,20 @@ export function loadProjectJobs(projectId: number, project?: Project): ProjectJo
   return readStoredProjectJobs(projectId, project);
 }
 
+/** Prefer non-empty server data; keep optimistic/cache jobs when API/SSR are still empty. */
+export function resolveHydratedProjectJobs(
+  projectId: number,
+  project: Project | undefined,
+  apiJobs: ProjectJob[] | null,
+  initialJobs?: ProjectJob[],
+): ProjectJob[] {
+  const cached = loadProjectJobs(projectId, project);
+  if (apiJobs != null && apiJobs.length > 0) return apiJobs;
+  if (cached.length > 0) return cached;
+  if (initialJobs != null && initialJobs.length > 0) return initialJobs;
+  return apiJobs ?? initialJobs ?? [];
+}
+
 export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
   const cleaned = withoutDemoSeedJobs(jobs);
   if (isClientLiveBackend()) {

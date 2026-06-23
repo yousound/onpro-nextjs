@@ -36,7 +36,7 @@ export function LiveDataHydrator({
     }
     if (contacts) mergeSeedLiveContacts(contacts);
     if (projects) seedLiveProjects(projects);
-    if (jobsProjectId != null && jobs) {
+    if (jobsProjectId != null && jobs && jobs.length > 0) {
       seedLiveJobsForProject(jobsProjectId, jobs);
     }
     if (jobsByProject) seedLiveJobsMap(jobsByProject);

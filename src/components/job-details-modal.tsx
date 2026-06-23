@@ -145,7 +145,7 @@ const SECTION_LABEL: Record<JobModalSection, string> = {
   overview: "Overview",
   product_details: "Job details",
   timeline: "Timeline",
-  brand: "Brand",
+  brand: "Brand & products",
   color_sizing: "Color & sizing",
   development: "Development",
   print_embroidery: "Print & embroidery",

@@ -345,7 +345,9 @@ export function FinancialDocumentFullscreen({
                     vendorQuoteId={mailroomSend.vendorQuoteId}
                     estimateId={mailroomSend.estimateId}
                     onSent={(result) => {
-                      onSave(draft);
+                      const saved = { ...draft, billToEmail: result.toEmail };
+                      setDraft(saved);
+                      onSave(saved);
                       mailroomSend.onSent(result);
                     }}
                   />

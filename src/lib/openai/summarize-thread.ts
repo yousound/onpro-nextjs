@@ -49,7 +49,7 @@ Schema:
 
 Rules:
 - Order workflow steps so dependencies run first (create_project before create_order before create_job before quotes/estimates).
-- Client RFQ with multiple styles (quote request FROM a client): use create_project then create_order then one create_job per style (up to 6 jobs), then team_note or generate_estimate. Do NOT start with add_vendor_quote.
+- Client RFQ with multiple styles (quote request FROM a client): use create_project then create_order then one create_job per style (up to 6 jobs), then team_note or exactly ONE generate_estimate for the whole project (never one generate_estimate per job). Do NOT start with add_vendor_quote.
 - add_vendor_quote only when email is FROM a vendor with pricing, or as a late outbound placeholder after jobs exist.
 - Never treat finishing notes like "101 Supplied" or "CD Supplied" as vendor company names.
 - Use flat payload fields: qty as number, colors as string, print_notes as string — never nested objects.

@@ -34,7 +34,7 @@ function findTeamContactByName(contacts: Contact[], name: string): Contact | und
   });
 }
 
-function findClientContactForProject(
+export function findClientContactForProject(
   contacts: Contact[],
   client: { id: number; name: string },
 ): Contact | undefined {

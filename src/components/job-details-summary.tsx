@@ -105,7 +105,7 @@ export function JobDetailsSummary({
       <div className="flex flex-wrap gap-2">
         <MetaChip label="Job type" value={jobTypeLabel(draft.job_type)} />
         <MetaChip label="Category" value={categoryDropdown || "—"} />
-        <MetaChip label="Brand / Blank" value={brandBlank} />
+        <MetaChip label="Product / blank" value={brandBlank} />
         <MetaChip
           label="Status"
           value={draft.status}

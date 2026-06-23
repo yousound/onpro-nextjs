@@ -54,7 +54,13 @@ function quantityLines(job: ProjectJob): string[] {
   return [];
 }
 
+import { finishingTasksToLines } from "@/lib/brand-products/finishing";
+
 function finishingLines(job: ProjectJob): string[] {
+  const structured = finishingTasksToLines(job.finishing_tasks ?? []);
+  if (structured.length > 0) {
+    return ["Finishing:", ...structured.map((x) => `- ${x}`)];
+  }
   const extras = (job.custom_fields ?? [])
     .map((f) => (f.key && f.value ? `${f.key}: ${f.value}` : f.value?.trim()))
     .filter(Boolean) as string[];

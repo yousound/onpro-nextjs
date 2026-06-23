@@ -20,6 +20,7 @@ import {
   generateEstimateFromSheet,
   costingLineFromVendorQuote,
   emptyCostingSheet,
+  mergeProjectJobCostingSheets,
   newCostingLine,
   newVendorQuote,
 } from "@/lib/costing-sheet";
@@ -32,7 +33,7 @@ import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { resolveClientCode } from "@/lib/reference/client-codes";
 import { sanitizeClientEmail } from "@/lib/client-email";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
-import { generatePoNumber } from "@/lib/po-number";
+import { generatePoNumber, projectPoNumber } from "@/lib/po-number";
 import { createPackingSlipDraft } from "@/lib/packing-slip";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 import {
@@ -494,18 +495,65 @@ function execGenerateEstimate(
 ): AgentApplyResult {
   const project = resolveProjectForSuggestion(suggestion, ctx);
   if (!project) return { ok: false, message: "No project found for estimate." };
-  const job = resolveJobForSuggestion(suggestion, ctx, project);
-  if (!job) return { ok: false, message: "Add a job with costing before generating an estimate." };
 
-  const sheet = job.costing_sheet ?? emptyCostingSheet();
-  let workingSheet = sheet;
-  if (sheet.lines.length === 0 && (job.vendor_quotes?.length ?? 0) > 0) {
-    workingSheet = {
-      ...sheet,
-      lines: (job.vendor_quotes ?? []).map((q) => costingLineFromVendorQuote(q)),
+  const allJobs = sortJobsForEstimate(loadProjectJobs(project.id, project));
+  const existingEstimate = allJobs
+    .flatMap((job) => job.estimates ?? [])
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
+  if (existingEstimate) {
+    const host =
+      allJobs.find((job) => job.estimates?.some((est) => est.id === existingEstimate.id)) ??
+      allJobs[0];
+    return {
+      ok: true,
+      message: `Estimate ${existingEstimate.document_number} already covers ${project.name}.`,
+      deepLink: host ? projectDeepLink(project.id, host.id) : projectDeepLink(project.id),
+      projectId: project.id,
     };
   }
-  if (workingSheet.lines.length === 0) {
+
+  if (allJobs.length > 1) {
+    const mergedSheet = mergeProjectJobCostingSheets(allJobs);
+    if (!mergedSheet || mergedSheet.lines.length === 0) {
+      return {
+        ok: false,
+        message: "Add vendor quotes or costing lines on at least one job before generating an estimate.",
+      };
+    }
+    const primary = allJobs[0]!;
+    const docBase =
+      projectPoNumber(project)?.trim() ||
+      primary.job_number?.trim() ||
+      String(project.id);
+    const estimate = generateEstimateFromSheet(
+      primary,
+      mergedSheet,
+      primary.estimates ?? [],
+      docBase,
+    );
+    saveJob(project, {
+      ...primary,
+      costing_sheet: mergedSheet,
+      estimates: [...(primary.estimates ?? []), estimate],
+      updated_at: nowIso(),
+    });
+    const labels = allJobs
+      .map((job) => job.job_number ?? job.style_number ?? job.name)
+      .filter(Boolean)
+      .join(", ");
+    return {
+      ok: true,
+      message: `Generated estimate ${estimate.document_number} covering ${labels || project.name}.`,
+      deepLink: projectDeepLink(project.id, primary.id),
+      projectId: project.id,
+    };
+  }
+
+  const job = resolveJobForSuggestion(suggestion, ctx, project) ?? allJobs[0];
+  if (!job) return { ok: false, message: "Add a job with costing before generating an estimate." };
+
+  const workingSheet = mergeProjectJobCostingSheets([job]);
+  if (!workingSheet || workingSheet.lines.length === 0) {
     return { ok: false, message: "Add vendor quotes or costing lines on the job first." };
   }
 
@@ -522,6 +570,14 @@ function execGenerateEstimate(
     message: `Generated estimate ${estimate.document_number} on ${job.job_number ?? job.name}.`,
     deepLink: projectDeepLink(project.id, job.id),
   };
+}
+
+function sortJobsForEstimate(jobs: ProjectJob[]): ProjectJob[] {
+  return [...jobs].sort((a, b) => {
+    const left = a.job_number?.trim() || a.style_number?.trim() || a.id;
+    const right = b.job_number?.trim() || b.style_number?.trim() || b.id;
+    return left.localeCompare(right, undefined, { numeric: true });
+  });
 }
 
 function appendExtraDocument(row: DocumentRow): void {

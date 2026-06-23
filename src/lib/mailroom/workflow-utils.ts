@@ -176,6 +176,16 @@ function flattenPayload(payload: Record<string, unknown>): Record<string, unknow
   return payloadWithFieldOrder(out, order);
 }
 
+/** Keep a single generate_estimate step when the model emits one per job. */
+function dedupeWorkflowSteps(steps: MailroomWorkflowStep[]): MailroomWorkflowStep[] {
+  const estimateIndexes = steps
+    .map((step, index) => (step.kind === "generate_estimate" ? index : -1))
+    .filter((index) => index >= 0);
+  if (estimateIndexes.length <= 1) return steps;
+  const keepIndex = estimateIndexes[estimateIndexes.length - 1]!;
+  return steps.filter((step, index) => step.kind !== "generate_estimate" || index === keepIndex);
+}
+
 export function buildWorkflowFromLlmResponse(
   threadId: string,
   parsed: Record<string, unknown>,
@@ -205,7 +215,7 @@ export function buildWorkflowFromLlmResponse(
         payload: s.payload,
       }));
 
-  const steps: MailroomWorkflowStep[] = rawSteps
+  const mappedSteps: MailroomWorkflowStep[] = rawSteps
     .filter((s) => s.kind && VALID_KINDS.includes(s.kind))
     .slice(0, 10)
     .map((s, i) => {
@@ -222,6 +232,8 @@ export function buildWorkflowFromLlmResponse(
         status: "pending" as const,
       };
     });
+
+  const steps = dedupeWorkflowSteps(mappedSteps);
 
   if (steps.length === 0) {
     return { workflow: null, suggestions: [] };

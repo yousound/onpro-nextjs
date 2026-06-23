@@ -10,6 +10,7 @@ import type {
   TrimLineTrack,
 } from "@/lib/types/project";
 import type { FileRef } from "@/lib/types/contact";
+import type { JobFinishingTask, SuppliedBy } from "@/lib/types/brand-products";
 
 export type JobType =
   | "print_production"
@@ -333,6 +334,14 @@ export type ProjectJob = {
   garment_style_number?: string;
   garment_color?: string;
   garment_size?: string;
+  /** Link to manufacturer blank in catalog. */
+  catalog_product_id?: string | null;
+  /** Link to saved workspace product (blank or decorated). */
+  workspace_product_id?: string | null;
+  /** Who supplies the garment blank for this job. */
+  blank_supplied_by?: SuppliedBy | null;
+  /** Structured finishing tasks (folding, bagging, custom sections, etc.). */
+  finishing_tasks?: JobFinishingTask[];
   estimate?: JobEstimateFields;
   /** Inbound vendor quotes per job — feed into the costing sheet. */
   vendor_quotes?: VendorQuote[];

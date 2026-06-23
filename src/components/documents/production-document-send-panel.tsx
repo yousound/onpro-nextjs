@@ -73,6 +73,12 @@ export function ProductionDocumentSendPanel({
   const [selectedDocIds, setSelectedDocIds] = useState<Set<number>>(new Set());
   const [includeQuoteDocument, setIncludeQuoteDocument] = useState(true);
 
+  const [recipientEmail, setRecipientEmail] = useState(() => toEmail.trim());
+
+  useEffect(() => {
+    setRecipientEmail(toEmail.trim());
+  }, [toEmail]);
+
   const jobDocs = useMemo(
     () => (isVendorQuote ? filterJobDocuments(allDocs, projectId, jobId) : []),
     [allDocs, projectId, jobId, isVendorQuote],
@@ -129,7 +135,7 @@ export function ProductionDocumentSendPanel({
   }, [isVendorQuote, job]);
 
   async function handleSend() {
-    const email = toEmail.trim();
+    const email = recipientEmail.trim();
     if (!email) {
       setError("Recipient email is required.");
       return;
@@ -171,10 +177,15 @@ export function ProductionDocumentSendPanel({
         <div className="space-y-4 p-5">
           <label className="block text-sm">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">To</span>
+            {toName ? (
+              <input className={`${fieldClass} mb-2`} readOnly value={toName} />
+            ) : null}
             <input
               className={fieldClass}
-              readOnly
-              value={toName ? `${toName} <${toEmail}>` : toEmail || "Add recipient email in Edit tab"}
+              type="email"
+              value={recipientEmail}
+              onChange={(e) => setRecipientEmail(e.target.value)}
+              placeholder="Client email address"
             />
           </label>
 
@@ -242,7 +253,7 @@ export function ProductionDocumentSendPanel({
 
           <button
             type="button"
-            disabled={sending || !toEmail.trim()}
+            disabled={sending || !recipientEmail.trim()}
             onClick={() => void handleSend()}
             className="w-full rounded-lg bg-accent py-2.5 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
           >

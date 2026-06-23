@@ -164,9 +164,14 @@ export function generateEstimateFromSheet(
   job: ProjectJob,
   sheet: CostingSheet,
   existingEstimates: Estimate[] = [],
+  documentNumberBase?: string,
 ): Estimate {
   const seq = String(existingEstimates.length + 1).padStart(2, "0");
-  const docBase = job.job_number?.trim() || job.style_number?.trim() || job.id;
+  const docBase =
+    documentNumberBase?.trim() ||
+    job.job_number?.trim() ||
+    job.style_number?.trim() ||
+    job.id;
   return {
     id: `est-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     job_id: job.id,
@@ -175,4 +180,50 @@ export function generateEstimateFromSheet(
     created_at: new Date().toISOString(),
     status: "draft",
   };
+}
+
+function workingCostingSheet(job: ProjectJob): CostingSheet {
+  const sheet = job.costing_sheet ?? emptyCostingSheet();
+  if (sheet.lines.length > 0) return sheet;
+  if ((job.vendor_quotes?.length ?? 0) === 0) return sheet;
+  return {
+    ...sheet,
+    lines: (job.vendor_quotes ?? []).map((q) => costingLineFromVendorQuote(q)),
+  };
+}
+
+/** Merge costing lines from multiple jobs into one client-facing sheet. */
+export function mergeProjectJobCostingSheets(jobs: ProjectJob[]): CostingSheet | null {
+  const working = jobs.map((job) => ({ job, sheet: workingCostingSheet(job) }));
+  const withLines = working.filter((entry) => entry.sheet.lines.length > 0);
+  if (withLines.length === 0) return null;
+
+  const [first, ...rest] = withLines;
+  const multiJob = withLines.length > 1;
+  const lines = withLines.flatMap(({ job, sheet }) =>
+    sheet.lines.map((line) =>
+      newCostingLine({
+        ...line,
+        description: multiJob
+          ? `${jobLabelForMerge(job)}: ${line.description}`.trim()
+          : line.description,
+      }),
+    ),
+  );
+
+  const notes = [first!.sheet.notes, ...rest.map((entry) => entry.sheet.notes)]
+    .map((n) => n?.trim())
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    ...first!.sheet,
+    lines,
+    estimated_qty: withLines.reduce((sum, entry) => sum + (entry.sheet.estimated_qty || 0), 0),
+    notes,
+  };
+}
+
+function jobLabelForMerge(job: ProjectJob): string {
+  return job.style_number?.trim() || job.name?.trim() || job.job_number?.trim() || job.id;
 }

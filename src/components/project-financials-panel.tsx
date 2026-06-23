@@ -21,6 +21,7 @@ import type { ProductionDocument } from "@/lib/documents/production-document-typ
 import { costingTotals } from "@/lib/costing-sheet";
 import { formatUsdDetailed } from "@/lib/ledger/format";
 import { loadContacts } from "@/lib/contacts-store";
+import { findClientContactForProject } from "@/lib/project-people";
 import {
   countPendingFinancialSeeds,
   DEFAULT_FINANCIAL_SEED_OPTIONS,
@@ -168,7 +169,7 @@ function formatShortDate(iso: string): string {
 
 function buildEstimateDocument(project: Project, job: ProjectJob, estimate?: Estimate): ProductionDocument {
   const contacts = loadContacts();
-  const clientContact = contacts.find((c) => String(c.id) === String(project.client.id));
+  const clientContact = findClientContactForProject(contacts, project.client);
   const clientName = project.client.name;
   if (estimate) {
     return buildClientEstimateDocument({ project, job, estimate, clientName, clientContact });
@@ -588,7 +589,7 @@ export function ProjectFinancialsPanel({
     const job = jobs[0];
     if (!job) return null;
     const contacts = loadContacts();
-    const clientContact = contacts.find((c) => String(c.id) === String(project.client.id));
+    const clientContact = findClientContactForProject(contacts, project.client);
     return buildJobPreviewEstimateDocument({
       project,
       job,

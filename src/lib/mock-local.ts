@@ -40,6 +40,8 @@ export const MOCK_LS = {
   messageDeletedIds: "onpro.mock.v1.messageDeletedIds",
   /** Bump when demo seed job ids / timelines change — ignores stale projectJobs in LS. */
   demoSeedVersion: "onpro.mock.v1.demoSeedVersion",
+  /** Manufacturer blanks + workspace products catalog. */
+  brandProducts: "onpro.mock.v1.brandProducts",
 } as const;
 
 /** Increment when regenerating demo projects/jobs so browsers drop stale WIP edits. */

@@ -72,7 +72,7 @@ function GripIcon() {
 const OPENS_IN_OPTIONS: { value: JobDetailsSection | "none"; label: string }[] = [
   { value: "none", label: "None" },
   { value: "product_details", label: "Job details" },
-  { value: "brand", label: "Brand" },
+  { value: "brand", label: "Brand & products" },
   { value: "color_sizing", label: "Color & sizing" },
   { value: "development", label: "Production specs" },
   { value: "print_embroidery", label: "Print / embroidery" },

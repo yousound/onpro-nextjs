@@ -22,11 +22,17 @@ export type JobType =
 
 export type JobDetailsSection =
   | "overview"
-  | "estimate"
+  | "product_details"
+  | "brand"
+  | "color_sizing"
   | "development"
+  | "print_embroidery"
+  | "cut_sew_samples"
   | "costing"
   | "approvals"
-  | "bulk";
+  | "bulk"
+  | "vendor_quotes"
+  | "outputs";
 
 export type JobLabelLine = {
   id: string;
@@ -339,6 +345,8 @@ export type ProjectJob = {
   tech_pack?: JobTechPackFields;
   fulfillment?: JobFulfillmentFields;
   bulk_production_tracks?: BulkProductionTrack[];
+  /** Optional line-item modules inside Job details (color & sizing, production specs, etc.). */
+  detail_modules?: import("@/lib/job-detail-modules").JobDetailModule[];
   timeline: WipStep[];
 };
 
@@ -353,7 +361,7 @@ export function wipStepToSection(stepId: string, opensIn?: JobDetailsSection): J
   switch (stepId) {
     case "vendor_inquiries":
     case "mock_up":
-      return "estimate";
+      return "vendor_quotes";
     case "cost_sheets":
     case "costing_summary":
     case "deposit_payment":
@@ -369,7 +377,7 @@ export function wipStepToSection(stepId: string, opensIn?: JobDetailsSection): J
     case "sample_1st":
     case "sample_2nd":
     case "sample_pp":
-      return "development";
+      return "cut_sew_samples";
     case "trimming":
     case "packing":
     case "arrange_delivery":

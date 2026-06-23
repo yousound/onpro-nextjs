@@ -11,6 +11,7 @@ export function createNewOrderSeed(
   operatorCode: string,
   allProjects: { po_number?: string | null; project_number?: string | null }[] = [],
   jobPos: string[] = [],
+  workspaceOrders?: ProjectOrder[],
 ): ProjectOrder {
   const now = new Date().toISOString();
   const clientCode = resolveClientCode(project.client.name);
@@ -43,7 +44,10 @@ export function createNewOrderSeed(
   return {
     id: `order-${project.id}-${Date.now()}`,
     project_id: project.id,
-    order_number: generateOrderNumber(operatorCode, existingOrders),
+    order_number: generateOrderNumber(
+      operatorCode,
+      workspaceOrders && workspaceOrders.length > 0 ? workspaceOrders : existingOrders,
+    ),
     due_date: project.due_date ?? null,
     po_number: po,
     client_po_number: clientPo,

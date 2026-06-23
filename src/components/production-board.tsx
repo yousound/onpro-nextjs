@@ -258,6 +258,10 @@ export function ProductionBoard({
           onClose={closeJobModal}
           onSave={handleSaveJob}
           onDelete={handleDeleteJob}
+          onSwitchJob={(jobId) => {
+            const j = loadProjectJobs(modalJob.project.id, modalJob.project).find((x) => x.id === jobId);
+            if (j) setModalJob({ project: modalJob.project, job: j });
+          }}
         />
       ) : null}
     </div>

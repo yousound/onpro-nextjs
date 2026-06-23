@@ -182,6 +182,7 @@ export function EstimatesList({
             category: "client",
             projectId: project.id,
             jobId: job.id,
+            estimateId: activeEstimateId,
             onSent: (result) => handleEstimateSent(activeEstimateId, result),
           }}
         />

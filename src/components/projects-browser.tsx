@@ -37,36 +37,33 @@ export function ProjectsBrowser({ projects }: { projects: Project[] }) {
   const [dense, setDense] = useState(false);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* Status filters under light Projects header */}
-      <div className="shrink-0 border-b border-border-light bg-white px-6 py-2.5">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap gap-2">
-          {STATUSES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatus(s)}
-              className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-wide ${
-                status === s
-                  ? "bg-accent text-white shadow-sm"
-                  : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
-              }`}
-            >
-              {s === "ALL" ? "All" : s}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-body">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="w-full max-w-none px-6 pb-10 pt-2">
+          <div className="mx-auto max-w-[1600px] space-y-5">
+            <div className="flex flex-wrap gap-2">
+              {STATUSES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatus(s)}
+                  className={`rounded-full px-4 py-1.5 text-xs font-semibold capitalize tracking-wide transition ${
+                    status === s
+                      ? "bg-accent text-white shadow-sm"
+                      : "bg-white text-slate-600 shadow-sm ring-1 ring-slate-200/90 hover:text-slate-900"
+                  }`}
+                >
+                  {s === "ALL" ? "All" : s}
+                </button>
+              ))}
+            </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-white">
-        <div className="w-full max-w-none px-6 pb-8 pt-4">
-          <div className="mx-auto max-w-[1600px]">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search projects…"
-                className="h-11 flex-1 rounded-xl border border-border-light bg-surface-card px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
+                className="h-11 flex-1 rounded-xl border border-slate-200/90 bg-white px-4 text-sm text-text-primary shadow-sm outline-none ring-accent/30 focus:ring-2"
               />
               <div className="flex flex-wrap items-center gap-2">
                 <select
@@ -74,7 +71,7 @@ export function ProjectsBrowser({ projects }: { projects: Project[] }) {
                   onChange={(e) =>
                     setClientId(e.target.value === "" ? "ALL" : Number(e.target.value))
                   }
-                  className="h-11 rounded-xl border border-border-light bg-surface-card px-3 text-sm text-text-primary"
+                  className="h-11 rounded-xl border border-slate-200/90 bg-white px-3 text-sm text-text-primary shadow-sm"
                   aria-label="Filter by client"
                 >
                   <option value="">All clients</option>
@@ -87,18 +84,18 @@ export function ProjectsBrowser({ projects }: { projects: Project[] }) {
                 <button
                   type="button"
                   onClick={() => setDense((d) => !d)}
-                  className="h-11 rounded-xl border border-border-light bg-surface-card px-4 text-sm font-medium text-text-primary hover:bg-surface-body"
+                  className="h-11 rounded-xl border border-slate-200/90 bg-white px-4 text-sm font-medium text-text-primary shadow-sm hover:bg-slate-50"
                 >
                   {dense ? "Card view" : "More filters"}
                 </button>
               </div>
             </div>
 
-            <div className="mt-6">
+            <div>
               {dense ? (
-                <div className="overflow-x-auto rounded-xl border border-border-light bg-surface-card">
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/90 bg-white shadow-sm">
                   <table className="min-w-full text-left text-sm">
-                    <thead className="border-b border-border-light bg-surface-body text-xs uppercase text-text-secondary">
+                    <thead className="border-b border-slate-100 bg-slate-50/80 text-xs uppercase text-text-secondary">
                       <tr>
                         <th className="px-4 py-3">Project</th>
                         <th className="px-4 py-3">Client</th>
@@ -109,7 +106,7 @@ export function ProjectsBrowser({ projects }: { projects: Project[] }) {
                     </thead>
                     <tbody>
                       {filtered.map((p) => (
-                        <tr key={p.id} className="border-b border-border-light last:border-0">
+                        <tr key={p.id} className="border-b border-slate-100 last:border-0">
                           <td className="px-4 py-3 font-medium text-text-primary">
                             <Link href={`/projects/${p.id}`} className="hover:text-accent">
                               {p.name}

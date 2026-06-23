@@ -1,3 +1,5 @@
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { seedLiveDocumentsCache, readLiveDocumentsCache } from "@/lib/data/persist-documents";
 import { deleteDocumentBlob } from "@/lib/documents/document-blob-store";
 import {
   readExtraDocumentsSync,
@@ -7,6 +9,7 @@ import { normalizeDocumentRow } from "@/lib/documents/document-preview";
 import { readDeletedProjectIds } from "@/lib/deleted-projects";
 import { MOCK_LS, writeMockLs } from "@/lib/mock-local";
 import { dispatchDocumentsChanged } from "@/lib/onpro-events";
+import { deleteDocumentsViaApi, fetchAllDocumentsViaApi } from "@/lib/supabase/upload-project-document";
 import type { DocumentRow } from "@/lib/types/documents";
 
 export type DeleteDocumentsResult = {
@@ -41,6 +44,20 @@ export async function deleteExtraDocumentsWhere(
   const toRemove = raw.filter(predicate);
   if (toRemove.length === 0) return { removed: 0, quotaExceeded: false };
 
+  if (isClientLiveBackend()) {
+    try {
+      const ids = toRemove.map((r) => r.id).filter((id) => id > 0);
+      await deleteDocumentsViaApi(ids);
+      const fresh = await fetchAllDocumentsViaApi();
+      seedLiveDocumentsCache(fresh);
+      dispatchDocumentsChanged();
+      return { removed: toRemove.length, quotaExceeded: false };
+    } catch (e) {
+      console.error("[documents] live delete failed", e);
+      return { removed: 0, quotaExceeded: false };
+    }
+  }
+
   const keep = raw.filter((row) => !predicate(row));
   const keptBlobRefs = new Set(
     keep.map((row) => row.blob_ref).filter((ref): ref is string => Boolean(ref)),
@@ -64,5 +81,21 @@ export async function deleteExtraDocumentsByIds(ids: number[]): Promise<DeleteDo
 }
 
 export async function deleteExtraDocumentsForProject(projectId: number): Promise<DeleteDocumentsResult> {
+  if (isClientLiveBackend()) {
+    const ids = readLiveDocumentsCache()
+      .filter((r) => r.project_id === projectId)
+      .map((r) => r.id);
+    if (ids.length === 0) return { removed: 0, quotaExceeded: false };
+    try {
+      await deleteDocumentsViaApi(ids);
+      const fresh = await fetchAllDocumentsViaApi();
+      seedLiveDocumentsCache(fresh);
+      dispatchDocumentsChanged();
+      return { removed: ids.length, quotaExceeded: false };
+    } catch (e) {
+      console.error("[documents] live project delete failed", e);
+      return { removed: 0, quotaExceeded: false };
+    }
+  }
   return deleteExtraDocumentsWhere((row) => row.project_id === projectId);
 }

@@ -8,6 +8,7 @@ import type {
   JobDetailsFocus,
   ProjectJob,
   ProjectOrder,
+  VendorQuote,
 } from "@/lib/types/wip";
 import { dateInputToIso, formatShortDate, isoToDateInput } from "@/lib/format";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
@@ -42,6 +43,14 @@ import { normalizeJob } from "@/lib/job-defaults";
 import { createNewJobSeed } from "@/lib/project-job-create";
 import type { ProjectModuleId } from "@/lib/project-modules";
 import { parseProjectModuleTab, PROJECT_MODULE_TABS } from "@/lib/project-modules";
+import type { FinancialDocMode } from "@/components/financial-document-fullscreen";
+import {
+  applyFinancialsDeepLink,
+  clearFinancialsDeepLink,
+  financialDocIdForQuote,
+  parseFinancialsDeepLink,
+  type FinancialsDeepLink,
+} from "@/lib/project-financials-nav";
 import { ContentHeader } from "@/components/content-header";
 import {
   InternalDevelopmentPanel,
@@ -52,6 +61,8 @@ import { ProjectDocumentsPanel } from "@/components/project-documents-panel";
 import { JobDetailsModal } from "@/components/job-details-modal";
 import { EditProjectModal } from "@/components/edit-project-modal";
 import { RequestVendorQuotesModal } from "@/components/request-vendor-quotes-modal";
+import { CombinedVendorQuoteSendPanel } from "@/components/documents/combined-vendor-quote-send-panel";
+import { reassignMailroomDocumentJobs } from "@/lib/documents/import-mailroom-images";
 import { parseInspectJob } from "@/lib/job-inspect";
 import { commitDeleteProject } from "@/lib/data/delete-project";
 import { countExtraDocumentsForProject } from "@/lib/documents/delete-documents";
@@ -84,6 +95,7 @@ export function ProjectJobsView({
   const [hydrated, setHydrated] = useState(false);
   const [editModal, setEditModal] = useState<EditModal>(null);
   const [activeModule, setActiveModule] = useState<ProjectModuleId>("details");
+  const [financialDeepLink, setFinancialDeepLink] = useState<FinancialsDeepLink | null>(null);
 
   const [draftProject, setDraftProject] = useState({
     name: "",
@@ -98,11 +110,19 @@ export function ProjectJobsView({
   const [deletingProject, setDeletingProject] = useState(false);
   const [deletingJob, setDeletingJob] = useState(false);
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [combinedQuoteSend, setCombinedQuoteSend] = useState<{
+    vendorName: string;
+    jobIds: string[];
+    quotesByJobId: Map<string, VendorQuote>;
+  } | null>(null);
   const [projectNumberMessage, setProjectNumberMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const mod = searchParams.get("module");
     setActiveModule(parseProjectModuleTab(mod));
+    if (parseProjectModuleTab(mod) === "financials") {
+      setFinancialDeepLink(parseFinancialsDeepLink(searchParams));
+    }
   }, [searchParams]);
 
   useEffect(() => {
@@ -129,6 +149,13 @@ export function ProjectJobsView({
     },
     [pathname, router, searchParams],
   );
+
+  const consumeFinancialDeepLink = useCallback(() => {
+    setFinancialDeepLink(null);
+    const params = clearFinancialsDeepLink(new URLSearchParams(searchParams.toString()));
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [pathname, router, searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -285,6 +312,7 @@ export function ProjectJobsView({
       setJobs((prev) => {
         const next = updater(prev);
         saveProjectJobs(project.id, next);
+        void reassignMailroomDocumentJobs({ projectId: project.id, jobs: next });
         return next;
       });
     },
@@ -369,6 +397,30 @@ export function ProjectJobsView({
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     }
+  }
+
+  function handleOpenJobFinancials(
+    job: ProjectJob,
+    quoteId: string,
+    mode: FinancialDocMode = "edit",
+  ) {
+    persistJobs((prev) => {
+      const normalized = normalizeJob(job, merged);
+      const exists = prev.some((j) => j.id === normalized.id);
+      if (exists) return prev.map((j) => (j.id === normalized.id ? normalized : j));
+      return [...prev, normalized];
+    });
+    const link: FinancialsDeepLink = {
+      docId: financialDocIdForQuote(quoteId),
+      mode,
+    };
+    setFinancialDeepLink(link);
+    const params = applyFinancialsDeepLink(new URLSearchParams(searchParams.toString()), link);
+    setActiveModule("financials");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    closeModal();
+    dispatchAppToast("Opened in Financials — preview or send from the workspace");
   }
 
   function handleSaveJob(saved: ProjectJob) {
@@ -490,7 +542,7 @@ export function ProjectJobsView({
 
   if (!hydrated) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-body">
         <ContentHeader
           breadcrumbs={
             <nav className="flex items-center gap-2 text-sm text-text-secondary" aria-label="Breadcrumb">
@@ -531,7 +583,7 @@ export function ProjectJobsView({
   );
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-body">
       <ContentHeader
         breadcrumbs={
           <nav className="flex items-center gap-2 text-sm text-text-secondary" aria-label="Breadcrumb">
@@ -544,9 +596,9 @@ export function ProjectJobsView({
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="mx-auto w-full max-w-[1600px] px-4 pb-8 sm:px-6">
-        <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 pt-4 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-surface-body">
+        <div className="mx-auto w-full max-w-[1600px] px-4 pb-10 sm:px-6">
+        <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 pb-2 pt-6">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-text-primary md:text-3xl">{merged.name}</h1>
             {projectPoNumber(merged) ? (
@@ -583,11 +635,11 @@ export function ProjectJobsView({
         </header>
 
         <div
-          className="scrollbar-light-gray -mx-1 shrink-0 overflow-x-auto pb-2"
+          className="scrollbar-light-gray -mx-1 shrink-0 overflow-x-auto border-b border-slate-200/80"
           role="tablist"
           aria-label="Project modules"
         >
-          <div className="flex min-w-max gap-1 px-1">
+          <div className="-mb-px flex min-w-max gap-0 px-1">
             {PROJECT_MODULE_TABS.map((t) => {
               const on = activeModule === t.id;
               return (
@@ -597,10 +649,10 @@ export function ProjectJobsView({
                   role="tab"
                   aria-selected={on}
                   onClick={() => navigateToModule(t.id)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition ${
+                  className={`shrink-0 border-b-2 px-4 py-3 text-sm font-semibold whitespace-nowrap transition ${
                     on
-                      ? "bg-accent text-white shadow-sm"
-                      : "bg-surface-card text-text-secondary ring-1 ring-border-light hover:text-text-primary"
+                      ? "border-accent text-text-primary"
+                      : "border-transparent text-text-secondary hover:border-slate-200 hover:text-text-primary"
                   }`}
                 >
                   {t.label}
@@ -610,10 +662,10 @@ export function ProjectJobsView({
           </div>
         </div>
 
-        <div>
+        <div className="pt-8">
           {activeModule === "details" ? (
             <div className="space-y-5">
-              <ProjectDetailsClientCard project={merged} />
+              <ProjectDetailsClientCard project={merged} onPatchProject={persistProject} />
               {ordersSection}
             </div>
           ) : null}
@@ -625,12 +677,18 @@ export function ProjectJobsView({
           ) : null}
 
           {activeModule === "documents" ? (
-            <div className="-mx-4 min-h-[24rem] sm:-mx-6">
+            <div className="min-h-[24rem]">
               <ProjectDocumentsPanel project={merged} />
             </div>
           ) : null}
 
-          <ProjectModuleRouter moduleId={activeModule} project={merged} onPatchProject={persistProject} />
+          <ProjectModuleRouter
+            moduleId={activeModule}
+            project={merged}
+            onPatchProject={persistProject}
+            financialDeepLink={financialDeepLink}
+            onFinancialDeepLinkConsumed={consumeFinancialDeepLink}
+          />
         </div>
         </div>
       </div>
@@ -657,25 +715,82 @@ export function ProjectJobsView({
           jobs={jobs}
           vendors={vendors}
           onClose={() => setQuoteModalOpen(false)}
-          onSend={(updates) => {
+          onSend={(updates, options) => {
+            const now = new Date().toISOString();
+            const nextJobs = jobs.map((j) => {
+              const added = updates.get(j.id);
+              if (!added?.length) return j;
+              const quoteRequested = j.estimate?.quote_requested_date ?? now;
+              return {
+                ...j,
+                vendor_quotes: [...(j.vendor_quotes ?? []), ...added],
+                estimate: j.estimate
+                  ? { ...j.estimate, quote_requested_date: quoteRequested }
+                  : j.estimate,
+                updated_at: now,
+              };
+            });
+            persistJobs(() => nextJobs);
+            setQuoteModalOpen(false);
+
+            if (options?.combinedSend) {
+              const vendorName = [...updates.values()][0]?.[0]?.vendor;
+              if (vendorName) {
+                const quotesByJobId = new Map<string, VendorQuote>();
+                const jobIds: string[] = [];
+                for (const [jobId, quotes] of updates) {
+                  const q = quotes.find((row) => row.vendor === vendorName);
+                  if (q) {
+                    quotesByJobId.set(jobId, q);
+                    jobIds.push(jobId);
+                  }
+                }
+                setCombinedQuoteSend({ vendorName, jobIds, quotesByJobId });
+                return;
+              }
+            }
+
+            dispatchAppToast("Vendor quote requests created — open Financials to preview and send");
+          }}
+        />
+      ) : null}
+
+      {combinedQuoteSend ? (
+        <CombinedVendorQuoteSendPanel
+          project={merged}
+          jobs={jobs.filter((j) => combinedQuoteSend.jobIds.includes(j.id))}
+          vendorName={combinedQuoteSend.vendorName}
+          quotesByJobId={combinedQuoteSend.quotesByJobId}
+          onClose={() => setCombinedQuoteSend(null)}
+          onSent={(result) => {
             const now = new Date().toISOString();
             persistJobs((prev) =>
-              prev.map((j) => {
-                const added = updates.get(j.id);
-                if (!added?.length) return j;
-                const quoteRequested = j.estimate?.quote_requested_date ?? now;
+              prev.map((job) => {
+                const quote = combinedQuoteSend.quotesByJobId.get(job.id);
+                if (!quote) return job;
                 return {
-                  ...j,
-                  vendor_quotes: [...(j.vendor_quotes ?? []), ...added],
-                  estimate: j.estimate
-                    ? { ...j.estimate, quote_requested_date: quoteRequested }
-                    : j.estimate,
-                  updated_at: now,
+                  ...job,
+                  vendor_quotes: (job.vendor_quotes ?? []).map((q) =>
+                    q.id === quote.id
+                      ? {
+                          ...q,
+                          status: "sent" as const,
+                          sent_at: now,
+                          sent_to_email: result.toEmail,
+                          mailroom_thread_id: result.threadId,
+                          outbound_message_id: result.messageId,
+                        }
+                      : q,
+                  ),
                 };
               }),
             );
-            setQuoteModalOpen(false);
-            dispatchAppToast("Vendor quote requests sent — open each job to Preview / Send PO");
+            setCombinedQuoteSend(null);
+            dispatchAppToast(
+              isClientLiveBackend()
+                ? "Combined vendor quote sent via Gmail"
+                : "Combined vendor quote sent via Mailroom",
+            );
           }}
         />
       ) : null}
@@ -695,6 +810,8 @@ export function ProjectJobsView({
           onSave={handleSaveJob}
           onDelete={handleDeleteJob}
           deleting={deletingJob}
+          onSwitchJob={(jobId) => setEditModal({ kind: "job", jobId })}
+          onOpenFinancials={handleOpenJobFinancials}
         />
       ) : null}
     </div>

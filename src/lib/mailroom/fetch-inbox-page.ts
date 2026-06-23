@@ -1,9 +1,11 @@
 import {
   enrichThreadsWithGoogleProfile,
   fetchGmailInboxThreadPage,
+  fetchGmailSentThreadPage,
   fetchGoogleUserProfile,
   GMAIL_INBOX_FIRST_PAGE_SIZE,
   GMAIL_INBOX_PAGE_SIZE,
+  GMAIL_SENT_SYNC_SIZE,
 } from "@/lib/gmail/fetch-threads";
 import type { GmailConnectionRow } from "@/lib/supabase/gmail-connection";
 import { getValidGmailAccessToken } from "@/lib/supabase/gmail-connection";
@@ -88,7 +90,7 @@ async function fetchInboxPageFromGmail(
   },
 ): Promise<MailroomInboxPageResult> {
   const { accessToken } = await getValidGmailAccessToken(connection);
-  const [page, profile] = await Promise.all([
+  const [page, sentThreads, profile] = await Promise.all([
     fetchGmailInboxThreadPage(accessToken, {
       pageToken: opts.pageToken,
       maxResults: opts.maxResults,
@@ -96,12 +98,16 @@ async function fetchInboxPageFromGmail(
       format: "metadata",
       resolveInlineImages: false,
     }),
+    !opts.pageToken && !opts.q?.trim()
+      ? fetchGmailSentThreadPage(accessToken, { maxResults: GMAIL_SENT_SYNC_SIZE })
+      : Promise.resolve([]),
     fetchGoogleUserProfile(accessToken).catch(() => null),
   ]);
 
+  const mergedThreads = mergeInboxThreadsPreferNewer(page.threads, sentThreads);
   const enriched = profile
-    ? enrichThreadsWithGoogleProfile(page.threads, profile)
-    : page.threads;
+    ? enrichThreadsWithGoogleProfile(mergedThreads, profile)
+    : mergedThreads;
 
   if (!opts.q?.trim()) {
     if (enriched.length > 0) {

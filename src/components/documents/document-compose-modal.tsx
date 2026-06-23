@@ -102,7 +102,7 @@ export function DocumentComposeModal({
     setSending(true);
     setError(null);
     try {
-      const result = sendProductionDocumentViaMailroom({
+      const result = await sendProductionDocumentViaMailroom({
         document,
         toName,
         toEmail: email,

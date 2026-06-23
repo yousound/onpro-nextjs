@@ -32,6 +32,27 @@ export type EmailInlineImage = {
   filename?: string;
 };
 
+/** Non-image file from Gmail MIME (PDF, AI, etc.). */
+export type EmailFilePart = {
+  id: string;
+  mimeType: string;
+  src: string;
+  filename?: string;
+  size_bytes?: number;
+};
+
+/** Outbound file attachment with blob in IndexedDB or inline data. */
+export type EmailFileAttachment = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size_bytes?: number;
+  blob_ref?: string;
+  /** Workspace document row when sourced from project library. */
+  document_id?: number;
+  label?: string;
+};
+
 export type EmailMessage = {
   id: string;
   from: { name: string; email: string };
@@ -44,8 +65,14 @@ export type EmailMessage = {
   subject?: string;
   /** Inline images from Gmail MIME parts (Live inbox). */
   inlineImages?: EmailInlineImage[];
+  /** File attachments from Gmail (PDF, tech pack, art). */
+  emailFiles?: EmailFilePart[];
   /** Mock attachments — generated items referenced from this message. */
   attachments?: EmailAttachment[];
+  /** Outbound file attachments (quote PDF, mockups, tech packs). */
+  fileAttachments?: EmailFileAttachment[];
+  /** HTML body variant for rich outbound vendor RFQs. */
+  htmlBody?: string;
 };
 
 export type EmailThreadStatus = "unread" | "read" | "archived";

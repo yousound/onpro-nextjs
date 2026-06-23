@@ -1,0 +1,221 @@
+.production-doc-preview {
+  display: flex;
+  flex-direction: column;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: #3e3e3e;
+  font-size: 9pt;
+  line-height: 1.35;
+  padding: 0.35in 0.45in;
+  background: white;
+  width: 100%;
+  min-height: 9.9in;
+}
+
+.doc-preview-top {
+  margin-bottom: 16px;
+}
+
+.doc-preview-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.doc-preview-logo {
+  height: 52px;
+  width: auto;
+  object-fit: contain;
+}
+
+.doc-preview-issuer {
+  margin: 0;
+  font-size: 13pt;
+  font-weight: 700;
+}
+
+.doc-preview-heading {
+  margin: 2px 0 0;
+  font-size: 20pt;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #1a1a1a;
+}
+
+.doc-preview-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.doc-preview-bill-to h2,
+.doc-preview-notes h3 {
+  margin: 0 0 8px;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666;
+}
+
+.doc-preview-name {
+  font-size: 10pt;
+  margin-bottom: 3px;
+}
+
+.doc-meta-field {
+  display: grid;
+  grid-template-columns: 1.15in 1fr;
+  gap: 8px;
+  margin-bottom: 4px;
+  align-items: baseline;
+}
+
+.doc-meta-label {
+  color: #666;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.doc-preview-summary-box {
+  border: 1px solid #d4d4d4;
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: #fafafa;
+}
+
+.doc-preview-summary-title {
+  font-size: 10pt;
+  margin-bottom: 6px;
+}
+
+.doc-preview-summary-meta p {
+  margin: 0 0 4px;
+  font-size: 8.5pt;
+}
+
+.doc-preview-lines {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 6px;
+}
+
+.doc-preview-lines th,
+.doc-preview-lines td {
+  border: 1px solid #d4d4d4;
+  padding: 7px 8px;
+  vertical-align: top;
+}
+
+.doc-preview-lines th {
+  background: #f3f3f3;
+  font-size: 7.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #555;
+}
+
+.doc-preview-lines td.desc {
+  width: 55%;
+}
+
+.doc-preview-lines td.num,
+.doc-preview-lines th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.doc-preview-lines td.amount {
+  font-weight: 600;
+}
+
+.doc-preview-tax-note {
+  margin: 0 0 10px;
+  font-size: 7.5pt;
+  color: #777;
+}
+
+.doc-preview-totals-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.doc-preview-totals {
+  border-collapse: collapse;
+  min-width: 2.4in;
+}
+
+.doc-preview-totals td {
+  padding: 4px 0 4px 16px;
+  border: none;
+  font-size: 9pt;
+}
+
+.doc-preview-totals td:first-child {
+  padding-left: 0;
+  color: #555;
+}
+
+.doc-preview-totals tr.emph td {
+  font-weight: 700;
+  font-size: 10pt;
+}
+
+.doc-preview-totals tr.balance td {
+  font-size: 11pt;
+}
+
+.doc-preview-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid #e8e8e8;
+}
+
+.doc-preview-notes {
+  margin-bottom: 10px;
+}
+
+.doc-preview-notes.terms {
+  color: #555;
+}
+
+.doc-preview-issuer-footer {
+  margin-top: 12px;
+  font-size: 8pt;
+  color: #666;
+}
+
+.doc-preview-issuer-footer p {
+  margin: 0 0 2px;
+}
+
+.doc-editable {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  outline: none;
+}
+
+.doc-editable::placeholder {
+  color: #cbd5e1;
+}
+
+.doc-editable:hover,
+.doc-editable:focus {
+  background: rgba(124, 58, 237, 0.06);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.25);
+}
+
+.doc-editable.inline {
+  display: inline;
+  width: auto;
+  min-width: 4rem;
+}

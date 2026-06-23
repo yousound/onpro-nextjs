@@ -1,8 +1,9 @@
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob, ProjectOrder } from "@/lib/types/wip";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
-import { getLiveCachedOrders, seedLiveOrdersForProject } from "@/lib/data/live-cache";
+import { getLiveCachedOrders, getLiveCachedProjects, seedLiveOrdersForProject } from "@/lib/data/live-cache";
 import { readMockLs, writeMockLs, MOCK_LS } from "@/lib/mock-local";
+import { readSessionProjects } from "@/lib/mock/project-session";
 import { createNewOrderSeed } from "@/lib/project-order-create";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 
@@ -58,6 +59,35 @@ export function backfillOrphanJobOrderIds(projectId: number, orders: ProjectOrde
   return true;
 }
 
+/** All orders in the active workspace — used for operator-wide order number allocation. */
+export function loadWorkspaceOrders(): ProjectOrder[] {
+  if (isClientLiveBackend()) {
+    const projects = getLiveCachedProjects();
+    if (projects.length === 0) return [];
+    return loadAllOrdersAcrossProjects(
+      projects.map((p) => p.id),
+      new Map(projects.map((p) => [p.id, p])),
+      "",
+    );
+  }
+  const ids = new Set<number>();
+  for (const p of readSessionProjects()) ids.add(p.id);
+  if (typeof window !== "undefined") {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith("onpro.mock.v1.projectOrders.")) continue;
+        const id = Number(key.replace("onpro.mock.v1.projectOrders.", ""));
+        if (Number.isFinite(id) && id > 0) ids.add(id);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  const projects = readSessionProjects();
+  return loadAllOrdersAcrossProjects([...ids], new Map(projects.map((p) => [p.id, p])), "");
+}
+
 /** Create the first order when a job is added or the user clicks + New order. */
 export function createFirstProjectOrder(
   projectId: number,
@@ -67,7 +97,15 @@ export function createFirstProjectOrder(
   allProjects: { po_number?: string | null; project_number?: string | null }[] = [],
   jobPos: string[] = [],
 ): ProjectOrder {
-  const order = createNewOrderSeed(project, existingOrders, operatorCode, allProjects, jobPos);
+  const workspaceOrders = loadWorkspaceOrders();
+  const order = createNewOrderSeed(
+    project,
+    existingOrders,
+    operatorCode,
+    allProjects,
+    jobPos,
+    workspaceOrders,
+  );
   const next = [...existingOrders, order];
   saveProjectOrders(projectId, next);
   backfillOrphanJobOrderIds(projectId, next);

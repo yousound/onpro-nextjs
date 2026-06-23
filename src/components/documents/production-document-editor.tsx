@@ -93,12 +93,15 @@ export function ProductionDocumentEditor({
   onPrint,
   onSend,
   hideToolbar,
+  hidePreviewSection,
 }: {
   initialDraft: ProductionDocument;
   onDraftChange?: (draft: ProductionDocument) => void;
   onPrint?: (draft: ProductionDocument) => void;
   onSend?: (draft: ProductionDocument) => void;
   hideToolbar?: boolean;
+  /** Hide embedded PDF iframe (fullscreen preview tab renders it separately). */
+  hidePreviewSection?: boolean;
 }) {
   const [draft, setDraft] = useState(initialDraft);
 
@@ -374,6 +377,7 @@ export function ProductionDocumentEditor({
         </Section>
       </div>
 
+      {hidePreviewSection ? null : (
       <Section title="Export preview">
         <p className="mb-3 text-sm text-text-secondary">
           Live preview with Connect Dots branding. Print / Export PDF opens the print dialog — save as
@@ -385,6 +389,7 @@ export function ProductionDocumentEditor({
           className="h-[min(1100px,80vh)] w-full rounded-lg border border-border-light bg-slate-100"
         />
       </Section>
+      )}
     </div>
   );
 }

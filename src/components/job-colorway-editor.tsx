@@ -97,11 +97,9 @@ export function JobColorwayEditor({ rows, onChange }: Props) {
         const showCustomInput = selectValue === CUSTOM_COLOR_VALUE;
 
         return (
-          <div key={row.id} className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
+          <div key={row.id} className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                Colorway {idx + 1}
-              </p>
+              <p className="text-sm font-semibold text-slate-900">Colorway {idx + 1}</p>
               {rows.length > 1 ? (
                 <button
                   type="button"

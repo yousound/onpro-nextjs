@@ -22,10 +22,10 @@ export function ProjectModalOverlay({
 }: {
   titleId: string;
   onClose: () => void;
-  aside: ReactNode;
+  aside?: ReactNode;
   children: ReactNode;
   overlayClassName?: string;
-  size?: "default" | "wide" | "wide-tall";
+  size?: "default" | "wide" | "wide-tall" | "workspace";
 }) {
   const [mounted, setMounted] = useState(false);
 
@@ -34,8 +34,13 @@ export function ProjectModalOverlay({
   }, []);
 
   const maxHeightClass =
-    size === "wide-tall" ? "max-h-[92vh]" : "max-h-[min(640px,92vh)]";
-  const widthClass = size === "default" ? "max-w-4xl" : "max-w-5xl";
+    size === "wide-tall" || size === "workspace" ? "max-h-[92vh]" : "max-h-[min(640px,92vh)]";
+  const widthClass =
+    size === "workspace"
+      ? "max-w-[min(1180px,96vw)]"
+      : size === "default"
+        ? "max-w-4xl"
+        : "max-w-5xl";
 
   const overlay = (
     <div
@@ -163,6 +168,8 @@ export function ProjectModalPanelFooter({
   deleteDisabled,
   extraLeftLabel,
   onExtraLeft,
+  middleLabel,
+  onMiddle,
   onPrimary,
 }: {
   secondaryLabel: string;
@@ -175,13 +182,15 @@ export function ProjectModalPanelFooter({
   deleteDisabled?: boolean;
   extraLeftLabel?: string;
   onExtraLeft?: () => void;
+  middleLabel?: string;
+  onMiddle?: () => void;
   /** When set, primary renders as type="button" instead of submit. */
   onPrimary?: () => void;
 }) {
   const hasLeft = Boolean((deleteLabel && onDelete) || (extraLeftLabel && onExtraLeft));
   return (
     <div
-      className={`flex shrink-0 items-center gap-3 border-t border-slate-100 px-5 py-4 sm:px-6 ${
+      className={`flex shrink-0 flex-wrap items-center gap-3 border-t border-slate-100 px-5 py-4 sm:px-6 ${
         hasLeft ? "justify-between" : "justify-end"
       }`}
     >
@@ -211,7 +220,7 @@ export function ProjectModalPanelFooter({
       ) : (
         <span />
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={onSecondary}
@@ -220,6 +229,16 @@ export function ProjectModalPanelFooter({
         >
           {secondaryLabel}
         </button>
+        {middleLabel && onMiddle ? (
+          <button
+            type="button"
+            onClick={onMiddle}
+            disabled={primaryDisabled}
+            className="rounded-xl border-2 border-[#7c3aed] px-4 py-2.5 text-sm font-semibold text-[#7c3aed] hover:bg-violet-50 disabled:opacity-50"
+          >
+            {middleLabel}
+          </button>
+        ) : null}
         <button
           type={onPrimary ? "button" : "submit"}
           onClick={onPrimary}

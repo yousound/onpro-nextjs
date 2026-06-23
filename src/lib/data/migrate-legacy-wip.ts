@@ -2,7 +2,7 @@ import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { seedLiveOrdersForProject } from "@/lib/data/live-cache";
 import { syncJobsToDb } from "@/lib/data/persist-jobs";
 import { syncOrdersToDb } from "@/lib/data/persist-orders";
-import { MOCK_LS, readMockLs } from "@/lib/mock-local";
+import { clearMockLs, MOCK_LS, readMockLs } from "@/lib/mock-local";
 import { withoutDemoSeedJobs } from "@/lib/mock/demo-seed-jobs";
 import { readLegacyStoredProjectJobs } from "@/lib/project-wip-edits";
 import { readLegacyStoredProjectOrders } from "@/lib/project-order-edits";
@@ -42,20 +42,31 @@ function hasLegacyWip(projectId: number): boolean {
   return orders.length > 0;
 }
 
+function clearLegacyWipStorage(projectId: number): void {
+  clearMockLs(MOCK_LS.projectJobs(projectId));
+  clearMockLs(MOCK_LS.projectOrders(projectId));
+}
+
 /**
- * Push all browser-only jobs/orders to Supabase (once per browser).
- * Run when entering a shared workspace so teammates' local WIP becomes team-visible.
+ * Push browser-only jobs/orders to Supabase for projects in the active workspace.
+ * Stale mock keys for other project ids are cleared so we do not hammer the API.
  */
 export async function migrateAllLegacyWipFromBrowser(projects: Project[]): Promise<number> {
   if (!isClientLiveBackend()) return 0;
+  if (projects.length === 0) return 0;
 
-  const byId = new Map(projects.map((p) => [p.id, p]));
-  const ids = new Set<number>([...legacyWipProjectIds(), ...projects.map((p) => p.id)]);
+  const accessibleIds = new Set(projects.map((p) => p.id));
+  for (const orphanId of legacyWipProjectIds()) {
+    if (!accessibleIds.has(orphanId)) {
+      clearLegacyWipStorage(orphanId);
+    }
+  }
+
   let migrated = 0;
 
-  for (const projectId of ids) {
+  for (const project of projects) {
+    const projectId = project.id;
     if (!hasLegacyWip(projectId)) continue;
-    const project = byId.get(projectId) ?? ({ id: projectId } as Project);
     const legacyOrders = readLegacyStoredProjectOrders(projectId);
     const legacyJobs = readLegacyStoredProjectJobs(projectId, project);
     if (legacyOrders.length === 0 && legacyJobs.length === 0) continue;
@@ -68,6 +79,7 @@ export async function migrateAllLegacyWipFromBrowser(projects: Project[]): Promi
       if (legacyJobs.length > 0) {
         await syncJobsToDb(projectId, legacyJobs);
       }
+      clearLegacyWipStorage(projectId);
       migrated += 1;
     } catch (err) {
       console.error("[migrateAllLegacyWip] project", projectId, err);

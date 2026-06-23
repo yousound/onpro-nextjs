@@ -7,7 +7,7 @@ const config: Config = {
       colors: {
         "chrome-dark": "#0f1419",
         "chrome-elevated": "#161f2a",
-        "surface-body": "#f0f2f7",
+        "surface-body": "#f7f9fc",
         "surface-card": "#ffffff",
         "border-subtle": "rgba(255, 255, 255, 0.08)",
         "border-light": "#e2e8f0",

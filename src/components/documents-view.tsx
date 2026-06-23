@@ -23,6 +23,7 @@ import {
 import { DocumentPreviewModal } from "@/components/document-preview-modal";
 import { DocumentThumb } from "@/components/document-thumb";
 import { MessageAttachmentComposer } from "@/components/message-attachment-composer";
+import { useCurrentUser } from "@/components/profile-provider";
 
 type SortKey = "updated" | "name" | "uploaded_by";
 type SortDir = "asc" | "desc";
@@ -101,6 +102,49 @@ function DocumentProjectLink({ doc }: { doc: DocumentRow }) {
   );
 }
 
+function jobLabelForDoc(
+  doc: DocumentRow,
+  scope?: DocumentsProjectScope,
+): string {
+  if (!doc.job_id) return "Unassigned";
+  if (doc.job_label?.trim()) return doc.job_label.trim();
+  return scope?.jobs.find((j) => j.id === doc.job_id)?.label ?? doc.job_id;
+}
+
+function DocumentJobLabel({
+  doc,
+  projectScope,
+  onAssign,
+}: {
+  doc: DocumentRow;
+  projectScope?: DocumentsProjectScope;
+  onAssign?: (jobId: string | null) => void;
+}) {
+  if (!projectScope || !onAssign) {
+    return <span className="text-text-primary">{jobLabelForDoc(doc, projectScope)}</span>;
+  }
+
+  return (
+    <select
+      aria-label={`Assign ${doc.name} to job`}
+      className="max-w-full rounded-md border border-border-light bg-white px-2 py-1 text-sm text-text-primary"
+      value={doc.job_id ?? ""}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        const value = e.target.value;
+        onAssign(value ? value : null);
+      }}
+    >
+      <option value="">Unassigned</option>
+      {projectScope.jobs.map((job) => (
+        <option key={job.id} value={job.id}>
+          {job.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function docSourceLabel(d: DocumentRow): string | null {
   if (d.source_ref?.startsWith("mailroom:")) return "Mailroom";
   if (d.external_url) return "Link";
@@ -151,6 +195,7 @@ function projectChoices(seed: DocumentRow[]): { id: number; name: string }[] {
 export type DocumentsProjectScope = {
   projectId: number;
   projectName: string;
+  jobs: { id: string; label: string; jobNumber: string }[];
 };
 
 export function DocumentsView({
@@ -165,14 +210,27 @@ export function DocumentsView({
   /** When set, shows the workspace documents UI scoped to one project only. */
   projectScope?: DocumentsProjectScope;
 }) {
+  const { user } = useCurrentUser();
+  const defaultUploader = useMemo(
+    () => user?.fullName?.trim() || user?.email?.split("@")[0]?.trim() || "",
+    [user],
+  );
   const [extraDocs, setExtraDocs] = useState<DocumentRow[]>([]);
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState<DocumentKind>("other");
   const [newProjectId, setNewProjectId] = useState<string>("");
-  const [newUploader, setNewUploader] = useState("Jerry M");
+  const [newUploader, setNewUploader] = useState("");
   const [newExternalUrl, setNewExternalUrl] = useState("");
   const [newFile, setNewFile] = useState<DocumentUploadFile | null>(null);
+
+  useEffect(() => {
+    setNewUploader(defaultUploader);
+  }, [defaultUploader]);
+
+  useEffect(() => {
+    if (newOpen) setNewUploader(defaultUploader);
+  }, [newOpen, defaultUploader]);
 
   const reloadExtras = useCallback(() => {
     void loadExtraDocuments().then(setExtraDocs);
@@ -253,10 +311,27 @@ export function DocumentsView({
     dispatchDocumentsChanged();
   }
 
+  async function handleAssignDocumentJob(doc: DocumentRow, jobId: string | null) {
+    if (!projectScope) return;
+    const job = jobId ? projectScope.jobs.find((j) => j.id === jobId) : null;
+    const next = extraDocs.map((d) =>
+      d.id === doc.id
+        ? {
+            ...d,
+            job_id: jobId,
+            job_label: job?.label ?? null,
+            updated_at: new Date().toISOString(),
+          }
+        : d,
+    );
+    await persistExtras(next);
+  }
+
   function resetNewDocForm() {
     setNewName("");
     setNewExternalUrl("");
     setNewFile(null);
+    setNewUploader(defaultUploader);
   }
 
   async function handleNewDoc(e: FormEvent<HTMLFormElement>) {
@@ -271,14 +346,19 @@ export function DocumentsView({
           ? null
           : Number(newProjectId);
     const choice = projects.find((c) => c.id === pid);
+    const scopedJobId =
+      projectScope && jobKey.startsWith("j:") ? jobKey.slice(2) : null;
+    const scopedJob = projectScope?.jobs.find((j) => j.id === scopedJobId);
     const row = normalizeDocumentRow({
       id: Math.max(0, ...allDocuments.map((d) => d.id)) + 1,
       name,
       project_id: pid,
       project_name: pid == null ? null : choice?.name ?? projectScope?.projectName ?? null,
+      job_id: scopedJobId,
+      job_label: scopedJob?.label ?? null,
       kind: newFile?.data_url?.startsWith("data:image/") ? "image" : newKind,
       size_bytes: newFile?.size_bytes ?? 512_000,
-      uploaded_by: newUploader.trim() || "Connect Dots Ops",
+      uploaded_by: newUploader.trim() || defaultUploader,
       updated_at: new Date().toISOString(),
       file_name: newFile?.name ?? null,
       file_data_url: newFile?.data_url ?? null,
@@ -291,6 +371,7 @@ export function DocumentsView({
 
   const scopedProjectKey = projectScope ? `p:${projectScope.projectId}` : "ALL";
   const [projectKey, setProjectKey] = useState<string>(scopedProjectKey);
+  const [jobKey, setJobKey] = useState<string>("ALL");
   const [kindFilter, setKindFilter] = useState<DocumentFilter>("ALL");
   const [sortKey, setSortKey] = useState<SortKey>("updated");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -311,6 +392,12 @@ export function DocumentsView({
   const baseFiltered = useMemo(() => {
     return allDocuments.filter((d) => {
       if (kindFilter !== "ALL" && d.kind !== kindFilter) return false;
+      if (projectScope) {
+        if (d.project_id !== projectScope.projectId) return false;
+        if (jobKey === "unassigned") return !d.job_id;
+        if (jobKey.startsWith("j:")) return d.job_id === jobKey.slice(2);
+        return true;
+      }
       if (projectKey === "ALL") return true;
       if (projectKey === "unassigned") return d.project_id == null;
       if (projectKey.startsWith("p:")) {
@@ -319,7 +406,22 @@ export function DocumentsView({
       }
       return true;
     });
-  }, [allDocuments, kindFilter, projectKey]);
+  }, [allDocuments, kindFilter, projectKey, projectScope, jobKey]);
+
+  const jobFilterCounts = useMemo(() => {
+    if (!projectScope) return null;
+    const inProject = allDocuments.filter((d) => d.project_id === projectScope.projectId);
+    const counts = new Map<string, number>();
+    let unassigned = 0;
+    for (const d of inProject) {
+      if (!d.job_id) {
+        unassigned += 1;
+        continue;
+      }
+      counts.set(d.job_id, (counts.get(d.job_id) ?? 0) + 1);
+    }
+    return { total: inProject.length, byJob: counts, unassigned };
+  }, [allDocuments, projectScope]);
 
   const recent = useMemo(() => {
     return [...baseFiltered]
@@ -340,6 +442,24 @@ export function DocumentsView({
   }, [baseFiltered, sortKey, sortDir]);
 
   const tableGroups = useMemo(() => {
+    if (projectScope) {
+      const order: string[] = [
+        ...projectScope.jobs.map((j) => j.id),
+        "unassigned",
+      ];
+      return order
+        .map((key) => {
+          const label =
+            key === "unassigned"
+              ? "Unassigned"
+              : (projectScope.jobs.find((j) => j.id === key)?.label ?? key);
+          const rows = tableRows.filter((d) =>
+            key === "unassigned" ? !d.job_id : d.job_id === key,
+          );
+          return { key, label, rows };
+        })
+        .filter((g) => g.rows.length > 0);
+    }
     if (kindFilter === "ALL") {
       return DOCUMENT_KIND_ORDER.map((kind) => ({
         key: kind,
@@ -348,7 +468,7 @@ export function DocumentsView({
       })).filter((g) => g.rows.length > 0);
     }
     return [{ key: kindFilter, label: kindLabel(kindFilter), rows: tableRows }];
-  }, [kindFilter, tableRows]);
+  }, [projectScope, kindFilter, tableRows]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -436,8 +556,10 @@ export function DocumentsView({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto bg-white">
-      <div className="mx-auto max-w-[1600px] space-y-8 px-4 py-6 sm:px-6">
+    <div className={`min-h-0 flex-1 overflow-y-auto ${projectScope ? "bg-transparent" : "bg-white"}`}>
+      <div
+        className={`mx-auto w-full max-w-[1600px] space-y-8 py-6 ${projectScope ? "" : "px-4 sm:px-6"}`}
+      >
         <div className="flex flex-wrap items-end gap-3">
           <button
             type="button"
@@ -448,15 +570,35 @@ export function DocumentsView({
           </button>
 
           {projectScope ? (
-            <div className="flex min-w-[min(100%,16rem)] flex-1 flex-col gap-1 sm:max-w-xs">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Project</span>
-              <p className="rounded-xl border border-accent/30 bg-violet-50/50 px-3 py-2.5 text-sm font-semibold text-text-primary ring-1 ring-accent/20">
-                {projectScope.projectName}
-                <span className="ml-2 font-normal text-text-secondary">
-                  ({baseFiltered.length} file{baseFiltered.length === 1 ? "" : "s"})
-                </span>
-              </p>
-            </div>
+            <label className="relative flex min-w-[min(100%,16rem)] flex-1 flex-col gap-1 sm:max-w-xs">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Job</span>
+              <div className="relative">
+                <select
+                  aria-label="Filter by job"
+                  className={`w-full cursor-pointer appearance-none rounded-xl border bg-white py-2.5 pl-3 pr-9 text-sm font-medium text-text-primary shadow-sm focus:outline-none focus:ring-2 focus:ring-accent/30 ${
+                    jobKey === "ALL" ? "border-border-light" : "border-accent/50 ring-1 ring-accent/20"
+                  }`}
+                  value={jobKey}
+                  onChange={(e) => setJobKey(e.target.value)}
+                >
+                  <option value="ALL">
+                    All jobs ({jobFilterCounts?.total ?? baseFiltered.length} file
+                    {(jobFilterCounts?.total ?? baseFiltered.length) === 1 ? "" : "s"})
+                  </option>
+                  {projectScope.jobs.map((job) => (
+                    <option key={job.id} value={`j:${job.id}`}>
+                      {job.label} ({jobFilterCounts?.byJob.get(job.id) ?? 0} file
+                      {(jobFilterCounts?.byJob.get(job.id) ?? 0) === 1 ? "" : "s"})
+                    </option>
+                  ))}
+                  <option value="unassigned">
+                    Unassigned ({jobFilterCounts?.unassigned ?? 0} file
+                    {(jobFilterCounts?.unassigned ?? 0) === 1 ? "" : "s"})
+                  </option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary" />
+              </div>
+            </label>
           ) : (
             <label className="relative flex min-w-[min(100%,16rem)] flex-1 flex-col gap-1 sm:max-w-xs">
               <span className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">Project</span>
@@ -510,6 +652,7 @@ export function DocumentsView({
             onClick={() => {
               setKindFilter("ALL");
               setProjectKey(projectScope ? `p:${projectScope.projectId}` : "ALL");
+              setJobKey("ALL");
             }}
             className="rounded-xl border border-border-light bg-white px-3 py-2.5 text-sm font-medium text-text-secondary shadow-sm hover:bg-slate-50"
           >
@@ -566,7 +709,11 @@ export function DocumentsView({
           {recent.length > 0 ? (
             <>
               <h2 className="text-base font-semibold text-text-primary">Recent</h2>
-              <p className="mt-1 text-sm text-text-secondary">Latest uploads for your current folder and kind filters.</p>
+              <p className="mt-1 text-sm text-text-secondary">
+                {projectScope
+                  ? "Latest uploads for this project, grouped by job."
+                  : "Latest uploads for your current folder and kind filters."}
+              </p>
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                 {recent.map((d) => (
                   <div
@@ -594,7 +741,11 @@ export function DocumentsView({
                     >
                     <DocumentThumb doc={d} className="h-20 w-full rounded-lg object-cover bg-slate-100" />
                     <p className="mt-2 line-clamp-2 text-sm font-semibold leading-snug text-text-primary">{d.name}</p>
-                    {d.project_id != null && d.project_name ? (
+                    {projectScope ? (
+                      <p className="mt-1 truncate text-xs font-semibold text-accent">
+                        {jobLabelForDoc(d, projectScope)}
+                      </p>
+                    ) : d.project_id != null && d.project_name ? (
                       <p className="mt-1 truncate text-xs">
                         <Link
                           href={projectRowHref(d) ?? "#"}
@@ -641,7 +792,7 @@ export function DocumentsView({
                       </button>
                     </th>
                     <th className="hidden px-4 py-3 md:table-cell">Kind</th>
-                    <th className="hidden px-4 py-3 lg:table-cell">Project</th>
+                    <th className="hidden px-4 py-3 lg:table-cell">{projectScope ? "Job" : "Project"}</th>
                     <th className="px-4 py-3 text-right">
                       <button
                         type="button"
@@ -708,8 +859,20 @@ export function DocumentsView({
                               </div>
                             </td>
                             <td className="hidden px-4 py-3 text-text-secondary md:table-cell">{kindLabel(d.kind)}</td>
-                            <td className="hidden px-4 py-3 lg:table-cell">
-                              <DocumentProjectLink doc={d} />
+                            <td className="hidden px-4 py-3 lg:table-cell" onClick={(e) => e.stopPropagation()}>
+                              {projectScope ? (
+                                <DocumentJobLabel
+                                  doc={d}
+                                  projectScope={projectScope}
+                                  onAssign={
+                                    canDeleteDocument(d)
+                                      ? (jobId) => void handleAssignDocumentJob(d, jobId)
+                                      : undefined
+                                  }
+                                />
+                              ) : (
+                                <DocumentProjectLink doc={d} />
+                              )}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{formatShortDate(d.updated_at)}</td>
                             <td className="px-2 py-3 text-right">

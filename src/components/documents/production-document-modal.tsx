@@ -12,6 +12,8 @@ export type MailroomSendContext = {
   projectId: number;
   jobId: string;
   vendorName?: string;
+  vendorQuoteId?: string | null;
+  estimateId?: string | null;
   onSent: (result: {
     threadId: string;
     messageId: string;

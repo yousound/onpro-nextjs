@@ -5,6 +5,7 @@ import type { Project } from "@/lib/types/project";
 import type { ProjectJob, ProjectOrder } from "@/lib/types/wip";
 import { formatShortDate, isoToDateInput, dateInputToIso } from "@/lib/format";
 import { createNewOrderSeed } from "@/lib/project-order-create";
+import { loadWorkspaceOrders } from "@/lib/project-order-edits";
 import { jobsForOrder } from "@/lib/project-order-edits";
 import { JOB_TYPE_OPTIONS } from "@/lib/reference/category-codes";
 import { effectiveJobPoDisplay, orderDisplayLabel } from "@/lib/effective-po";
@@ -127,7 +128,14 @@ export function ProjectOrdersSection({
   }, []);
 
   const handleCreateOrder = useCallback(() => {
-    const seed = createNewOrderSeed(project, orders, operatorCode, allProjects);
+    const seed = createNewOrderSeed(
+      project,
+      orders,
+      operatorCode,
+      allProjects,
+      [],
+      loadWorkspaceOrders(),
+    );
     onOrdersChange([...orders, seed]);
     setExpandedOrders((prev) => new Set(prev).add(seed.id));
   }, [project, orders, operatorCode, allProjects, onOrdersChange]);

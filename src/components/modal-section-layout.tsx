@@ -20,10 +20,10 @@ function sidebarNavButtonClass(
   const polished = variant === "polished";
   return isActive
     ? polished
-      ? "bg-violet-100 text-[#5b21b6] ring-1 ring-violet-200"
+      ? "bg-violet-100/90 text-[#6d28d9] ring-1 ring-violet-200/90"
       : "bg-accent/10 text-accent ring-1 ring-accent/30"
     : polished
-      ? "text-slate-600 hover:bg-violet-50 hover:text-violet-900"
+      ? "text-slate-600 hover:bg-violet-50/80 hover:text-violet-900"
       : "text-text-secondary hover:bg-slate-100 hover:text-text-primary";
 }
 
@@ -49,7 +49,7 @@ export function ModalSectionNavList({
           key={id}
           type="button"
           onClick={() => onSectionChange(id)}
-          className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition ${sidebarNavButtonClass(activeSection === id, variant, tone)}`}
+          className={`block w-full rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition ${sidebarNavButtonClass(activeSection === id, variant, tone)}`}
         >
           {label}
         </button>
@@ -129,11 +129,14 @@ export function ModalSectionLayout({
     <div className="flex min-h-0 flex-1">
       {showInlineSidebar ? (
         <aside
-          className={`hidden w-52 shrink-0 overflow-y-auto border-r py-3 sm:block ${
-            polished ? "border-slate-100 bg-violet-50/40" : "border-border-light bg-surface-body/40"
+          className={`hidden w-56 shrink-0 overflow-y-auto border-r py-4 sm:block ${
+            polished ? "border-violet-100/80 bg-[#faf8ff]" : "border-border-light bg-surface-body/40"
           }`}
         >
-          <div className="px-2">
+          <div className="px-3">
+            <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-wider text-violet-400">
+              Sections
+            </p>
             <ModalSectionNavList
               sections={sections}
               activeSection={activeSection}

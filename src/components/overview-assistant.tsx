@@ -1142,6 +1142,10 @@ export function OverviewAssistant({ layout = "page" }: { layout?: "page" | "moda
             );
             setModalJob(null);
           }}
+          onSwitchJob={(jobId) => {
+            const j = loadProjectJobs(modalJob.project.id, modalJob.project).find((x) => x.id === jobId);
+            if (j) setModalJob({ project: modalJob.project, job: j });
+          }}
         />
       ) : null}
     </>

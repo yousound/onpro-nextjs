@@ -17,6 +17,7 @@ import {
 } from "@/lib/internal-team-roster";
 import type { PeopleSegment } from "@/lib/mock/people";
 import { segmentBadgeSoftClass, segmentLabel, segmentPillSelectedClass } from "@/lib/mock/people";
+import { ProjectFinancialsPanel } from "@/components/project-financials-panel";
 import { PackingSlipSection } from "@/components/packing-slip-section";
 import { loadContacts } from "@/lib/contacts-store";
 import { DirectoryAvatar } from "@/components/directory-avatar";
@@ -110,7 +111,7 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-border-light bg-white p-6 shadow-sm">
+    <section className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">{title}</h3>
         {headerExtra ? <div className="shrink-0">{headerExtra}</div> : null}
@@ -930,11 +931,17 @@ function RepeatableBulkApprovalSections({
   );
 }
 
-export function ProjectDetailsClientCard({ project }: { project: Project }) {
+export function ProjectDetailsClientCard({
+  project,
+  onPatchProject,
+}: {
+  project: Project;
+  onPatchProject?: (patch: Partial<Project>) => void;
+}) {
   const initials = clientInitials(project.client.name);
   const pn = project.project_number?.trim();
   return (
-    <section className="rounded-2xl border border-border-light bg-white p-6 shadow-sm">
+    <section className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm">
       <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">Client</p>
       <div className="mt-4 flex flex-wrap items-start gap-4">
         <div
@@ -957,7 +964,40 @@ export function ProjectDetailsClientCard({ project }: { project: Project }) {
             <dd className="font-medium text-text-primary">{project.status_overview ?? "—"}</dd>
             <dt className="text-text-secondary">Status update</dt>
             <dd className="font-medium text-text-primary">{formatShortDate(project.status_update_date)}</dd>
+            <dt className="text-text-secondary">Scope</dt>
+            <dd className="font-medium text-text-primary">
+              {onPatchProject ? (
+                <select
+                  className="rounded-lg border border-border-light bg-white px-2 py-1 text-sm font-semibold"
+                  value={project.scope_kind ?? "original"}
+                  onChange={(e) =>
+                    onPatchProject({
+                      scope_kind: e.target.value as "original" | "addon",
+                    })
+                  }
+                >
+                  <option value="original">Original deliverable</option>
+                  <option value="addon">Reorder</option>
+                </select>
+              ) : project.scope_kind === "addon" ? (
+                "Reorder"
+              ) : (
+                "Original deliverable"
+              )}
+            </dd>
           </dl>
+          {onPatchProject && project.scope_kind === "addon" ? (
+            <label className="mt-4 block text-sm">
+              <span className="font-medium text-text-secondary">Scope note</span>
+              <textarea
+                className="mt-1 w-full rounded-lg border border-border-light px-3 py-2 text-sm"
+                rows={2}
+                value={project.scope_note ?? ""}
+                onChange={(e) => onPatchProject({ scope_note: e.target.value || null })}
+                placeholder="Reorder details"
+              />
+            </label>
+          ) : null}
         </div>
       </div>
     </section>
@@ -1926,7 +1966,7 @@ export function ProjectPeopleAccessPanel({ project }: { project: Project }) {
 
   return (
     <PanelShell>
-      <section className="rounded-2xl border border-border-light bg-white p-6 shadow-sm">
+      <section className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm">
         <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">People &amp; access</h3>
         <p className="mt-2 max-w-2xl text-sm text-text-secondary">
           Default capabilities for each workspace segment on{" "}
@@ -2116,20 +2156,30 @@ export function ProjectModuleRouter({
   moduleId,
   project,
   onPatchProject,
+  financialDeepLink,
+  onFinancialDeepLinkConsumed,
 }: {
   moduleId: ProjectModuleId;
   project: Project;
   onPatchProject?: ProjectPatchFn;
+  financialDeepLink?: import("@/lib/project-financials-nav").FinancialsDeepLink | null;
+  onFinancialDeepLinkConsumed?: () => void;
 }) {
   switch (moduleId) {
     case "details":
     case "internal":
     case "documents":
       return null;
+    case "financials":
+      return (
+        <ProjectFinancialsPanel
+          project={project}
+          deepLink={financialDeepLink}
+          onDeepLinkConsumed={onFinancialDeepLinkConsumed}
+        />
+      );
     case "payments":
       return <PaymentsPanel project={project} />;
-    case "invoices":
-      return <InvoicesPanel project={project} />;
     case "shipping":
       return <ShippingModulePanel project={project} onPatchProject={onPatchProject} />;
     case "people_access":

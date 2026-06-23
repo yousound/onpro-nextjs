@@ -36,7 +36,7 @@ export function ProjectDetailGate({
 
   if (!staticProject && !mounted) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white text-sm text-text-secondary">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-surface-body text-sm text-text-secondary">
         Loading…
       </div>
     );
@@ -45,10 +45,10 @@ export function ProjectDetailGate({
   if (!project) notFound();
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-body">
       <Suspense
         fallback={
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-white text-sm text-text-secondary">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-surface-body text-sm text-text-secondary">
             Loading…
           </div>
         }

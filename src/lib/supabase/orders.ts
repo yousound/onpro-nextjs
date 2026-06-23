@@ -1,8 +1,23 @@
-import { supabaseErrorMessage } from "@/lib/id-uuid";
+import { ensureUuid, supabaseErrorMessage } from "@/lib/id-uuid";
+import { generateOrderNumber, parseOrderNumber } from "@/lib/order-number";
 import { projectOrderFromRow, projectOrderToRow } from "@/lib/supabase/mappers/order";
 import type { ProjectOrderRowDb } from "@/lib/supabase/types-db";
 import type { ProjectOrder } from "@/lib/types/wip";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+function reconcileOrderNumberForSync(
+  order: ProjectOrder,
+  operatorCode: string,
+  pool: ProjectOrder[],
+): string {
+  const number = order.order_number.trim();
+  const orderDbId = ensureUuid(order.id);
+  const taken = pool.some(
+    (o) => o.order_number === number && ensureUuid(o.id) !== orderDbId,
+  );
+  if (!taken) return number;
+  return generateOrderNumber(operatorCode, pool);
+}
 
 export async function fetchOrdersForProjectFromSupabase(
   projectId: number,
@@ -53,16 +68,41 @@ export async function syncProjectOrdersForUser(
   ownerUserId: string,
   orders: ProjectOrder[],
 ): Promise<ProjectOrder[]> {
+  const { data: existingRows, error: existingListError } = await supabase
+    .from("project_orders")
+    .select("*")
+    .eq("user_id", ownerUserId);
+
+  if (existingListError) throw new Error(supabaseErrorMessage(existingListError));
+
+  const existingOrders = (existingRows ?? []).map((row) =>
+    projectOrderFromRow(row as ProjectOrderRowDb),
+  );
   const saved: ProjectOrder[] = [];
   const keptIds = new Set<string>();
 
   for (const order of orders) {
-    const row = projectOrderToRow(order, ownerUserId);
+    const operatorCode =
+      parseOrderNumber(order.order_number)?.operatorCode ??
+      parseOrderNumber(existingOrders[0]?.order_number ?? "")?.operatorCode ??
+      "OP";
+    const pool = [...existingOrders, ...saved];
+    const row = projectOrderToRow(
+      {
+        ...order,
+        order_number: reconcileOrderNumberForSync(order, operatorCode, pool),
+      },
+      ownerUserId,
+    );
     const { data, error } = await supabase.from("project_orders").upsert(row).select("*").single();
     if (error) throw new Error(supabaseErrorMessage(error));
     const mapped = projectOrderFromRow(data as ProjectOrderRowDb);
     saved.push(mapped);
     keptIds.add(mapped.id);
+
+    const idx = existingOrders.findIndex((o) => ensureUuid(o.id) === row.id);
+    if (idx >= 0) existingOrders[idx] = mapped;
+    else existingOrders.push(mapped);
   }
 
   const { data: existing, error: listError } = await supabase

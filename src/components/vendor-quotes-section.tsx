@@ -1,16 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo } from "react";
 import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob, VendorQuote, VendorQuoteStatus } from "@/lib/types/wip";
 import { newVendorQuote } from "@/lib/costing-sheet";
-import { buildVendorPoDocument } from "@/lib/documents/production-document-draft";
-import type { ProductionDocument } from "@/lib/documents/production-document-types";
+import type { FinancialDocMode } from "@/components/financial-document-fullscreen";
 import { MailroomThreadLink } from "@/components/documents/document-compose-modal";
-import { ProductionDocumentModal } from "@/components/documents/production-document-modal";
 import { VendorFieldSelect } from "@/components/vendor-select";
-import { vendorDisplayName } from "@/lib/contacts-store";
 import {
   defaultVendorForNewQuote,
   jobVendorsMissingQuotes,
@@ -38,24 +35,15 @@ function parseNumber(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function matchVendor(vendors: Contact[], name: string): Contact | undefined {
-  const key = name.trim().toLowerCase();
-  if (!key) return undefined;
-  return vendors.find(
-    (v) =>
-      v.name.trim().toLowerCase() === key ||
-      vendorDisplayName(v).trim().toLowerCase() === key,
-  );
-}
-
 export function VendorQuotesSection({
-  project,
+  project: _project,
   job,
   quotes,
   vendors,
   onChange,
   onPullToCosting,
   onQuoteReceived,
+  onOpenInFinancials,
 }: {
   project: Project;
   job: ProjectJob;
@@ -64,9 +52,21 @@ export function VendorQuotesSection({
   onChange: (next: VendorQuote[]) => void;
   onPullToCosting?: (quoteId: string) => void;
   onQuoteReceived?: (quoteId: string) => void;
+  /** Opens the quote in the project Financials workspace (preview / send). */
+  onOpenInFinancials?: (quoteId: string, mode?: FinancialDocMode) => void;
 }) {
-  const [docDraft, setDocDraft] = useState<ProductionDocument | null>(null);
-  const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
+  const quoteIdsInCosting = useMemo(() => {
+    const ids = new Set<string>();
+    for (const line of job.costing_sheet?.lines ?? []) {
+      if (line.vendor_quote_id) ids.add(line.vendor_quote_id);
+    }
+    return ids;
+  }, [job.costing_sheet?.lines]);
+
+  function handlePullToCosting(quoteId: string) {
+    if (quoteIdsInCosting.has(quoteId)) return;
+    onPullToCosting?.(quoteId);
+  }
 
   function patch(id: string, partial: Partial<VendorQuote>) {
     onChange(quotes.map((q) => (q.id === id ? { ...q, ...partial } : q)));
@@ -102,27 +102,6 @@ export function VendorQuotesSection({
     onQuoteReceived?.(id);
   }
 
-  function openPoEditor(quote: VendorQuote) {
-    const vendorContact = matchVendor(vendors, quote.vendor);
-    setActiveQuoteId(quote.id);
-    setDocDraft(buildVendorPoDocument({ project, job, quote, vendorContact }));
-  }
-
-  function handlePoSent(
-    quoteId: string,
-    result: { threadId: string; messageId: string; toEmail: string; ccEmails: string[] },
-  ) {
-    const now = new Date().toISOString();
-    patch(quoteId, {
-      status: "sent",
-      sent_at: now,
-      sent_to_email: result.toEmail,
-      cc_emails: result.ccEmails.length > 0 ? result.ccEmails : undefined,
-      mailroom_thread_id: result.threadId,
-      outbound_message_id: result.messageId,
-    });
-  }
-
   return (
     <>
       <div className="space-y-3">
@@ -130,7 +109,7 @@ export function VendorQuotesSection({
           <p className="text-sm text-text-secondary">
             Inbound vendor quotes for this job. Each sent request has a unique vendor PO. Vendors
             come from <strong>Job vendors</strong> above or the job <strong>Supplier</strong> on
-            Overview.
+            Overview. Preview and send POs in the project <strong>Financials</strong> tab.
           </p>
           <button
             type="button"
@@ -165,7 +144,7 @@ export function VendorQuotesSection({
         ) : (
           <div className="space-y-2">
             <p className="text-xs text-text-secondary sm:hidden">
-              Swipe the table sideways — <strong>Send PO</strong> stays pinned on the right.
+              Swipe the table sideways — <strong>Preview / Send</strong> stays pinned on the right.
             </p>
             <div className="overflow-x-auto rounded-lg border border-border-light bg-white">
             <table className="w-full min-w-[68rem] text-left text-sm">
@@ -186,6 +165,7 @@ export function VendorQuotesSection({
               <tbody>
                 {quotes.map((q) => {
                   const status = q.status ?? "draft";
+                  const inCosting = quoteIdsInCosting.has(q.id);
                   return (
                     <tr key={q.id} className="border-t border-border-light/70 align-top">
                       <td className="px-3 py-2">
@@ -265,43 +245,50 @@ export function VendorQuotesSection({
                         />
                       </td>
                       <td className="sticky right-0 z-10 border-l border-border-light/70 bg-white px-3 py-2 shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)]">
-                        <div className="flex flex-col items-stretch gap-1.5 sm:items-end">
+                        <div className="flex w-[10.5rem] flex-col items-stretch gap-2">
                           <button
                             type="button"
-                            onClick={() => openPoEditor(q)}
-                            className="whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-xs font-bold text-white hover:bg-accent/90"
+                            onClick={() => onOpenInFinancials?.(q.id, "edit")}
+                            disabled={!onOpenInFinancials}
+                            className="relative z-10 whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-xs font-bold text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Send PO
+                            Preview / Send
                           </button>
-                          <div className="flex flex-nowrap items-center justify-end gap-1">
-                          {status === "sent" ? (
-                            <button
-                              type="button"
-                              onClick={() => markReceived(q.id)}
-                              className="shrink-0 whitespace-nowrap rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"
-                              title="Mark quote received"
-                            >
-                              Received
-                            </button>
-                          ) : null}
                           {onPullToCosting ? (
+                            inCosting ? (
+                              <p className="text-center text-[11px] font-semibold leading-snug text-emerald-700">
+                                This has been sent to costing
+                              </p>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handlePullToCosting(q.id)}
+                                className="whitespace-nowrap rounded-md bg-accent/10 px-2 py-1.5 text-[11px] font-bold text-accent hover:bg-accent/20"
+                                title="Add as a line on the cost sheet"
+                              >
+                                → Cost
+                              </button>
+                            )
+                          ) : null}
+                          <div className="flex flex-wrap items-center justify-end gap-1">
+                            {status === "sent" ? (
+                              <button
+                                type="button"
+                                onClick={() => markReceived(q.id)}
+                                className="shrink-0 whitespace-nowrap rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"
+                                title="Mark quote received"
+                              >
+                                Received
+                              </button>
+                            ) : null}
                             <button
                               type="button"
-                              onClick={() => onPullToCosting(q.id)}
-                              className="shrink-0 whitespace-nowrap rounded-md bg-accent/10 px-2 py-1 text-[11px] font-bold text-accent hover:bg-accent/20"
-                              title="Add as a line on the cost sheet"
+                              onClick={() => remove(q.id)}
+                              className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-bold text-red-600 hover:bg-red-50"
+                              aria-label="Remove quote"
                             >
-                              → Cost
+                              ✕
                             </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => remove(q.id)}
-                            className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-bold text-red-600 hover:bg-red-50"
-                            aria-label="Remove quote"
-                          >
-                            ✕
-                          </button>
                           </div>
                         </div>
                       </td>
@@ -314,24 +301,6 @@ export function VendorQuotesSection({
           </div>
         )}
       </div>
-
-      {docDraft && activeQuoteId ? (
-        <ProductionDocumentModal
-          open
-          draft={docDraft}
-          onClose={() => {
-            setDocDraft(null);
-            setActiveQuoteId(null);
-          }}
-          mailroomSend={{
-            category: "vendor_quote",
-            projectId: project.id,
-            jobId: job.id,
-            vendorName: quotes.find((q) => q.id === activeQuoteId)?.vendor,
-            onSent: (result) => handlePoSent(activeQuoteId, result),
-          }}
-        />
-      ) : null}
     </>
   );
 }

@@ -1928,6 +1928,10 @@ export function MessageAttachmentComposer(props: {
         onClose={() => setJobModal(null)}
         onSave={handleComposerJobSave}
         onDelete={jobModal?.kind === "edit" ? handleComposerJobDelete : undefined}
+        onSwitchJob={(jobId) => {
+          if (jobModal?.kind !== "edit") return;
+          setJobModal({ kind: "edit", jobId });
+        }}
       />
     ) : null}
     </>

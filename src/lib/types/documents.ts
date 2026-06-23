@@ -5,6 +5,9 @@ export interface DocumentRow {
   name: string;
   project_id: number | null;
   project_name: string | null;
+  /** Job within the project (project documents tab). */
+  job_id?: string | null;
+  job_label?: string | null;
   kind: DocumentKind;
   /** Approximate size for library UI (bytes). */
   size_bytes: number;

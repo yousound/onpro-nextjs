@@ -32,15 +32,20 @@ function field(label: string, value: string): string {
 }
 
 function documentHeading(kind: ProductionDocument["kind"]): string {
-  return kind === "vendor_po" ? "PURCHASE ORDER" : "ESTIMATE";
+  if (kind === "vendor_po") return "PURCHASE ORDER";
+  if (kind === "vendor_quote") return "VENDOR QUOTE";
+  return "ESTIMATE";
 }
 
 function documentNumberLabel(kind: ProductionDocument["kind"]): string {
-  return kind === "vendor_po" ? "Purchase Order No." : "Estimate No.";
+  if (kind === "vendor_po") return "Purchase Order No.";
+  if (kind === "vendor_quote") return "Quote No.";
+  return "Estimate No.";
 }
 
 function billToLabel(kind: ProductionDocument["kind"]): string {
-  return kind === "vendor_po" ? "For" : "Bill To";
+  if (kind === "vendor_po" || kind === "vendor_quote") return "For";
+  return "Bill To";
 }
 
 export function resolveLogoUrl(origin?: string): string {

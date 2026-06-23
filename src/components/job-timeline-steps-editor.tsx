@@ -71,7 +71,14 @@ function GripIcon() {
 
 const OPENS_IN_OPTIONS: { value: JobDetailsSection | "none"; label: string }[] = [
   { value: "none", label: "None" },
-  { value: "estimate", label: "Estimate" },
+  { value: "product_details", label: "Job details" },
+  { value: "brand", label: "Brand" },
+  { value: "color_sizing", label: "Color & sizing" },
+  { value: "development", label: "Production specs" },
+  { value: "print_embroidery", label: "Print / embroidery" },
+  { value: "cut_sew_samples", label: "Colorways & samples" },
+  { value: "vendor_quotes", label: "Vendor quotes" },
+  { value: "outputs", label: "Outputs" },
   { value: "costing", label: "Costing" },
   { value: "approvals", label: "Approvals" },
   { value: "bulk", label: "Bulk production" },

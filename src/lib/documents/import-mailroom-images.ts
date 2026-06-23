@@ -1,5 +1,11 @@
 import { resolveWorkflowProjectId } from "@/lib/mailroom/workflow-utils";
 import {
+  assignJobsOnNewMailroomRows,
+  assignJobsToProjectDocuments,
+} from "@/lib/documents/mailroom-job-match";
+import { isClientLiveBackend } from "@/lib/config/backend-mode";
+import { seedLiveDocumentsCache } from "@/lib/data/persist-documents";
+import {
   MAX_MAILROOM_IMAGE_BYTES,
   loadExtraDocuments,
   persistExtraDocuments,
@@ -7,7 +13,13 @@ import {
 } from "@/lib/documents/document-storage";
 import { putDocumentBlob } from "@/lib/documents/document-blob-store";
 import { dispatchDocumentsChanged } from "@/lib/onpro-events";
+import {
+  fetchAllDocumentsViaApi,
+  insertMailroomDocumentsViaApi,
+  syncDocumentsViaApi,
+} from "@/lib/supabase/upload-project-document";
 import type {
+  EmailFilePart,
   EmailInlineImage,
   EmailMessage,
   EmailThread,
@@ -15,6 +27,7 @@ import type {
   MailroomWorkflow,
 } from "@/lib/types/agent";
 import type { DocumentRow } from "@/lib/types/documents";
+import type { ProjectJob } from "@/lib/types/wip";
 
 const MAX_IMPORTS_PER_RUN = 40;
 
@@ -133,8 +146,7 @@ export function buildMailroomImageDedupeIndex(all: DocumentRow[]): MailroomImage
   };
 
   for (const row of all) {
-    if (row.kind !== "image") continue;
-
+    if (!row.source_ref?.startsWith("mailroom:") && row.kind !== "image") continue;
     if (row.source_ref) index.sourceRefs.add(row.source_ref);
 
     if (row.blob_ref) index.blobRefs.add(row.blob_ref);
@@ -245,6 +257,19 @@ function registerImportedMailroomImage(
   index.legacyByMessageProject.set(legacyKey, fingerprints);
 }
 
+function documentKindFromMime(mimeType: string, filename?: string): DocumentRow["kind"] {
+  const mime = mimeType.toLowerCase();
+  const name = filename?.toLowerCase() ?? "";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.includes("pdf") || name.endsWith(".pdf")) return "tech_pack";
+  if (name.includes("tech") || name.includes("pack")) return "tech_pack";
+  return "other";
+}
+
+function filePartContentKey(file: EmailFilePart): string {
+  return imageContentKey(file);
+}
+
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|img)$/i;
 
 function extensionFromMime(mimeType: string): string {
@@ -274,6 +299,132 @@ function imageDisplayName(
   const subject = thread.subject.trim() || "Mailroom";
   const from = message.from.name?.trim() || message.from.email || "Sender";
   return `${base} — ${subject} (${from})`;
+}
+
+function mailroomFileName(file: EmailFilePart): string {
+  const name = file.filename?.trim();
+  if (name) return name;
+  const ext = extensionFromMime(file.mimeType);
+  return `${file.id}.${ext}`;
+}
+
+function fileDisplayName(
+  thread: EmailThread,
+  message: EmailMessage,
+  file: EmailFilePart,
+): string {
+  const base = file.filename?.trim() || "Email attachment";
+  const subject = thread.subject.trim() || "Mailroom";
+  const from = message.from.name?.trim() || message.from.email || "Sender";
+  return `${base} — ${subject} (${from})`;
+}
+
+function isMailroomFileDuplicate(
+  index: MailroomImageDedupeIndex,
+  thread: EmailThread,
+  message: EmailMessage,
+  file: EmailFilePart,
+  projectId: number,
+): boolean {
+  const contentKey = filePartContentKey(file);
+  const sourceRef = mailroomImageSourceRef(thread.id, message.id, contentKey, projectId);
+  if (index.sourceRefs.has(sourceRef)) return true;
+
+  const blobRef = file.src.startsWith("data:")
+    ? sharedMailroomBlobRef(thread.id, message.id, contentKey)
+    : null;
+  if (blobRef && index.blobRefs.has(blobRef)) return true;
+
+  const projectContent = index.contentByProject.get(projectId);
+  if (projectContent?.has(contentKey)) return true;
+
+  return false;
+}
+
+function registerImportedMailroomFile(
+  index: MailroomImageDedupeIndex,
+  thread: EmailThread,
+  message: EmailMessage,
+  file: EmailFilePart,
+  projectId: number,
+  row: DocumentRow,
+): void {
+  const contentKey = filePartContentKey(file);
+  registerImportedMailroomImage(index, thread, message, file, projectId, row);
+  void contentKey;
+}
+
+export function buildMailroomFileRowsForMessage(
+  thread: EmailThread,
+  message: EmailMessage,
+  projectIds: number[],
+  projectNameById: Map<number, string>,
+  dedupeIndex: MailroomImageDedupeIndex,
+  pendingBlobs: Map<string, string>,
+  nextIdStart: number,
+  importBudget: { remaining: number },
+): { rows: DocumentRow[]; nextId: number } {
+  const files = message.emailFiles ?? [];
+  if (files.length === 0 || projectIds.length === 0 || importBudget.remaining <= 0) {
+    return { rows: [], nextId: nextIdStart };
+  }
+
+  const rows: DocumentRow[] = [];
+  let nextId = nextIdStart;
+  const seenContentInMessage = new Set<string>();
+
+  for (const file of files) {
+    if (!file.src.startsWith("data:") && !file.src.startsWith("http")) continue;
+
+    const contentKey = filePartContentKey(file);
+    if (seenContentInMessage.has(contentKey)) continue;
+    seenContentInMessage.add(contentKey);
+
+    const blobRef = file.src.startsWith("data:")
+      ? sharedMailroomBlobRef(thread.id, message.id, contentKey)
+      : null;
+
+    if (file.src.startsWith("data:")) {
+      const bytes = dataUrlByteSize(file.src);
+      if (bytes > MAX_MAILROOM_IMAGE_BYTES) continue;
+    }
+
+    const projectsToImport = projectIds.filter(
+      (projectId) => !isMailroomFileDuplicate(dedupeIndex, thread, message, file, projectId),
+    );
+    if (projectsToImport.length === 0) continue;
+
+    if (file.src.startsWith("data:") && blobRef && !pendingBlobs.has(blobRef)) {
+      pendingBlobs.set(blobRef, file.src);
+    }
+
+    for (const projectId of projectsToImport) {
+      if (importBudget.remaining <= 0) return { rows, nextId };
+
+      const sourceRef = mailroomImageSourceRef(thread.id, message.id, contentKey, projectId);
+      const projectName = projectNameById.get(projectId) ?? `Project ${projectId}`;
+      const row: DocumentRow = {
+        id: nextId++,
+        name: fileDisplayName(thread, message, file),
+        project_id: projectId,
+        project_name: projectName,
+        kind: documentKindFromMime(file.mimeType, file.filename),
+        size_bytes: file.size_bytes ?? (file.src.startsWith("data:") ? dataUrlByteSize(file.src) : 0),
+        uploaded_by: "Mailroom",
+        updated_at: message.at ?? new Date().toISOString(),
+        file_name: mailroomFileName(file),
+        file_data_url: null,
+        blob_ref: blobRef,
+        external_url: file.src.startsWith("http") ? file.src : null,
+        source_ref: sourceRef,
+      };
+      rows.push(row);
+      registerImportedMailroomFile(dedupeIndex, thread, message, file, projectId, row);
+      importBudget.remaining -= 1;
+    }
+  }
+
+  return { rows, nextId };
 }
 
 export function buildMailroomImageRowsForMessage(
@@ -354,6 +505,8 @@ export type ImportMailroomImagesInput = {
   workflows: Record<string, MailroomWorkflow>;
   generatedItems: GeneratedItem[];
   projectNames: Array<{ id: number; name: string }>;
+  /** Jobs per project — used to auto-assign imported art by style #. */
+  jobsByProjectId?: Map<number, ProjectJob[]>;
   /** Seed rows (mock library) — used for id allocation and existing source_ref scan. */
   seedDocuments?: DocumentRow[];
 };
@@ -382,6 +535,7 @@ export async function importMailroomImagesToDocuments(
   const newRows: DocumentRow[] = [];
   const pendingBlobs = new Map<string, string>();
   const importBudget = { remaining: MAX_IMPORTS_PER_RUN };
+  const jobsByProject = input.jobsByProjectId ?? new Map<number, ProjectJob[]>();
 
   for (const thread of input.threads) {
     const workflow = input.workflows[thread.id];
@@ -392,7 +546,7 @@ export async function importMailroomImagesToDocuments(
     if (projectIds.length === 0) continue;
 
     for (const message of thread.messages) {
-      const { rows, nextId: bumped } = buildMailroomImageRowsForMessage(
+      const imageResult = buildMailroomImageRowsForMessage(
         thread,
         message,
         projectIds,
@@ -402,12 +556,65 @@ export async function importMailroomImagesToDocuments(
         nextId,
         importBudget,
       );
-      newRows.push(...rows);
-      nextId = bumped;
+      const withJobImages = assignJobsOnNewMailroomRows(
+        imageResult.rows,
+        jobsByProject,
+        input.threads,
+        message,
+        thread,
+      );
+      newRows.push(...withJobImages);
+      nextId = imageResult.nextId;
+
+      const fileResult = buildMailroomFileRowsForMessage(
+        thread,
+        message,
+        projectIds,
+        projectNameById,
+        dedupeIndex,
+        pendingBlobs,
+        nextId,
+        importBudget,
+      );
+      const withJobFiles = assignJobsOnNewMailroomRows(
+        fileResult.rows,
+        jobsByProject,
+        input.threads,
+        message,
+        thread,
+      );
+      newRows.push(...withJobFiles);
+      nextId = fileResult.nextId;
     }
   }
 
   if (newRows.length === 0) return { imported: 0, quotaExceeded: false };
+
+  if (isClientLiveBackend()) {
+    try {
+      const byProject = new Map<number, DocumentRow[]>();
+      for (const row of newRows) {
+        if (row.project_id == null) continue;
+        const list = byProject.get(row.project_id) ?? [];
+        list.push(row);
+        byProject.set(row.project_id, list);
+      }
+
+      const inserted: DocumentRow[] = [];
+      for (const [projectId, rows] of byProject) {
+        const saved = await insertMailroomDocumentsViaApi(projectId, rows, pendingBlobs);
+        inserted.push(...saved);
+      }
+
+      const fresh = await fetchAllDocumentsViaApi();
+      seedLiveDocumentsCache(fresh);
+      dispatchDocumentsChanged();
+      return { imported: inserted.length, quotaExceeded: false };
+    } catch (e) {
+      console.warn("[mailroom] supabase document import failed", e);
+      return { imported: 0, quotaExceeded: false };
+    }
+  }
 
   try {
     for (const [ref, dataUrl] of pendingBlobs) {
@@ -424,4 +631,43 @@ export async function importMailroomImagesToDocuments(
 
   dispatchDocumentsChanged();
   return { imported: newRows.length, quotaExceeded: false };
+}
+
+/** Re-run style # matching on unassigned mailroom docs after jobs are created/updated. */
+export async function reassignMailroomDocumentJobs(input: {
+  projectId: number;
+  jobs: ProjectJob[];
+  threads?: EmailThread[];
+}): Promise<number> {
+  if (typeof window === "undefined") return 0;
+
+  await loadExtraDocuments();
+  const extras = readExtraDocumentsSync();
+  const threads = input.threads ?? [];
+  const next = assignJobsToProjectDocuments(extras, input.projectId, input.jobs, threads);
+
+  let changed = 0;
+  for (let i = 0; i < extras.length; i++) {
+    if (extras[i]!.job_id !== next[i]!.job_id) changed += 1;
+  }
+  if (changed === 0) return 0;
+
+  if (isClientLiveBackend()) {
+    try {
+      const changedRows = next.filter((row, i) => extras[i]!.job_id !== row.job_id);
+      await syncDocumentsViaApi(changedRows);
+      const fresh = await fetchAllDocumentsViaApi();
+      seedLiveDocumentsCache(fresh);
+      dispatchDocumentsChanged();
+      return changed;
+    } catch (e) {
+      console.warn("[mailroom] document job reassignment failed", e);
+      return 0;
+    }
+  }
+
+  const ok = await persistExtraDocuments(next);
+  if (!ok) return 0;
+  dispatchDocumentsChanged();
+  return changed;
 }

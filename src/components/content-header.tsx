@@ -12,7 +12,7 @@ export function ContentHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border-light bg-surface-card px-4 sm:px-6">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-slate-200/80 bg-surface-body px-4 sm:px-6">
       <div className="min-w-0 flex-1">{breadcrumbs}</div>
       <div className="flex shrink-0 items-center gap-2">
         {actions}

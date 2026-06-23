@@ -195,6 +195,10 @@ export interface Project {
   /** Packing lists created in OnPro for outbound shipments */
   packaging_slips?: PackingSlipDocument[];
 
+  /** Project-level deliverable scope (local overlay until DB column exists). */
+  scope_kind?: "original" | "addon" | null;
+  scope_note?: string | null;
+
   /** When set, overrides legacy single-row dye / lab dip fields for UI + persistence. */
   dye_costing_tracks?: DyeCostingTrack[] | null;
   print_embroidery_costing_tracks?: PrintEmbroideryCostingTrack[] | null;

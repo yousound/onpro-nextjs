@@ -8,7 +8,7 @@ const SAMPLE_TIMELINE_STEP_IDS = new Set(["sample_1st", "sample_2nd", "sample_pp
 
 /** Cut & Sew sample approval steps open Development → SAMPLE APPROVALS. */
 export function timelineStepOpensIn(stepId: string): JobDetailsSection | undefined {
-  if (SAMPLE_TIMELINE_STEP_IDS.has(stepId)) return "development";
+  if (SAMPLE_TIMELINE_STEP_IDS.has(stepId)) return "cut_sew_samples";
   return undefined;
 }
 
@@ -148,26 +148,72 @@ export function repairJobTimelineWithTemplate(
 
 /** What accordion sections should the modal show for this job type? */
 export type AccordionSection =
-  | "estimate"
+  | "product_details"
+  | "brand"
+  | "color_sizing"
   | "development"
+  | "print_embroidery"
+  | "cut_sew_samples"
   | "costing"
   | "approvals"
-  | "bulk";
+  | "bulk"
+  | "vendor_quotes"
+  | "outputs";
 
 export function accordionSectionsFor(type: JobType | undefined): AccordionSection[] {
   switch (type) {
     case "full_package":
-      return ["estimate", "costing"];
+      return [
+        "product_details",
+        "brand",
+        "color_sizing",
+        "print_embroidery",
+        "vendor_quotes",
+        "costing",
+        "outputs",
+      ];
     case "design":
-      return ["estimate", "development"];
+      return ["product_details", "brand", "color_sizing", "development", "vendor_quotes", "outputs"];
     case "branding":
-      return ["estimate", "development", "costing"];
+      return [
+        "product_details",
+        "brand",
+        "color_sizing",
+        "development",
+        "print_embroidery",
+        "vendor_quotes",
+        "costing",
+        "outputs",
+      ];
     case "cut_sew":
-      return ["estimate", "development", "costing", "approvals", "bulk"];
+      return [
+        "product_details",
+        "brand",
+        "color_sizing",
+        "development",
+        "print_embroidery",
+        "cut_sew_samples",
+        "vendor_quotes",
+        "costing",
+        "approvals",
+        "bulk",
+        "outputs",
+      ];
     case "print_production":
     case "embroidery":
     case "custom":
     default:
-      return ["estimate", "development", "costing", "approvals", "bulk"];
+      return [
+        "product_details",
+        "brand",
+        "color_sizing",
+        "development",
+        "print_embroidery",
+        "vendor_quotes",
+        "costing",
+        "approvals",
+        "bulk",
+        "outputs",
+      ];
   }
 }

@@ -12,11 +12,7 @@ import {
 import type {
   ApprovalStatus,
   BulkProductionTrack,
-  Colorway,
   Project,
-  Sample,
-  SampleStatus,
-  SampleType,
 } from "@/lib/types/project";
 import type { Contact } from "@/lib/types/contact";
 import {
@@ -30,15 +26,11 @@ import {
 } from "@/lib/types/wip";
 import { findDuplicateSku } from "@/lib/sku";
 import { jobTimelineEditorLabel } from "@/lib/types/wip";
-import { JobShareMenu } from "@/components/job-share-menu";
-import { ModalSectionLayout, ModalSectionNavList } from "@/components/modal-section-layout";
+import { ModalSectionLayout } from "@/components/modal-section-layout";
 import {
   CheckMini,
-  ProjectModalAside,
-  ProjectModalBadge,
   ProjectModalOverlay,
   ProjectModalPanelFooter,
-  ProjectModalPanelHeader,
   projectModalFieldClass,
   projectModalLabelClass,
   projectModalTextareaClass,
@@ -79,11 +71,9 @@ import {
 import {
   defaultBulkProductionTrack,
   defaultDyeCostingTrack,
-  defaultPrintEmbroideryTrack,
   defaultTrimLineTrack,
   updateBulkTrack,
   updateDyeTrack,
-  updatePrintEmbTrack,
 } from "@/lib/project-repeatable-tracks";
 import { generatePoForJob } from "@/lib/po-context";
 import { orderDisplayLabel } from "@/lib/effective-po";
@@ -97,12 +87,29 @@ import { JobLabelsSection } from "@/components/job-labels-section";
 import { TechPackArtworkSection } from "@/components/tech-pack-artwork-section";
 import { CostingSheetEditor } from "@/components/costing-sheet-editor";
 import { JobOverviewFields } from "@/components/job-overview-fields";
+import { JobDetailsSummary } from "@/components/job-details-summary";
+import { JobBrandSection } from "@/components/job-brand-section";
+import { JobPrintEmbroiderySection } from "@/components/job-print-embroidery-section";
+import { JobCutSewSamplesSection } from "@/components/job-cut-sew-samples-section";
+import { JobColorSizingSection } from "@/components/job-color-sizing-section";
+import { JobDetailModulesSection } from "@/components/job-detail-modules-section";
+import {
+  ensureDetailModule,
+  inferDetailModules,
+  isJobDetailModuleKind,
+  nestedDetailSection,
+  type JobDetailModule,
+  type JobDetailModuleKind,
+} from "@/lib/job-detail-modules";
+import { JobDetailsModalHeader } from "@/components/job-details-modal-header";
+import { jobTypeLabel } from "@/components/job-details-modal-helpers";
 import { useCurrentUser } from "@/components/profile-provider";
-import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
+import { newColorwayRow, syncLegacyColorwayFields } from "@/lib/job-colorways";
 import { effectiveJobPrice, priceFromCostingSheet } from "@/lib/job-price";
 import { isApparelWorkspace } from "@/lib/workspace-industry";
 import { JobVendorsSection } from "@/components/job-vendors-section";
 import { VendorQuotesSection } from "@/components/vendor-quotes-section";
+import type { FinancialDocMode } from "@/components/financial-document-fullscreen";
 import { EstimatesList } from "@/components/estimates-list";
 import {
   costingLineFromVendorQuote,
@@ -125,41 +132,53 @@ const fieldClass = projectModalFieldClass;
 const labelClass = projectModalLabelClass;
 const textareaClass = projectModalTextareaClass;
 
-const SAMPLE_STATUS_OPTIONS: SampleStatus[] = [
-  "PENDING",
-  "RECEIVED",
-  "APPROVED",
-  "REJECTED",
-  "IN REVIEW",
-];
+type JobModalSection = "overview" | "timeline" | JobDetailsSection;
 
-const SAMPLE_TYPE_OPTIONS: SampleType[] = [
-  "1ST SAMPLE",
-  "2ND SAMPLE",
-  "3RD SAMPLE",
-  "PP SAMPLE",
-  "2ND PP SAMPLE",
-];
-
-type JobModalSection = "overview" | "labels" | "timeline" | JobDetailsSection;
+const NESTED_JOB_DETAIL_SECTIONS = new Set<JobDetailsSection>([
+  "color_sizing",
+  "development",
+  "print_embroidery",
+  "cut_sew_samples",
+]);
 
 const SECTION_LABEL: Record<JobModalSection, string> = {
   overview: "Overview",
-  labels: "Labels & barcodes",
-  timeline: "Job timeline",
-  estimate: "Estimate",
+  product_details: "Job details",
+  timeline: "Timeline",
+  brand: "Brand",
+  color_sizing: "Color & sizing",
   development: "Development",
+  print_embroidery: "Print & embroidery",
+  cut_sew_samples: "Cut & sew samples",
+  vendor_quotes: "Vendor quotes",
   costing: "Costing",
   approvals: "Approvals",
   bulk: "Bulk production",
+  outputs: "Financials",
 };
+
+function visibleModalSections(jobType?: JobType): JobModalSection[] {
+  const a = new Set(accordionSectionsForJob(jobType));
+  const nav: JobModalSection[] = ["overview"];
+  if (a.has("product_details")) nav.push("product_details");
+  nav.push("timeline");
+  if (a.has("brand")) nav.push("brand");
+  if (a.has("vendor_quotes")) nav.push("vendor_quotes");
+  if (a.has("costing")) nav.push("costing");
+  if (a.has("approvals")) nav.push("approvals");
+  if (a.has("bulk")) nav.push("bulk");
+  if (a.has("outputs")) nav.push("outputs");
+  return nav;
+}
+
+function resolveInitialSection(focus?: JobDetailsFocus): JobModalSection {
+  if (!focus) return "overview";
+  if (nestedDetailSection(focus.section)) return "product_details";
+  return focus.section as JobModalSection;
+}
 
 function accordionSectionsForJob(jobType?: JobType): JobDetailsSection[] {
   return accordionSectionsFor(jobType) as JobDetailsSection[];
-}
-
-function visibleModalSections(jobType?: JobType): JobModalSection[] {
-  return ["overview", "labels", "timeline", ...accordionSectionsForJob(jobType)];
 }
 
 function resolveCategoryDropdown(category: string): string {
@@ -174,11 +193,6 @@ function resolveCategoryDropdown(category: string): string {
   const byFullLabel = CATEGORY_CODES.find((c) => c.label.toLowerCase() === trimmed.toLowerCase());
   if (byFullLabel) return byFullLabel.dropdownLabel;
   return dropdownLabelForCategoryCode(trimmed) !== "Custom" ? dropdownLabelForCategoryCode(trimmed) : trimmed;
-}
-
-function jobTypeLabel(jobType: JobType | undefined): string {
-  const hit = JOB_TYPE_OPTIONS.find((o) => o.value === jobType);
-  return hit?.label ?? "Print Production";
 }
 
 function cloneJob(job: ProjectJob): ProjectJob {
@@ -228,14 +242,6 @@ function cloneJob(job: ProjectJob): ProjectJob {
       },
     })),
   };
-}
-
-function JobBadgeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="size-5" aria-hidden>
-      <path d="M10 2h4a2 2 0 0 1 2 2v2h4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6h4V4a2 2 0 0 1 2-2zm2 4V4h-4v2h4z" />
-    </svg>
-  );
 }
 
 function SectionCard({
@@ -398,6 +404,9 @@ export type JobDetailsModalProps = {
   onSave: (job: ProjectJob) => void;
   onDelete?: () => void;
   deleting?: boolean;
+  onSwitchJob?: (jobId: string) => void;
+  /** Save job draft and open a vendor quote in the project Financials workspace. */
+  onOpenFinancials?: (job: ProjectJob, quoteId: string, mode?: FinancialDocMode) => void;
 };
 
 export function JobDetailsModal({
@@ -415,6 +424,8 @@ export function JobDetailsModal({
   onSave,
   onDelete,
   deleting = false,
+  onSwitchJob,
+  onOpenFinancials,
 }: JobDetailsModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(() => {
@@ -424,18 +435,16 @@ export function JobDetailsModal({
   const [categoryDropdown, setCategoryDropdown] = useState(() =>
     isNew ? "" : resolveCategoryDropdown(job.category),
   );
-  const [activeSection, setActiveSection] = useState<JobModalSection>(
-    () => (focus?.section ?? "overview") as JobModalSection,
-  );
+  const [activeSection, setActiveSection] = useState<JobModalSection>(() => resolveInitialSection(focus));
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [highlightModuleKind, setHighlightModuleKind] = useState<JobDetailModuleKind | null>(() =>
+    focus?.section && isJobDetailModuleKind(focus.section) ? focus.section : null,
+  );
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { user: currentUser } = useCurrentUser();
   const apparelWorkspace = isApparelWorkspace(currentUser?.businessType);
-  const colorwayRows = useMemo(
-    () => draft.colorway_rows ?? normalizeColorwayRows(draft),
-    [draft.colorway_rows, draft.colorway, draft.color_code],
-  );
+  const colorwayRows = useMemo(() => draft.colorway_rows ?? [], [draft.colorway_rows]);
   const isPrimaryJob = useMemo(() => {
     if (!allJobs.length) return true;
     const sorted = [...allJobs].sort((a, b) =>
@@ -542,6 +551,7 @@ export function JobDetailsModal({
     const q = (draft.vendor_quotes ?? []).find((vq) => vq.id === quoteId);
     if (!q) return;
     const sheet = draft.costing_sheet ?? emptyCostingSheet();
+    if (sheet.lines.some((line) => line.vendor_quote_id === quoteId)) return;
     patchCostingSheet({ ...sheet, lines: [...sheet.lines, costingLineFromVendorQuote(q)] });
   }
 
@@ -616,6 +626,7 @@ export function JobDetailsModal({
 
   function handleJumpToSection(section: JobModalSection) {
     setActiveSection(section);
+    setHighlightModuleKind(null);
     const id = `job-section-${section}`;
     setHighlightId(id);
     window.setTimeout(() => {
@@ -627,16 +638,33 @@ export function JobDetailsModal({
 
   function handleTimelineStepClick(stepId: string) {
     const step = draft.timeline.find((s) => s.id === stepId);
-    const section = wipStepToSection(stepId, step?.opensIn);
+    let section = wipStepToSection(stepId, step?.opensIn);
+    let moduleKind: JobDetailModuleKind | null = null;
+
+    if (nestedDetailSection(section)) {
+      moduleKind = section;
+      section = "product_details";
+      const nextModules = ensureDetailModule(detailModules, moduleKind);
+      if (nextModules.length !== detailModules.length) patchDetailModules(nextModules);
+    }
+
     setActiveSection(section as JobModalSection);
-    const focusStepId = stepId.startsWith("sample_") ? "sample_approvals" : stepId;
-    const targetId = `job-step-${focusStepId}`;
+    setHighlightModuleKind(moduleKind);
+    const isSampleStep = stepId.startsWith("sample_");
+    const targetId = moduleKind
+      ? `job-module-${moduleKind}`
+      : isSampleStep
+        ? "job-module-cut_sew_samples"
+        : `job-step-${stepId}`;
     setHighlightId(targetId);
     window.setTimeout(() => {
       const root = scrollRef.current;
       const el = root?.querySelector<HTMLElement>(`#${CSS.escape(targetId)}`);
       el?.scrollIntoView({ behavior: "smooth", block: "center" });
-      window.setTimeout(() => setHighlightId(null), 1800);
+      window.setTimeout(() => {
+        setHighlightId(null);
+        setHighlightModuleKind(null);
+      }, 1800);
     }, 80);
   }
 
@@ -696,6 +724,20 @@ export function JobDetailsModal({
     }
   }
 
+  function handleOpenQuoteInFinancials(quoteId: string, mode: FinancialDocMode = "edit") {
+    if (!onOpenFinancials || isNew) return;
+    const saved: ProjectJob = {
+      ...draft,
+      ...syncLegacyColorwayFields(draft),
+      category: categoryDropdown,
+      sku: draft.sku?.trim() || null,
+      scope_note: draft.scope_note?.trim() || undefined,
+      price: displayPrice || draft.price || null,
+      updated_at: new Date().toISOString(),
+    };
+    onOpenFinancials(normalizeJob(saved, project), quoteId, mode);
+  }
+
   function handleDuplicate() {
     if (isNew) return;
     setDuplicateOpen(true);
@@ -736,61 +778,28 @@ export function JobDetailsModal({
   const trimLineTracks = development.trim_line_tracks;
   const sampleStages = development.sample_approval_stages;
   const barcodesDate = barcodesSentDate(draft);
-  const printTracks = costing.print_embroidery_costing_tracks;
-  const colorways = costing.colorways;
-  const visibleSections = accordionSectionsForJob(draft.job_type);
+  const visibleSections = accordionSectionsForJob(draft.job_type).filter(
+    (s) => !NESTED_JOB_DETAIL_SECTIONS.has(s),
+  );
+  const detailModules = useMemo(() => {
+    if (draft.detail_modules?.length) return draft.detail_modules;
+    if (isNew) return [];
+    return inferDetailModules(draft);
+  }, [draft, isNew]);
 
-  function patchColorway(colorwayId: number, partial: Partial<Colorway>) {
-    patchCosting({
-      colorways: colorways.map((cw) => (cw.id === colorwayId ? { ...cw, ...partial } : cw)),
-    });
-  }
-
-  function patchSample(colorwayId: number, sampleId: number, partial: Partial<Sample>) {
-    patchCosting({
-      colorways: colorways.map((cw) =>
-        cw.id !== colorwayId
-          ? cw
-          : {
-              ...cw,
-              samples: cw.samples.map((s) => (s.id === sampleId ? { ...s, ...partial } : s)),
-            },
-      ),
-    });
-  }
-
-  function addColorway() {
-    const maxId = colorways.reduce((m, c) => Math.max(m, c.id), 0);
-    patchCosting({
-      colorways: [...colorways, { id: maxId + 1, name: `Colorway ${colorways.length + 1}`, samples: [] }],
-    });
-  }
-
-  function nextSampleType(colorwayId: number): SampleType {
-    const cw = colorways.find((c) => c.id === colorwayId);
-    const used = new Set(cw?.samples.map((s) => s.type) ?? []);
-    return SAMPLE_TYPE_OPTIONS.find((t) => !used.has(t)) ?? "1ST SAMPLE";
-  }
-
-  function addSample(colorwayId: number) {
-    const cw = colorways.find((c) => c.id === colorwayId);
-    if (!cw) return;
-    const maxId = colorways.flatMap((c) => c.samples).reduce((m, s) => Math.max(m, s.id), 0);
-    patchColorway(colorwayId, {
-      samples: [
-        ...cw.samples,
-        {
-          id: maxId + 1,
-          type: nextSampleType(colorwayId),
-          requested_date: null,
-          due_date: null,
-          received_date: null,
-          comments_sent_date: null,
-          status: "PENDING",
-          comments: null,
-        },
-      ],
-    });
+  function patchDetailModules(modules: JobDetailModule[]) {
+    const addingColorSizing =
+      modules.some((m) => m.kind === "color_sizing") &&
+      !detailModules.some((m) => m.kind === "color_sizing");
+    if (addingColorSizing && !(draft.colorway_rows?.length ?? 0)) {
+      const rows = [newColorwayRow()];
+      patch({
+        detail_modules: modules,
+        ...syncLegacyColorwayFields({ ...draft, colorway_rows: rows }),
+      });
+      return;
+    }
+    patch({ detail_modules: modules });
   }
 
   function removeBulkTrack(id: string) {
@@ -816,6 +825,439 @@ export function JobDetailsModal({
     draft.job_number ? `Job ${draft.job_number}` : null,
     statusLabel,
   ].filter(Boolean);
+  function renderDetailModuleContent(kind: JobDetailModuleKind): ReactNode {
+    if (kind === "color_sizing") {
+      return (
+        <JobColorSizingSection
+          draft={draft}
+          patch={patch}
+          colorwayRows={colorwayRows}
+          onColorwayChange={(rows) =>
+            patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))
+          }
+          displayPrice={displayPrice}
+          costingPrice={costingPrice}
+        />
+      );
+    }
+    if (kind === "print_embroidery") {
+      return (
+        <JobPrintEmbroiderySection
+          tracks={costing.print_embroidery_costing_tracks}
+          vendors={vendors}
+          fieldClass={fieldClass}
+          onChange={(tracks) => patchCosting({ print_embroidery_costing_tracks: tracks })}
+        />
+      );
+    }
+    if (kind === "cut_sew_samples") {
+      return (
+        <JobCutSewSamplesSection
+          colorways={costing.colorways}
+          fieldClass={fieldClass}
+          textareaClass={textareaClass}
+          onChange={(colorways) => patchCosting({ colorways })}
+        />
+      );
+    }
+    if (kind === "development") {
+      return renderDevelopmentModuleContent();
+    }
+    return null;
+  }
+
+  function renderDevelopmentModuleContent(): ReactNode {
+    return (
+      <>
+        <WipStepFieldBlock stepId="mock_up" highlight={highlightId === "job-step-mock_up"}>
+          <label className={labelClass}>
+            References sent
+            <input
+              type="date"
+              className={fieldClass}
+              value={isoToDateInput(estimate.references_sent_date)}
+              onChange={(e) =>
+                patchEstimate({ references_sent_date: dateInputToIso(e.target.value) })
+              }
+            />
+          </label>
+          <label className={`${labelClass} mt-3 block`}>
+            Mock-up notes
+            <textarea
+              className={textareaClass}
+              rows={3}
+              value={estimate.mock_up_notes ?? ""}
+              onChange={(e) =>
+                patchEstimate({ mock_up_notes: e.target.value.trim() || null })
+              }
+            />
+          </label>
+        </WipStepFieldBlock>
+
+        <WipStepFieldBlock stepId="tp_setup" highlight={highlightId === "job-step-tp_setup"}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={labelClass}>
+              Tech pack due
+              <input
+                type="date"
+                className={fieldClass}
+                value={isoToDateInput(techPackDueDate(techPack))}
+                onChange={(e) =>
+                  patchTechPack({ tech_pack_due_date: dateInputToIso(e.target.value) })
+                }
+              />
+            </label>
+            <label className={labelClass}>
+              Tech pack complete
+              <input
+                type="date"
+                className={fieldClass}
+                value={isoToDateInput(techPackCompleteDate(techPack))}
+                onChange={(e) =>
+                  patchTechPack({ tech_pack_complete_date: dateInputToIso(e.target.value) })
+                }
+              />
+            </label>
+          </div>
+          <div className="mt-4">
+            <TechPackArtworkSection
+              files={techPack.artwork_files ?? []}
+              links={techPack.dropbox_links ?? []}
+              onChangeFiles={(artwork_files) => patchTechPack({ artwork_files })}
+              onChangeLinks={(dropbox_links) => patchTechPack({ dropbox_links })}
+            />
+          </div>
+        </WipStepFieldBlock>
+
+        <WipStepFieldBlock stepId="blanks_lab_dip" highlight={highlightId === "job-step-blanks_lab_dip"}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+            Blanks purchasing
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className={labelClass}>
+              Blanks purchased
+              <input
+                type="date"
+                className={fieldClass}
+                value={isoToDateInput(development.blanks_purchased_date)}
+                onChange={(e) =>
+                  patchDevelopment({ blanks_purchased_date: dateInputToIso(e.target.value) })
+                }
+              />
+            </label>
+            <label className={labelClass}>
+              Products Go blanks requested
+              <input
+                type="date"
+                className={fieldClass}
+                value={isoToDateInput(development.pg_requested_date)}
+                onChange={(e) =>
+                  patchDevelopment({ pg_requested_date: dateInputToIso(e.target.value) })
+                }
+              />
+            </label>
+            <label className={labelClass}>
+              Blanks received
+              <input
+                type="date"
+                className={fieldClass}
+                value={isoToDateInput(development.blanks_received_date)}
+                onChange={(e) =>
+                  patchDevelopment({ blanks_received_date: dateInputToIso(e.target.value) })
+                }
+              />
+            </label>
+          </div>
+
+          <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+            Lab dip requested
+          </p>
+          <div className="mt-3 space-y-3">
+            {dyeTracks.map((t, i) => (
+              <SectionCard
+                key={t.id}
+                title={dyeTracks.length > 1 ? `Dye line ${i + 1}` : "Dye line"}
+                headerExtra={
+                  dyeTracks.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        patchDevelopment({
+                          dye_costing_tracks: dyeTracks.filter((x) => x.id !== t.id),
+                        })
+                      }
+                      className="text-[11px] font-semibold text-red-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  ) : undefined
+                }
+              >
+                <VendorFieldSelect
+                  label="Vendor"
+                  vendors={vendors}
+                  value={t.dye_vendor}
+                  onChange={(name) =>
+                    patchDevelopment({
+                      dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
+                        dye_vendor: name,
+                      }),
+                    })
+                  }
+                />
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className={labelClass}>
+                    Lab dip requested
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(t.lab_dip_request_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
+                            lab_dip_request_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    Lab dip due
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(t.lab_dip_due_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
+                            lab_dip_due_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    Lab dip received
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(t.lab_dip_received_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
+                            lab_dip_received_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <label className={labelClass}>
+                  Lab dip status
+                  <select
+                    className={fieldClass}
+                    value={t.lab_dip_approval_status ?? "PENDING"}
+                    onChange={(e) =>
+                      patchDevelopment({
+                        dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
+                          lab_dip_approval_status: e.target.value as ApprovalStatus,
+                        }),
+                      })
+                    }
+                  >
+                    {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </SectionCard>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                patchDevelopment({ dye_costing_tracks: [...dyeTracks, defaultDyeCostingTrack()] })
+              }
+              className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
+            >
+              + Add dye line
+            </button>
+          </div>
+        </WipStepFieldBlock>
+
+        <WipStepFieldBlock stepId="order_trims" highlight={highlightId === "job-step-order_trims"}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+            Trims
+          </p>
+          <div className="mt-3 space-y-3">
+            {trimLineTracks.map((t, i) => (
+              <SectionCard
+                key={t.id}
+                title={trimLineTracks.length > 1 ? `Trim line ${i + 1}` : "Trim line"}
+                headerExtra={
+                  trimLineTracks.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        patchDevelopment({
+                          trim_line_tracks: trimLineTracks.filter((x) => x.id !== t.id),
+                        })
+                      }
+                      className="text-[11px] font-semibold text-red-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  ) : undefined
+                }
+              >
+                <VendorFieldSelect
+                  label="Vendor"
+                  vendors={vendors}
+                  value={t.vendor}
+                  onChange={(name) =>
+                    patchDevelopment({
+                      trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                        vendor: name,
+                      }),
+                    })
+                  }
+                />
+                <label className={labelClass}>
+                  Trim type
+                  <input
+                    className={fieldClass}
+                    value={t.trim_type ?? ""}
+                    placeholder="e.g. woven label, hang tag"
+                    onChange={(e) =>
+                      patchDevelopment({
+                        trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                          trim_type: e.target.value.trim() || null,
+                        }),
+                      })
+                    }
+                  />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className={labelClass}>
+                    Trim ordered
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(t.trim_ordered_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                            trim_ordered_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    Trim received
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(t.trim_received_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
+                            trim_received_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              </SectionCard>
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                patchDevelopment({
+                  trim_line_tracks: [...trimLineTracks, defaultTrimLineTrack()],
+                })
+              }
+              className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
+            >
+              + Add trim line
+            </button>
+          </div>
+        </WipStepFieldBlock>
+
+        <WipStepFieldBlock
+          stepId="sample_approvals"
+          title="SAMPLE APPROVALS"
+          highlight={highlightId === "job-step-sample_approvals"}
+        >
+          <div className="space-y-5">
+            {sampleStages.map((stage) => {
+              const fieldLabels = sampleApprovalFieldLabels(stage.key);
+              return (
+                <div
+                  key={stage.key}
+                  className="grid gap-3 border-t border-border-light pt-4 first:border-t-0 first:pt-0 sm:grid-cols-3"
+                >
+                  <label className={labelClass}>
+                    {fieldLabels.requested}
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(stage.requested_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          sample_approval_stages: updateSampleStage(sampleStages, stage.key, {
+                            requested_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {fieldLabels.due}
+                    <input
+                      type="date"
+                      className={fieldClass}
+                      value={isoToDateInput(stage.due_date)}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          sample_approval_stages: updateSampleStage(sampleStages, stage.key, {
+                            due_date: dateInputToIso(e.target.value),
+                          }),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {fieldLabels.status}
+                    <select
+                      className={fieldClass}
+                      value={stage.status ?? "PENDING"}
+                      onChange={(e) =>
+                        patchDevelopment({
+                          sample_approval_stages: updateSampleStage(sampleStages, stage.key, {
+                            status: e.target.value as ApprovalStatus,
+                          }),
+                        })
+                      }
+                    >
+                      {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </WipStepFieldBlock>
+      </>
+    );
+  }
+
   const sectionNavItems = visibleModalSections(draft.job_type).map((id) => ({
     id,
     label: SECTION_LABEL[id],
@@ -826,46 +1268,16 @@ export function JobDetailsModal({
       titleId="job-details-modal-title"
       onClose={onClose}
       overlayClassName={overlayClassName}
-      size="wide-tall"
-      aside={
-        <ProjectModalAside
-          badge={
-            <ProjectModalBadge>
-              <JobBadgeIcon />
-            </ProjectModalBadge>
-          }
-          title={
-            <>
-              Track every step
-              <br />
-              of the run.
-            </>
-          }
-          body="Update timeline dates, costing, approvals, and production details — all tied to this job’s WIP."
-          nav={
-            <ModalSectionNavList
-              sections={sectionNavItems}
-              activeSection={activeSection}
-              onSectionChange={(id) => handleJumpToSection(id as JobModalSection)}
-              navLabel="Job sections"
-              variant="polished"
-              tone="aside"
-            />
-          }
-        />
-      }
+      size="workspace"
     >
-      <ProjectModalPanelHeader
-        title={draft.name.trim() || (isNew ? "New job" : "Job details")}
-        subtitle={subtitleParts.join(" · ")}
+      <JobDetailsModalHeader
         titleId="job-details-modal-title"
+        subtitle={subtitleParts.join(" · ")}
+        jobs={allJobs}
+        activeJobId={draft.id}
+        onSelectJob={onSwitchJob}
         onClose={onClose}
       />
-      {!isNew ? (
-        <div className="flex shrink-0 justify-end border-b border-slate-100 px-5 py-2 sm:px-6">
-          <JobShareMenu project={project} job={draft} />
-        </div>
-      ) : null}
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSave} noValidate>
         <ModalSectionLayout
           sections={sectionNavItems}
@@ -873,36 +1285,16 @@ export function JobDetailsModal({
           onSectionChange={(id) => handleJumpToSection(id as JobModalSection)}
           navLabel="Job sections"
           variant="polished"
-          sidebar="none"
+          sidebar="inline"
           contentRef={scrollRef}
         >
           <div className="space-y-4">
               <div hidden={activeSection !== "overview"}>
             <SectionCard
               id="job-section-overview"
-              title="Job details"
+              title="Overview"
               highlight={highlightId === "job-section-overview"}
             >
-              <JobOverviewFields
-                draft={draft}
-                patch={patch}
-                vendors={vendors}
-                categoryDropdown={categoryDropdown}
-                onCategoryChange={handleCategoryChange}
-                onJobTypeChange={handleJobTypeChange}
-                isPrimaryJob={isPrimaryJob}
-                colorwayRows={colorwayRows}
-                onColorwayChange={(rows) =>
-                  patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))
-                }
-                displayPrice={displayPrice}
-                costingPrice={costingPrice}
-                fieldClass={fieldClass}
-                textareaClass={textareaClass}
-                showLeadTimesLink
-                onApplyTimelineTemplate={applyTimelineTemplateForType}
-              />
-
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className={labelClass}>
                   <span className="flex items-center gap-2">
@@ -941,6 +1333,13 @@ export function JobDetailsModal({
                 </label>
               </div>
 
+              <JobDetailsSummary
+                draft={draft}
+                categoryDropdown={categoryDropdown}
+                colorwayRows={colorwayRows}
+                orderDueYmd={orderDueYmd}
+              />
+
               {orders.length > 0 ? (
                 <label className={labelClass}>
                   Order
@@ -959,213 +1358,11 @@ export function JobDetailsModal({
                   </select>
                 </label>
               ) : null}
-
-              <label className={labelClass}>
-                Scope
-                <select
-                  className={fieldClass}
-                  value={draft.scope_kind ?? "original"}
-                  onChange={(e) => patch({ scope_kind: e.target.value as JobScopeKind })}
-                >
-                  <option value="original">Original deliverable</option>
-                  <option value="addon">Reorder</option>
-                </select>
-              </label>
-
-              <label className={labelClass}>
-                SKU #
-                <input
-                  className={fieldClass}
-                  value={draft.sku ?? ""}
-                  placeholder="Unique SKU (optional)"
-                  onChange={(e) => patch({ sku: e.target.value.toUpperCase() })}
-                />
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  Must be unique across your workspace.
-                </p>
-              </label>
-
-              {(draft.custom_fields ?? []).map((cf, idx) => (
-                <div key={cf.id ?? `custom-field-${idx}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                  <input
-                    className={fieldClass}
-                    value={cf.key}
-                    placeholder="Field name"
-                    onChange={(e) => {
-                      const next = [...(draft.custom_fields ?? [])];
-                      next[idx] = { ...cf, key: e.target.value };
-                      patch({ custom_fields: next });
-                    }}
-                  />
-                  <input
-                    className={fieldClass}
-                    value={cf.value}
-                    placeholder="Value"
-                    onChange={(e) => {
-                      const next = [...(draft.custom_fields ?? [])];
-                      next[idx] = { ...cf, value: e.target.value };
-                      patch({ custom_fields: next });
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      patch({
-                        custom_fields: (draft.custom_fields ?? []).filter((_, i) => i !== idx),
-                      })
-                    }
-                    className="text-xs font-semibold text-red-600"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-              <p className="text-[11px] text-text-secondary">
-                Optional extra fields for this job (e.g. fabric content, decoration notes).
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  patch({
-                    custom_fields: [
-                      ...(draft.custom_fields ?? []),
-                      {
-                        id: `cf-${Date.now().toString(36)}`,
-                        key: "",
-                        value: "",
-                      },
-                    ],
-                  })
-                }
-                className="rounded-lg border border-dashed border-border-light px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-accent hover:text-accent"
-              >
-                + Add field
-              </button>
-
-              {draft.scope_kind === "addon" ? (
-                <div className="rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-950">Reorder scope</p>
-                  <div className="mt-3 space-y-3">
-                    <label className={labelClass}>
-                      Reorder category
-                      <select
-                        className={fieldClass}
-                        value={draft.addon_category ?? ""}
-                        onChange={(e) => patch({ addon_category: e.target.value })}
-                      >
-                        <option value="">Select…</option>
-                        {ADDON_CATEGORY_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <SizeChipGroup
-                      label="Shirt sizes"
-                      options={SHIRT_SIZE_OPTIONS}
-                      selected={draft.addon_shirt_sizes ?? []}
-                      onChange={(sizes) => patch({ addon_shirt_sizes: sizes })}
-                    />
-
-                    <div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className={labelClass}>Pant sizes</p>
-                        <div className="flex rounded-lg border border-border-light bg-white p-0.5 text-[11px] font-semibold">
-                          {(["alpha", "numeric"] as const).map((mode) => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() =>
-                                patch({
-                                  addon_pant_size_mode: mode,
-                                  addon_pant_sizes: [],
-                                })
-                              }
-                              className={`rounded-md px-2.5 py-1 capitalize ${
-                                (draft.addon_pant_size_mode ?? "alpha") === mode
-                                  ? "bg-accent text-white"
-                                  : "text-text-secondary"
-                              }`}
-                            >
-                              {mode}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <SizeChipGroup
-                        label=""
-                        options={
-                          (draft.addon_pant_size_mode ?? "alpha") === "numeric"
-                            ? PANT_SIZE_NUMERIC
-                            : PANT_SIZE_ALPHA
-                        }
-                        selected={draft.addon_pant_sizes ?? []}
-                        onChange={(sizes) => patch({ addon_pant_sizes: sizes })}
-                      />
-                    </div>
-
-                    <label className={labelClass}>
-                      Custom note
-                      <textarea
-                        className={textareaClass}
-                        rows={2}
-                        value={draft.addon_custom_note ?? ""}
-                        onChange={(e) => patch({ addon_custom_note: e.target.value })}
-                      />
-                    </label>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="rounded-xl border border-border-light bg-surface-body/40 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                  Garment blanks (optional)
-                </p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className={labelClass}>
-                      Garment style #
-                      <input
-                        className={fieldClass}
-                        value={draft.garment_style_number ?? ""}
-                        onChange={(e) => patch({ garment_style_number: e.target.value })}
-                      />
-                    </label>
-                    <label className={labelClass}>
-                      Garment color
-                      <input
-                        className={fieldClass}
-                        value={draft.garment_color ?? ""}
-                        onChange={(e) => patch({ garment_color: e.target.value })}
-                      />
-                    </label>
-                    <label className={labelClass}>
-                      Garment size
-                      <input
-                        className={fieldClass}
-                        value={draft.garment_size ?? ""}
-                        onChange={(e) => patch({ garment_size: e.target.value })}
-                      />
-                    </label>
-                </div>
-              </div>
-
             </SectionCard>
               </div>
 
-              <div hidden={activeSection !== "labels"}>
-                <SectionCard
-                  id="job-section-labels"
-                  title="Labels & barcodes"
-                  highlight={highlightId === "job-section-labels"}
-                >
-                  <JobLabelsSection draft={draft} allJobs={allJobs} onPatch={patch} />
-                </SectionCard>
-              </div>
-
               <div hidden={activeSection !== "timeline"}>
-                <SectionCard
+                <SectionPanel
                   id="job-section-timeline"
                   title="Job timeline"
                   highlight={highlightId === "job-section-timeline"}
@@ -1184,7 +1381,7 @@ export function JobDetailsModal({
                     steps={draft.timeline}
                     onChange={(timeline) => patch({ timeline })}
                   />
-                </SectionCard>
+                </SectionPanel>
               </div>
 
             {visibleSections.map((section) => (
@@ -1194,67 +1391,152 @@ export function JobDetailsModal({
                 title={SECTION_LABEL[section]}
                 highlight={highlightId === `job-section-${section}`}
               >
-                {section === "estimate" ? (
+                {section === "product_details" ? (
+                  <>
+                    <JobOverviewFields
+                      draft={draft}
+                      patch={patch}
+                      vendors={vendors}
+                      categoryDropdown={categoryDropdown}
+                      onCategoryChange={handleCategoryChange}
+                      onJobTypeChange={handleJobTypeChange}
+                      isPrimaryJob={isPrimaryJob}
+                      fieldClass={fieldClass}
+                      textareaClass={textareaClass}
+                      showLeadTimesLink
+                      onApplyTimelineTemplate={applyTimelineTemplateForType}
+                    />
+                    <JobDetailModulesSection
+                      jobType={draft.job_type}
+                      modules={detailModules}
+                      onChange={patchDetailModules}
+                      highlightKind={highlightModuleKind}
+                      renderModule={(kind) => renderDetailModuleContent(kind)}
+                    />
+                  </>
+                ) : null}
+
+                {section === "brand" ? (
+                  <JobBrandSection
+                    draft={draft}
+                    patch={patch}
+                    vendors={vendors}
+                    isPrimaryJob={isPrimaryJob}
+                    fieldClass={fieldClass}
+                  />
+                ) : null}
+
+                {section === "vendor_quotes" ? (
                   <>
                     <WipStepFieldBlock
                       stepId="vendor_inquiries"
                       highlight={highlightId === "job-step-vendor_inquiries"}
                     >
                       <div className="grid gap-3 sm:grid-cols-2">
-                          <label className={labelClass}>
-                            Quote requested
-                            <input
-                              type="date"
-                              className={fieldClass}
-                              value={isoToDateInput(estimate.quote_requested_date)}
-                              onChange={(e) =>
-                                patchEstimate({ quote_requested_date: dateInputToIso(e.target.value) })
-                              }
-                            />
-                          </label>
-                          <label className={labelClass}>
-                            Vendor costing received
-                            <input
-                              type="date"
-                              className={fieldClass}
-                              value={isoToDateInput(estimate.vendor_costing_received_date)}
-                              onChange={(e) =>
-                                patchEstimate({ vendor_costing_received_date: dateInputToIso(e.target.value) })
-                              }
-                            />
-                          </label>
-                        </div>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock stepId="mock_up" highlight={highlightId === "job-step-mock_up"}>
-                      <label className={labelClass}>
-                          References sent
+                        <label className={labelClass}>
+                          Quote requested
                           <input
                             type="date"
                             className={fieldClass}
-                            value={isoToDateInput(estimate.references_sent_date)}
+                            value={isoToDateInput(estimate.quote_requested_date)}
                             onChange={(e) =>
-                              patchEstimate({ references_sent_date: dateInputToIso(e.target.value) })
+                              patchEstimate({ quote_requested_date: dateInputToIso(e.target.value) })
                             }
                           />
                         </label>
-                        <label className={`${labelClass} mt-3 block`}>
-                          Mock-up notes
-                          <textarea
-                            className={textareaClass}
-                            rows={3}
-                            value={estimate.mock_up_notes ?? ""}
+                        <label className={labelClass}>
+                          Vendor costing received
+                          <input
+                            type="date"
+                            className={fieldClass}
+                            value={isoToDateInput(estimate.vendor_costing_received_date)}
                             onChange={(e) =>
-                              patchEstimate({ mock_up_notes: e.target.value.trim() || null })
+                              patchEstimate({
+                                vendor_costing_received_date: dateInputToIso(e.target.value),
+                              })
                             }
-                        />
-                      </label>
+                          />
+                        </label>
+                      </div>
                     </WipStepFieldBlock>
+
+                    <SectionCard title="Job vendors">
+                      <JobVendorsSection
+                        assignedNames={draft.job_vendors ?? assignedJobVendors}
+                        allVendors={vendors}
+                        leadVendor={draft.lead_vendor}
+                        onChange={(names) => patch({ job_vendors: names })}
+                        onLeadVendorChange={(name) => patch({ lead_vendor: name })}
+                      />
+                    </SectionCard>
+
+                    <SectionCard title="Vendor quotes (their cost to us)">
+                      <VendorQuotesSection
+                        project={project}
+                        job={draft}
+                        quotes={draft.vendor_quotes ?? []}
+                        vendors={vendors}
+                        onChange={patchVendorQuotes}
+                        onPullToCosting={pullVendorQuoteIntoSheet}
+                        onQuoteReceived={handleVendorQuoteReceived}
+                        onOpenInFinancials={onOpenFinancials ? handleOpenQuoteInFinancials : undefined}
+                      />
+                    </SectionCard>
+                  </>
+                ) : null}
+
+                {section === "outputs" ? (
+                  <>
+                    <p className="text-sm text-text-secondary">
+                      Client-facing estimates for this job. Full project financials (estimate, PO, vendor quote
+                      previews) live under the project <strong>Financials</strong> tab.
+                    </p>
+                    <SectionCard title="Estimates (client-facing snapshots)">
+                      <EstimatesList
+                        project={project}
+                        estimates={draft.estimates ?? []}
+                        onChange={(next) => {
+                          const wasSent = (draft.estimates ?? []).some((e) => e.status === "sent");
+                          const nowSent = next.some((e) => e.status === "sent");
+                          patchEstimates(next);
+                          if (!wasSent && nowSent) handleEstimateSent();
+                        }}
+                        job={draft}
+                        clientName={project.client.name}
+                        clientContact={clientContact}
+                        onSent={handleEstimateSent}
+                      />
+                    </SectionCard>
                   </>
                 ) : null}
 
                 {section === "development" ? (
                   <>
+                    <WipStepFieldBlock stepId="mock_up" highlight={highlightId === "job-step-mock_up"}>
+                      <label className={labelClass}>
+                        References sent
+                        <input
+                          type="date"
+                          className={fieldClass}
+                          value={isoToDateInput(estimate.references_sent_date)}
+                          onChange={(e) =>
+                            patchEstimate({ references_sent_date: dateInputToIso(e.target.value) })
+                          }
+                        />
+                      </label>
+                      <label className={`${labelClass} mt-3 block`}>
+                        Mock-up notes
+                        <textarea
+                          className={textareaClass}
+                          rows={3}
+                          value={estimate.mock_up_notes ?? ""}
+                          onChange={(e) =>
+                            patchEstimate({ mock_up_notes: e.target.value.trim() || null })
+                          }
+                        />
+                      </label>
+                    </WipStepFieldBlock>
+
                     <WipStepFieldBlock stepId="tp_setup" highlight={highlightId === "job-step-tp_setup"}>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className={labelClass}>
@@ -1627,30 +1909,26 @@ export function JobDetailsModal({
                   </>
                 ) : null}
 
+                {section === "print_embroidery" ? (
+                  <JobPrintEmbroiderySection
+                    tracks={costing.print_embroidery_costing_tracks}
+                    vendors={vendors}
+                    fieldClass={fieldClass}
+                    onChange={(tracks) => patchCosting({ print_embroidery_costing_tracks: tracks })}
+                  />
+                ) : null}
+
+                {section === "cut_sew_samples" ? (
+                  <JobCutSewSamplesSection
+                    colorways={costing.colorways}
+                    fieldClass={fieldClass}
+                    textareaClass={textareaClass}
+                    onChange={(colorways) => patchCosting({ colorways })}
+                  />
+                ) : null}
+
                 {section === "costing" ? (
                   <>
-                    <SectionCard title="Job vendors">
-                      <JobVendorsSection
-                        assignedNames={draft.job_vendors ?? assignedJobVendors}
-                        allVendors={vendors}
-                        leadVendor={draft.lead_vendor}
-                        onChange={(names) => patch({ job_vendors: names })}
-                        onLeadVendorChange={(name) => patch({ lead_vendor: name })}
-                      />
-                    </SectionCard>
-
-                    <SectionCard title="Vendor quotes (their cost to us)">
-                      <VendorQuotesSection
-                        project={project}
-                        job={draft}
-                        quotes={draft.vendor_quotes ?? []}
-                        vendors={vendors}
-                        onChange={patchVendorQuotes}
-                        onPullToCosting={pullVendorQuoteIntoSheet}
-                        onQuoteReceived={handleVendorQuoteReceived}
-                      />
-                    </SectionCard>
-
                     <SectionCard title="Costing sheet (internal worksheet)">
                       <CostingSheetEditor
                         job={draft}
@@ -1659,23 +1937,6 @@ export function JobDetailsModal({
                         vendorQuotes={draft.vendor_quotes ?? []}
                         onChange={patchCostingSheet}
                         onGenerateEstimate={handleGenerateEstimate}
-                      />
-                    </SectionCard>
-
-                    <SectionCard title="Estimates (client-facing snapshots)">
-                      <EstimatesList
-                        project={project}
-                        estimates={draft.estimates ?? []}
-                        onChange={(next) => {
-                          const wasSent = (draft.estimates ?? []).some((e) => e.status === "sent");
-                          const nowSent = next.some((e) => e.status === "sent");
-                          patchEstimates(next);
-                          if (!wasSent && nowSent) handleEstimateSent();
-                        }}
-                        job={draft}
-                        clientName={project.client.name}
-                        clientContact={clientContact}
-                        onSent={handleEstimateSent}
                       />
                     </SectionCard>
 
@@ -1735,298 +1996,6 @@ export function JobDetailsModal({
                         Deposit / payment received (costing approved)
                       </label>
                     </WipStepFieldBlock>
-
-                    <div className="space-y-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Print / embroidery
-                      </p>
-                      {printTracks.map((t, i) => (
-                        <SectionCard
-                          key={t.id}
-                          title={printTracks.length > 1 ? `Print line ${i + 1}` : "Print line"}
-                          headerExtra={
-                            printTracks.length > 1 ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  patchCosting({
-                                    print_embroidery_costing_tracks: printTracks.filter((x) => x.id !== t.id),
-                                  })
-                                }
-                                className="text-[11px] font-semibold text-red-600 hover:underline"
-                              >
-                                Remove
-                              </button>
-                            ) : undefined
-                          }
-                        >
-                          <VendorFieldSelect
-                            label="Vendor"
-                            vendors={vendors}
-                            value={t.print_embroidery_vendor}
-                            onChange={(name) =>
-                              patchCosting({
-                                print_embroidery_costing_tracks: updatePrintEmbTrack(printTracks, t.id, {
-                                  print_embroidery_vendor: name,
-                                }),
-                              })
-                            }
-                          />
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <label className={labelClass}>
-                              Strike off requested
-                              <input
-                                type="date"
-                                className={fieldClass}
-                                value={isoToDateInput(t.strike_off_request_date)}
-                                onChange={(e) =>
-                                  patchCosting({
-                                    print_embroidery_costing_tracks: updatePrintEmbTrack(printTracks, t.id, {
-                                      strike_off_request_date: dateInputToIso(e.target.value),
-                                    }),
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className={labelClass}>
-                              Strike off due
-                              <input
-                                type="date"
-                                className={fieldClass}
-                                value={isoToDateInput(t.strike_off_due_date)}
-                                onChange={(e) =>
-                                  patchCosting({
-                                    print_embroidery_costing_tracks: updatePrintEmbTrack(printTracks, t.id, {
-                                      strike_off_due_date: dateInputToIso(e.target.value),
-                                    }),
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className={labelClass}>
-                              Strike off received
-                              <input
-                                type="date"
-                                className={fieldClass}
-                                value={isoToDateInput(t.strike_off_received_date)}
-                                onChange={(e) =>
-                                  patchCosting({
-                                    print_embroidery_costing_tracks: updatePrintEmbTrack(printTracks, t.id, {
-                                      strike_off_received_date: dateInputToIso(e.target.value),
-                                    }),
-                                  })
-                                }
-                              />
-                            </label>
-                          </div>
-                          <label className={labelClass}>
-                            Strike off status
-                            <select
-                              className={fieldClass}
-                              value={t.strike_off_approval_status ?? "PENDING"}
-                              onChange={(e) =>
-                                patchCosting({
-                                  print_embroidery_costing_tracks: updatePrintEmbTrack(printTracks, t.id, {
-                                    strike_off_approval_status: e.target.value as ApprovalStatus,
-                                  }),
-                                })
-                              }
-                            >
-                              {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
-                                <option key={s} value={s}>
-                                  {s}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </SectionCard>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          patchCosting({
-                            print_embroidery_costing_tracks: [...printTracks, defaultPrintEmbroideryTrack()],
-                          })
-                        }
-                        className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
-                      >
-                        + Add print / embroidery line
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 border-t border-border-light pt-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                          Cut & sew · colorways & samples
-                        </p>
-                        <button
-                          type="button"
-                          onClick={addColorway}
-                          className="text-xs font-semibold text-accent hover:underline"
-                        >
-                          + Add colorway
-                        </button>
-                      </div>
-                      {colorways.map((cw) => (
-                        <SectionCard
-                          key={cw.id}
-                          title={cw.name}
-                          headerExtra={
-                            colorways.length > 1 ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  patchCosting({ colorways: colorways.filter((c) => c.id !== cw.id) })
-                                }
-                                className="text-[11px] font-semibold text-red-600 hover:underline"
-                              >
-                                Remove
-                              </button>
-                            ) : undefined
-                          }
-                        >
-                          <label className={labelClass}>
-                            Colorway name
-                            <input
-                              className={fieldClass}
-                              value={cw.name}
-                              onChange={(e) => patchColorway(cw.id, { name: e.target.value })}
-                            />
-                          </label>
-                          {cw.samples.length === 0 ? (
-                            <p className="text-sm text-text-secondary">No samples yet.</p>
-                          ) : (
-                            cw.samples.map((s) => (
-                              <GrayRow key={s.id}>
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <label className={`${labelClass} min-w-[10rem] flex-1`}>
-                                    Sample stage
-                                    <select
-                                      className={fieldClass}
-                                      value={s.type}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          type: e.target.value as SampleType,
-                                        })
-                                      }
-                                    >
-                                      {SAMPLE_TYPE_OPTIONS.map((opt) => (
-                                        <option key={opt} value={opt}>
-                                          {opt}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      patchColorway(cw.id, {
-                                        samples: cw.samples.filter((x) => x.id !== s.id),
-                                      })
-                                    }
-                                    className="text-[11px] font-semibold text-red-600 hover:underline"
-                                  >
-                                    Remove sample
-                                  </button>
-                                </div>
-                                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                                  <label className={labelClass}>
-                                    Requested
-                                    <input
-                                      type="date"
-                                      className={fieldClass}
-                                      value={isoToDateInput(s.requested_date)}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          requested_date: dateInputToIso(e.target.value),
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                  <label className={labelClass}>
-                                    Due
-                                    <input
-                                      type="date"
-                                      className={fieldClass}
-                                      value={isoToDateInput(s.due_date)}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          due_date: dateInputToIso(e.target.value),
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                  <label className={labelClass}>
-                                    Received
-                                    <input
-                                      type="date"
-                                      className={fieldClass}
-                                      value={isoToDateInput(s.received_date)}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          received_date: dateInputToIso(e.target.value),
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                  <label className={labelClass}>
-                                    Comments sent
-                                    <input
-                                      type="date"
-                                      className={fieldClass}
-                                      value={isoToDateInput(s.comments_sent_date)}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          comments_sent_date: dateInputToIso(e.target.value),
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                  <label className={`${labelClass} sm:col-span-2`}>
-                                    Status
-                                    <select
-                                      className={fieldClass}
-                                      value={s.status}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          status: e.target.value as SampleStatus,
-                                        })
-                                      }
-                                    >
-                                      {SAMPLE_STATUS_OPTIONS.map((opt) => (
-                                        <option key={opt} value={opt}>
-                                          {opt}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className={`${labelClass} sm:col-span-2`}>
-                                    Comments
-                                    <textarea
-                                      className={textareaClass}
-                                      rows={2}
-                                      value={s.comments ?? ""}
-                                      onChange={(e) =>
-                                        patchSample(cw.id, s.id, {
-                                          comments: e.target.value.trim() || null,
-                                        })
-                                      }
-                                    />
-                                  </label>
-                                </div>
-                              </GrayRow>
-                            ))
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => addSample(cw.id)}
-                            className="text-xs font-semibold text-accent hover:underline"
-                          >
-                            + Add sample
-                          </button>
-                        </SectionCard>
-                      ))}
-                    </div>
                   </>
                 ) : null}
 
@@ -2362,6 +2331,8 @@ export function JobDetailsModal({
           onExtraLeft={!isNew ? handleDuplicate : undefined}
           secondaryLabel="Cancel"
           onSecondary={onClose}
+          middleLabel="Request quotes"
+          onMiddle={() => handleJumpToSection("vendor_quotes")}
           primaryLabel={saving ? "Saving…" : "Save job"}
           primaryIcon={<CheckMini />}
           primaryDisabled={deleting || saving}

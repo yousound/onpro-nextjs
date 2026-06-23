@@ -109,6 +109,8 @@ const LOCAL_ONLY_PROJECT_KEYS = new Set([
   "print_embroidery_costing_tracks",
   "costing_extra_tracks",
   "bulk_production_tracks",
+  "scope_kind",
+  "scope_note",
 ]);
 
 const SKIP_PROJECT_PATCH_KEYS = new Set(["id", "client", ...LOCAL_ONLY_PROJECT_KEYS]);

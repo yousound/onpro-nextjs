@@ -46,6 +46,8 @@ export function PageHeader(props: {
   /** Info control beside the title — opens section overview / cover. */
   onInfoClick?: () => void;
   infoLabel?: string;
+  /** Grey canvas below title — KPI tiles sit on surface-body so white cards pop. */
+  contentCanvas?: boolean;
 }) {
   const {
     title,
@@ -58,20 +60,13 @@ export function PageHeader(props: {
     titleClickLabel,
     onInfoClick,
     infoLabel,
+    contentCanvas = false,
   } = props;
   const light = variant === "light";
   const toneClass = light ? toneClassLight : toneClassDark;
 
-  return (
-    <div
-      className={
-        light
-          ? "border-b border-border-light bg-white px-6 py-6 text-text-primary shadow-sm"
-          : "border-b border-border-subtle bg-chrome-dark px-6 py-6 text-text-on-chrome"
-      }
-    >
-      <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+  const titleBlock = (
+    <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               {onTitleClick ? (
@@ -116,35 +111,64 @@ export function PageHeader(props: {
             </div>
           ) : null}
         </div>
-        {kpis && kpis.length > 0 ? (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {kpis.map((k) => (
+  );
+
+  const kpiBlock =
+    kpis && kpis.length > 0 ? (
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {kpis.map((k) => {
+          const tone = k.tone ?? "default";
+          return (
+            <div
+              key={k.label}
+              title={k.hint}
+              className={
+                light
+                  ? "rounded-2xl border border-slate-200/80 bg-white px-4 py-3.5 shadow-sm"
+                  : "rounded-xl border border-border-subtle bg-chrome-elevated/60 px-4 py-3"
+              }
+            >
               <div
-                key={k.label}
-                title={k.hint}
-                className={
-                  light
-                    ? "rounded-xl border border-slate-300 bg-white px-4 py-3"
-                    : "rounded-xl border border-border-subtle bg-chrome-elevated/60 px-4 py-3"
-                }
+                className={`text-xs font-medium uppercase tracking-wide ${
+                  light ? "text-text-secondary" : "text-text-muted-chrome"
+                }`}
               >
-                <div
-                  className={`text-xs font-medium uppercase tracking-wide ${
-                    light ? "text-text-secondary" : "text-text-muted-chrome"
-                  }`}
-                >
-                  {k.label}
-                </div>
-                <div
-                  className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass[k.tone ?? "default"]}`}
-                  suppressHydrationWarning
-                >
-                  {k.value}
-                </div>
+                {k.label}
               </div>
-            ))}
-          </div>
-        ) : null}
+              <div
+                className={`mt-0.5 text-2xl font-bold tabular-nums ${toneClass[tone]}`}
+                suppressHydrationWarning
+              >
+                {k.value}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ) : null;
+
+  if (contentCanvas && light) {
+    return (
+      <div className="shrink-0 bg-surface-body px-6 pb-2 pt-6 text-text-primary">
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
+          {titleBlock}
+          {kpiBlock}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={
+        light
+          ? "border-b border-border-light bg-white px-6 py-6 text-text-primary shadow-sm"
+          : "border-b border-border-subtle bg-chrome-dark px-6 py-6 text-text-on-chrome"
+      }
+    >
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
+        {titleBlock}
+        {kpiBlock}
       </div>
     </div>
   );

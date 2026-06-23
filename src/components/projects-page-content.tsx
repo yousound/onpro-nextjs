@@ -535,10 +535,11 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-body">
       <div className="shrink-0">
         <PageHeader
           title="Projects"
+          contentCanvas
           onInfoClick={projectCount === 0 ? openCoverPage : undefined}
           infoLabel={projectCount === 0 ? "About Projects" : undefined}
           action={

@@ -1,6 +1,6 @@
 /** Shared printable document for vendor POs and client estimates (production billing). */
 
-export type ProductionDocumentKind = "vendor_po" | "client_estimate";
+export type ProductionDocumentKind = "vendor_po" | "vendor_quote" | "client_estimate";
 
 export interface ProductionDocumentLine {
   id: string;

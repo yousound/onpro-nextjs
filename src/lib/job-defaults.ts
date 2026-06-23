@@ -5,7 +5,6 @@ import {
   defaultBulkProductionTrack,
   defaultCostingExtraTrack,
   defaultDyeCostingTrack,
-  defaultPrintEmbroideryTrack,
 } from "@/lib/project-repeatable-tracks";
 import { defaultSampleApprovalStages, resolveSampleApprovalStages } from "@/lib/job-development";
 import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
@@ -34,11 +33,11 @@ export function defaultJobCosting(project?: Project): NonNullable<ProjectJob["co
     dye_costing_tracks: [defaultDyeCostingTrack()],
     trim_line_tracks: [],
     sample_approval_stages: defaultSampleApprovalStages(),
-    print_embroidery_costing_tracks: [defaultPrintEmbroideryTrack()],
+    print_embroidery_costing_tracks: [],
     costing_extra_tracks: [defaultCostingExtraTrack()],
     colorways: project?.colorways?.length
       ? project.colorways.map((c) => ({ ...c, samples: [...c.samples] }))
-      : [{ id: 1, name: "Colorway 1", samples: [] }],
+      : [],
   };
 }
 
@@ -141,7 +140,7 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
     costing: {
       ...defaultJobCosting(project),
       ...job.costing,
-      colorways: (job.costing?.colorways ?? defaultJobCosting(project).colorways).map((cw) => ({
+      colorways: (job.costing?.colorways ?? []).map((cw) => ({
         ...cw,
         samples: cw.samples.map(backfillSample),
       })),
@@ -151,10 +150,7 @@ export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
           : defaultJobCosting(project).dye_costing_tracks,
       trim_line_tracks: job.costing?.trim_line_tracks ?? defaultJobCosting(project).trim_line_tracks,
       sample_approval_stages: resolveSampleApprovalStages(job.costing?.sample_approval_stages),
-      print_embroidery_costing_tracks:
-        job.costing?.print_embroidery_costing_tracks?.length
-          ? job.costing.print_embroidery_costing_tracks
-          : defaultJobCosting(project).print_embroidery_costing_tracks,
+      print_embroidery_costing_tracks: job.costing?.print_embroidery_costing_tracks ?? [],
       costing_extra_tracks:
         job.costing?.costing_extra_tracks?.length
           ? job.costing.costing_extra_tracks

@@ -80,7 +80,7 @@ export function normalizeColorwayRows(
       }),
     ];
   }
-  return [newColorwayRow()];
+  return [];
 }
 
 export function patchColorwayRow(

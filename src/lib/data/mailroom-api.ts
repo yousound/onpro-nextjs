@@ -166,6 +166,57 @@ export async function disconnectGmailViaApi(): Promise<void> {
   }
 }
 
+export type GmailOutboundSendPayload = {
+  toName: string;
+  toEmail: string;
+  ccEmails?: string[];
+  subject: string;
+  body: string;
+  htmlBody?: string;
+  fromName?: string;
+  projectId: number;
+  jobId?: string | null;
+  vendorQuoteId?: string | null;
+  estimateId?: string | null;
+  category?: string;
+  mailroomThreadId?: string | null;
+  documentIds?: number[];
+  productionDocuments?: import("@/lib/documents/production-document-types").ProductionDocument[];
+  attachQuoteDocument?: boolean;
+};
+
+export type GmailOutboundSendResult = {
+  ok: true;
+  gmailMessageId: string;
+  gmailThreadId: string;
+  mailroomThreadId: string;
+  attachmentCount: number;
+  linkedAttachmentCount?: number;
+  fromEmail: string;
+  thread?: import("@/lib/types/agent").EmailThread;
+};
+
+export async function sendGmailOutboundViaApi(
+  payload: GmailOutboundSendPayload,
+): Promise<GmailOutboundSendResult> {
+  const res = await fetch("/api/mailroom/gmail/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = (await res.json().catch(() => ({}))) as GmailOutboundSendResult & {
+    error?: string;
+    needsReauth?: boolean;
+  };
+  if (!res.ok) {
+    if (data.needsReauth) {
+      throw new Error("Gmail session expired — reconnect Gmail in Mailroom.");
+    }
+    throw new Error(data.error ?? "Could not send email");
+  }
+  return data;
+}
+
 export type MailroomChatResponse = {
   reply: string;
   propose_suggestion: {

@@ -24,12 +24,13 @@ export function RequestVendorQuotesModal({
   jobs: ProjectJob[];
   vendors: Contact[];
   onClose: () => void;
-  onSend: (updates: Map<string, VendorQuote[]>) => void;
+  onSend: (updates: Map<string, VendorQuote[]>, options?: { combinedSend?: boolean }) => void;
 }) {
   const [step, setStep] = useState<Step>("jobs");
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [selectedVendors, setSelectedVendors] = useState<string[]>([]);
   const [vendorDraft, setVendorDraft] = useState("");
+  const [combinedSend, setCombinedSend] = useState(true);
 
   const projectNumber = projectPoNumber(project);
 
@@ -90,7 +91,9 @@ export function RequestVendorQuotesModal({
       [...selectedJobIds],
       selectedVendors,
     );
-    onSend(updates);
+    onSend(updates, {
+      combinedSend: selectedVendors.length === 1 && combinedSend && selectedJobIds.size > 1,
+    });
   }
 
   const canNextJobs = selectedJobIds.size > 0;
@@ -196,8 +199,28 @@ export function RequestVendorQuotesModal({
             <div className="space-y-3">
               <p className="text-sm text-text-secondary">
                 {preview.length} quote request{preview.length === 1 ? "" : "s"} will be created.
-                Open each job to preview and send — one separate email per vendor.
+                {selectedVendors.length === 1 && selectedJobIds.size > 1 ? (
+                  <> You can send one combined email to {selectedVendors[0]} with all styles.</>
+                ) : (
+                  <> Open each job to preview and send — one separate email per vendor.</>
+                )}
               </p>
+              {selectedVendors.length === 1 && selectedJobIds.size > 1 ? (
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={combinedSend}
+                    onChange={(e) => setCombinedSend(e.target.checked)}
+                  />
+                  <span className="text-sm text-text-primary">
+                    <span className="font-semibold">Send as one combined email</span>
+                    <span className="mt-0.5 block text-text-secondary">
+                      One message to {selectedVendors[0]} with all job specs and art attachments.
+                    </span>
+                  </span>
+                </label>
+              ) : null}
               <ul className="space-y-2 text-sm">
                 {preview.map((row, i) => (
                   <li

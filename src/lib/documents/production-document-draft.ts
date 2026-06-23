@@ -1,3 +1,4 @@
+import { colorwayRowTotal, formatJobSizeBreakdown } from "@/lib/job-colorways";
 import { formatUsdDetailed, parseUsdInput } from "@/lib/ledger/format";
 import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
@@ -70,7 +71,12 @@ function baseDocument(
     billToAddress2: "",
     documentNumber: "",
     documentDate: now,
-    terms: kind === "vendor_po" ? "Net 30" : "Estimate",
+    terms:
+      kind === "vendor_po"
+        ? "Net 30"
+        : kind === "vendor_quote"
+          ? "Quote request"
+          : "Estimate",
     dueDate: now,
     shipToName: CONNECT_DOTS_ISSUER.name,
     shipToAddress1: CONNECT_DOTS_ISSUER.address1,
@@ -87,7 +93,11 @@ function baseDocument(
     paid: formatUsdDetailed(0),
     memoNotes: "",
     termsAndConditions:
-      kind === "vendor_po" ? DEFAULT_VENDOR_PO_TERMS : DEFAULT_CLIENT_ESTIMATE_TERMS,
+      kind === "vendor_po"
+        ? DEFAULT_VENDOR_PO_TERMS
+        : kind === "vendor_quote"
+          ? "Pricing and lead times subject to vendor confirmation."
+          : DEFAULT_CLIENT_ESTIMATE_TERMS,
     ...partial,
   };
 }
@@ -113,6 +123,45 @@ export function computeProductionDocumentTotals(
     paidCents,
     balanceDueCents,
   };
+}
+
+export function buildVendorQuoteDocument(input: {
+  project: Project;
+  job: ProjectJob;
+  quote: VendorQuote;
+  vendorContact?: Contact | null;
+}): ProductionDocument {
+  const { project, job, quote, vendorContact } = input;
+  const pn = projectPoNumber(project) ?? "";
+  const addr = formatContactAddress(vendorContact);
+  const rate =
+    quote.unit_cost > 0 ? formatUsdDetailed(Math.round(quote.unit_cost * 100)) : "";
+
+  const lines: ProductionDocumentLine[] = [
+    {
+      id: newLineId(),
+      description: quote.item_description?.trim() || job.name?.trim() || "Quote request",
+      quantity: String(quote.qty || 1),
+      rate,
+      non_taxable: true,
+    },
+  ];
+  while (lines.length < 3) lines.push(emptyProductionLine());
+
+  const jobRef = job.job_number?.trim() || job.id;
+  return baseDocument("vendor_quote", {
+    billToName: vendorContact?.name?.trim() || quote.vendor?.trim() || "",
+    billToEmail: vendorContact?.email?.trim() ?? "",
+    billToAddress1: addr.line1,
+    billToAddress2: addr.line2,
+    documentNumber: quote.po_number?.trim() || `VQ-${jobRef}`,
+    projectName: project.name?.trim() ?? "",
+    projectNumber: pn,
+    jobNumber: job.job_number?.trim() ?? "",
+    referenceNotes: [job.style_number, job.name].filter(Boolean).join(" · "),
+    lines,
+    memoNotes: quote.notes?.trim() ?? "",
+  });
 }
 
 export function buildVendorPoDocument(input: {
@@ -196,6 +245,54 @@ export function buildClientEstimateDocument(input: {
   });
 }
 
+export function buildJobPreviewEstimateDocument(input: {
+  project: Project;
+  job: ProjectJob;
+  clientName: string;
+  clientContact?: Contact | null;
+}): ProductionDocument {
+  const { project, job, clientName, clientContact } = input;
+  const pn = projectPoNumber(project) ?? "";
+  const addr = formatContactAddress(clientContact);
+  const rows = job.colorway_rows ?? [];
+  const qtyTotal = rows.reduce((sum, row) => sum + colorwayRowTotal(row), 0);
+  const unitPrice = parseFloat(String(job.price ?? "").replace(/[^0-9.\-]/g, "")) || 0;
+  const colorSummary = formatJobSizeBreakdown(rows).replace(/\n/g, "; ");
+
+  const description = [
+    job.name?.trim(),
+    job.style_number?.trim() ? `Style ${job.style_number.trim()}` : null,
+    colorSummary,
+    job.description?.trim(),
+  ]
+    .filter(Boolean)
+    .join(" — ");
+
+  const lines: ProductionDocumentLine[] = [
+    {
+      id: newLineId(),
+      description: description || "Job line",
+      quantity: String(qtyTotal || 1),
+      rate: unitPrice > 0 ? formatUsdDetailed(Math.round(unitPrice * 100)) : "",
+    },
+  ];
+  while (lines.length < 3) lines.push(emptyProductionLine());
+
+  return baseDocument("client_estimate", {
+    billToName: clientName,
+    billToEmail: clientContact?.email?.trim() ?? "",
+    billToAddress1: addr.line1,
+    billToAddress2: addr.line2,
+    documentNumber: job.job_number?.trim() || pn,
+    projectName: project.name?.trim() ?? "",
+    projectNumber: pn,
+    jobNumber: job.job_number?.trim() ?? "",
+    referenceNotes: job.style_number?.trim() ?? "",
+    lines,
+    memoNotes: job.description?.trim() ?? "",
+  });
+}
+
 export function storeProductionDocumentPrefill(draft: ProductionDocument): void {
   if (typeof window === "undefined") return;
   sessionStorage.setItem(PRODUCTION_DOCUMENT_PREFILL_KEY, JSON.stringify(draft));
@@ -218,7 +315,8 @@ export function clearProductionDocumentPrefill(): void {
 }
 
 export function productionDocumentTitle(draft: ProductionDocument): string {
-  const label = draft.kind === "vendor_po" ? "PO" : "Estimate";
+  const label =
+    draft.kind === "vendor_po" ? "PO" : draft.kind === "vendor_quote" ? "Quote" : "Estimate";
   const num = draft.documentNumber.trim() || "draft";
   return `ConnectDots-${label}-${num}`;
 }

@@ -135,6 +135,7 @@ import { AppToast } from "@/components/app-toast";
 import { emailBodyPreview, normalizeEmailBody } from "@/lib/email-body";
 import { importMailroomImagesToDocuments } from "@/lib/documents/import-mailroom-images";
 import { getDocuments } from "@/lib/mock/documents";
+import { loadProjectJobs } from "@/lib/project-wip-edits";
 
 const CATEGORY_DOT: Record<NonNullable<EmailThread["category"]>, string> = {
   vendor_quote: "bg-violet-500",
@@ -444,11 +445,20 @@ export function MailroomView() {
 
   useEffect(() => {
     const syncMailroom = () => setState(loadMailroomState());
+    const onThreadSynced = (e: Event) => {
+      const thread = (e as CustomEvent<{ thread?: EmailThread }>).detail?.thread;
+      if (thread) {
+        setGmailThreads((prev) => mergeGmailThreadLists(prev, [thread]));
+        gmailFullThreadIdsRef.current.add(thread.id);
+      }
+    };
     window.addEventListener("onpro-mailroom-state-changed", syncMailroom);
     window.addEventListener("onpro-projects-changed", syncMailroom);
+    window.addEventListener("onpro-gmail-thread-synced", onThreadSynced);
     return () => {
       window.removeEventListener("onpro-mailroom-state-changed", syncMailroom);
       window.removeEventListener("onpro-projects-changed", syncMailroom);
+      window.removeEventListener("onpro-gmail-thread-synced", onThreadSynced);
     };
   }, []);
 
@@ -858,6 +868,14 @@ export function MailroomView() {
     [workflowProjects],
   );
 
+  const jobsByProjectId = useMemo(() => {
+    const map = new Map<number, ReturnType<typeof loadProjectJobs>>();
+    for (const p of workflowProjects) {
+      map.set(p.id, loadProjectJobs(p.id));
+    }
+    return map;
+  }, [workflowProjects, state?.workflows]);
+
   const mailroomImportToastRef = useRef(false);
   useEffect(() => {
     if (!state || workflowProjects.length === 0) return;
@@ -867,6 +885,7 @@ export function MailroomView() {
       workflows: state.workflows ?? {},
       generatedItems: state.generated_items,
       projectNames: workflowProjects.map((p) => ({ id: p.id, name: p.name })),
+      jobsByProjectId,
       seedDocuments: isClientLiveBackend() ? [] : getDocuments(),
     }).then((result) => {
       if (cancelled || !result.quotaExceeded) return;
@@ -879,7 +898,7 @@ export function MailroomView() {
     return () => {
       cancelled = true;
     };
-  }, [threads, state, workflowProjects]);
+  }, [threads, state, workflowProjects, jobsByProjectId]);
 
   const selectedWorkflow = useMemo(
     () => (selectedThread && state ? state.workflows[selectedThread.id] : undefined),
@@ -2801,7 +2820,14 @@ function EmailRow({
       </button>
       {open ? (
         <div className="border-t border-border-light px-3 py-2 text-[13px] text-text-primary">
-          <div className="whitespace-pre-wrap break-words">{plainBody}</div>
+          {message.htmlBody ? (
+            <div
+              className="prose prose-sm max-w-none break-words email-html-body"
+              dangerouslySetInnerHTML={{ __html: message.htmlBody }}
+            />
+          ) : (
+            <div className="whitespace-pre-wrap break-words">{plainBody}</div>
+          )}
           {message.inlineImages && message.inlineImages.length > 0 ? (
             <ul className="mt-2 flex flex-wrap gap-2">
               {message.inlineImages.map((img) => (
@@ -2815,6 +2841,24 @@ function EmailRow({
                 </li>
               ))}
             </ul>
+          ) : null}
+          {message.fileAttachments && message.fileAttachments.length > 0 ? (
+            <div className="mt-2 border-t border-border-light pt-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-text-secondary">
+                {message.fileAttachments.length} file
+                {message.fileAttachments.length === 1 ? "" : "s"}
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-1">
+                {message.fileAttachments.map((a) => (
+                  <li key={a.id}>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-text-primary ring-1 ring-slate-200">
+                      <span aria-hidden>📎</span>
+                      <span className="max-w-[16rem] truncate">{a.label ?? a.filename}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
           {message.attachments && message.attachments.length > 0 ? (
             <div className="mt-2 border-t border-border-light pt-2">

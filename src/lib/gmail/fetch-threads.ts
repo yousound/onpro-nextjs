@@ -1,6 +1,6 @@
-import { isLikelyHtml, normalizeEmailBody } from "@/lib/email-body";
+import { isLikelyHtml, normalizeEmailBody, stripUnsafeEmailHtml } from "@/lib/email-body";
 import { attachmentDataToDataUrl, fetchGmailAttachmentData } from "@/lib/gmail/fetch-attachment";
-import type { EmailInlineImage, EmailMessage, EmailThread } from "@/lib/types/agent";
+import type { EmailFilePart, EmailInlineImage, EmailMessage, EmailThread } from "@/lib/types/agent";
 
 type GmailHeader = { name: string; value: string };
 
@@ -42,8 +42,21 @@ type PendingImagePart = {
   inlineData?: string;
 };
 
-const MAX_INLINE_IMAGES_PER_MESSAGE = 12;
-const MAX_INLINE_IMAGE_BYTES = 2_500_000;
+type PendingFilePart = {
+  mimeType: string;
+  filename?: string;
+  attachmentId?: string;
+  inlineData?: string;
+  size?: number;
+};
+
+const MAX_EMAIL_FILES_PER_MESSAGE = 8;
+const MAX_EMAIL_FILE_BYTES = 12_000_000;
+
+function isInlineDisposition(part: GmailPayload): boolean {
+  const disp = header(part.headers, "Content-Disposition").toLowerCase();
+  return disp.includes("inline");
+}
 
 function base64UrlToDataUrl(mimeType: string, data: string): string {
   const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
@@ -52,6 +65,48 @@ function base64UrlToDataUrl(mimeType: string, data: string): string {
 
 function parseContentId(raw: string): string {
   return raw.trim().replace(/^<|>$/g, "");
+}
+
+const MAX_INLINE_IMAGES_PER_MESSAGE = 12;
+const MAX_INLINE_IMAGE_BYTES = 2_500_000;
+
+function listFileParts(part: GmailPayload, out: PendingFilePart[]): void {
+  if (out.length >= MAX_EMAIL_FILES_PER_MESSAGE) return;
+  const mime = part.mimeType ?? "";
+  if (!mime || mime === "text/plain" || mime === "text/html" || mime.startsWith("multipart/")) {
+    for (const child of part.parts ?? []) listFileParts(child, out);
+    return;
+  }
+  if (mime.startsWith("image/")) {
+    for (const child of part.parts ?? []) listFileParts(child, out);
+    return;
+  }
+  if (isInlineDisposition(part)) {
+    for (const child of part.parts ?? []) listFileParts(child, out);
+    return;
+  }
+  if (part.body?.data) {
+    const approxBytes = Math.floor((part.body.data.length * 3) / 4);
+    if (approxBytes <= MAX_EMAIL_FILE_BYTES) {
+      out.push({
+        mimeType: mime,
+        filename: part.filename,
+        inlineData: part.body.data,
+        size: approxBytes,
+      });
+    }
+  } else if (part.body?.attachmentId) {
+    const size = part.body.size ?? 0;
+    if (size === 0 || size <= MAX_EMAIL_FILE_BYTES) {
+      out.push({
+        mimeType: mime,
+        filename: part.filename,
+        attachmentId: part.body.attachmentId,
+        size,
+      });
+    }
+  }
+  for (const child of part.parts ?? []) listFileParts(child, out);
 }
 
 function listImageParts(part: GmailPayload, out: PendingImagePart[]): void {
@@ -148,6 +203,37 @@ async function resolveMessageImages(
   }
 
   return images;
+}
+
+async function resolveMessageFiles(
+  accessToken: string,
+  messageId: string,
+  payload: GmailPayload,
+): Promise<EmailFilePart[]> {
+  const pending: PendingFilePart[] = [];
+  listFileParts(payload, pending);
+
+  const resolved = await Promise.all(
+    pending.map(async (part, index): Promise<EmailFilePart | null> => {
+      let dataUrl: string | null = null;
+      if (part.inlineData) {
+        dataUrl = base64UrlToDataUrl(part.mimeType, part.inlineData);
+      } else if (part.attachmentId) {
+        const data = await fetchGmailAttachmentData(accessToken, messageId, part.attachmentId);
+        if (data) dataUrl = attachmentDataToDataUrl(part.mimeType, data);
+      }
+      if (!dataUrl) return null;
+      return {
+        id: `file-${index}`,
+        mimeType: part.mimeType,
+        src: dataUrl,
+        filename: part.filename,
+        size_bytes: part.size,
+      };
+    }),
+  );
+
+  return resolved.filter((f): f is EmailFilePart => f != null);
 }
 
 function extractMimeRaw(payload: GmailPayload, mimeType: string): string {
@@ -269,18 +355,32 @@ async function mapGmailThread(
       const at = m.internalDate
         ? new Date(Number(m.internalDate)).toISOString()
         : new Date().toISOString();
-      const bodyRaw = extractBodyFromPayload(payload).trim();
+      const plainRaw = extractMime(payload, "text/plain").trim();
+      const htmlRaw = extractMime(payload, "text/html").trim();
       const snippet = header(m.payload?.headers, "Snippet");
-      const body = bodyRaw || (snippet ? normalizeEmailBody(snippet) : "");
+      const body = plainRaw
+        ? normalizeEmailBody(plainRaw)
+        : htmlRaw
+          ? normalizeEmailBody(htmlRaw)
+          : snippet
+            ? normalizeEmailBody(snippet)
+            : extractBodyFromPayload(payload).trim();
+      const htmlBody =
+        htmlRaw && isLikelyHtml(htmlRaw) ? stripUnsafeEmailHtml(htmlRaw) : undefined;
       const inlineImages = resolveInlineImages
         ? await resolveMessageImages(accessToken, m.id, payload)
+        : [];
+      const emailFiles = resolveInlineImages
+        ? await resolveMessageFiles(accessToken, m.id, payload)
         : [];
       return {
         id: m.id,
         from: parseFrom(fromRaw),
         at,
         body,
+        ...(htmlBody ? { htmlBody } : {}),
         ...(inlineImages.length > 0 ? { inlineImages } : {}),
+        ...(emailFiles.length > 0 ? { emailFiles } : {}),
       };
     }),
   );
@@ -315,6 +415,8 @@ export async function mapGmailThreadFromRaw(
 export const GMAIL_INBOX_PAGE_SIZE = 40;
 /** Smaller first page for faster connect / first paint. */
 export const GMAIL_INBOX_FIRST_PAGE_SIZE = 15;
+/** Recent sent threads merged into inbox list so outbound RFQs appear immediately. */
+export const GMAIL_SENT_SYNC_SIZE = 20;
 
 export type GmailInboxPage = {
   threads: EmailThread[];
@@ -374,16 +476,15 @@ async function fetchGmailThreadsByIds(
   return sortThreadsByLatest(threads);
 }
 
-/** One page of INBOX threads (default 40) with optional Gmail `pageToken`. */
-export async function fetchGmailInboxThreadPage(
+/** One page of threads for a Gmail label (INBOX, SENT, etc.). */
+export async function fetchGmailLabelThreadPage(
   accessToken: string,
+  labelId: string,
   opts?: {
     maxResults?: number;
     pageToken?: string;
     q?: string;
-    /** When false, skips Gmail attachment fetches for inline images (faster list load). */
     resolveInlineImages?: boolean;
-    /** List loads use metadata (fast); detail uses full. */
     format?: GmailThreadFormat;
   },
 ): Promise<GmailInboxPage> {
@@ -393,7 +494,7 @@ export async function fetchGmailInboxThreadPage(
   );
   const params = new URLSearchParams({
     maxResults: String(maxResults),
-    labelIds: "INBOX",
+    labelIds: labelId,
   });
   if (opts?.pageToken) params.set("pageToken", opts.pageToken);
   const q = opts?.q?.trim();
@@ -427,6 +528,35 @@ export async function fetchGmailInboxThreadPage(
         ? listJson.resultSizeEstimate
         : null,
   };
+}
+
+/** One page of INBOX threads (default 40) with optional Gmail `pageToken`. */
+export async function fetchGmailInboxThreadPage(
+  accessToken: string,
+  opts?: {
+    maxResults?: number;
+    pageToken?: string;
+    q?: string;
+    /** When false, skips Gmail attachment fetches for inline images (faster list load). */
+    resolveInlineImages?: boolean;
+    /** List loads use metadata (fast); detail uses full. */
+    format?: GmailThreadFormat;
+  },
+): Promise<GmailInboxPage> {
+  return fetchGmailLabelThreadPage(accessToken, "INBOX", opts);
+}
+
+/** Recent SENT threads — merged into Mailroom inbox list after outbound RFQs. */
+export async function fetchGmailSentThreadPage(
+  accessToken: string,
+  opts?: { maxResults?: number },
+): Promise<EmailThread[]> {
+  const page = await fetchGmailLabelThreadPage(accessToken, "SENT", {
+    maxResults: opts?.maxResults ?? GMAIL_SENT_SYNC_SIZE,
+    format: "metadata",
+    resolveInlineImages: false,
+  });
+  return page.threads;
 }
 
 /** @deprecated Prefer fetchGmailInboxThreadPage for pagination. */

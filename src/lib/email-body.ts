@@ -53,3 +53,13 @@ export function emailBodyPreview(body: string, maxLen = 120): string {
   if (plain.length <= maxLen) return plain;
   return `${plain.slice(0, maxLen)}…`;
 }
+
+/** Strip scripts/styles for safe-ish HTML rendering in Mailroom. */
+export function stripUnsafeEmailHtml(html: string): string {
+  let s = html;
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
+  s = s.replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+  s = s.replace(/javascript:/gi, "");
+  return s.trim();
+}

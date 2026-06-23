@@ -25,6 +25,7 @@ import {
 } from "@/lib/costing-sheet";
 import { sanitizeJobDisplayName } from "@/lib/job-display-name";
 import { defaultJobApprovals, defaultJobFulfillment, normalizeJob } from "@/lib/job-defaults";
+import { reassignMailroomDocumentJobs } from "@/lib/documents/import-mailroom-images";
 import { createNewJobSeed } from "@/lib/project-job-create";
 import { appendSessionProject, readSessionProjects } from "@/lib/mock/project-session";
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
@@ -413,6 +414,7 @@ function execCreateJob(
   }
 
   saveProjectJobs(project.id, jobs);
+  void reassignMailroomDocumentJobs({ projectId: project.id, jobs });
   const first = created[0]!;
   return {
     ok: true,

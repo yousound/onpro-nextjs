@@ -5,6 +5,7 @@ import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
 import type { JobScopeKind, JobType, ProjectJob } from "@/lib/types/wip";
 import { JobOverviewFields } from "@/components/job-overview-fields";
+import { JobColorwayEditor } from "@/components/job-colorway-editor";
 import {
   CalendarIcon,
   FolderIcon,
@@ -28,7 +29,6 @@ import {
   dropdownLabelForCategoryCode,
 } from "@/lib/reference/category-codes";
 import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-colorways";
-import { effectiveJobPrice, priceFromCostingSheet } from "@/lib/job-price";
 
 function resolveCategoryDropdown(category: string): string {
   const trimmed = category.trim();
@@ -133,8 +133,6 @@ export function NewJobModal({
     [draft.colorway_rows, draft.colorway, draft.color_code],
   );
   const isPrimaryJob = allJobs.length === 0;
-  const displayPrice = effectiveJobPrice(draft);
-  const costingPrice = priceFromCostingSheet(draft.costing_sheet);
 
   const canCreate = Boolean(draft.name.trim());
   const subtitleParts = [
@@ -195,15 +193,18 @@ export function NewJobModal({
             onCategoryChange={handleCategoryChange}
             onJobTypeChange={handleJobTypeChange}
             isPrimaryJob={isPrimaryJob}
-            colorwayRows={colorwayRows}
-            onColorwayChange={(rows) =>
-              patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))
-            }
-            displayPrice={displayPrice}
-            costingPrice={costingPrice}
             fieldClass={projectModalFieldClass}
             textareaClass={projectModalTextareaClass}
           />
+
+          <ProjectModalField label="Colorways & sizing" icon={<StatusDot />}>
+            <JobColorwayEditor
+              rows={colorwayRows}
+              onChange={(rows) =>
+                patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }))
+              }
+            />
+          </ProjectModalField>
 
           <ProjectModalField label="Scope" icon={<StatusDot />}>
             <select

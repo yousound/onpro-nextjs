@@ -208,12 +208,6 @@ export function ProjectJobsView({
   useEffect(() => {
     if (!hydrated) return;
     function reloadJobs() {
-      if (isClientLiveBackend()) {
-        void fetchJobsFromDb(project.id).then((apiJobs) => {
-          if (apiJobs != null) setJobs(apiJobs);
-        });
-        return;
-      }
       const saved = readMockLs<Partial<Project>>(MOCK_LS.project(project.id));
       const patch = saved && typeof saved === "object" ? saved : {};
       const mergedProject = { ...project, ...patch };

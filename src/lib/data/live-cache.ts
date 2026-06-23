@@ -35,9 +35,13 @@ export function seedLiveProjects(next: Project[]): void {
   projects = dedupeProjectsById(next);
 }
 
-export function seedLiveJobsForProject(projectId: number, jobs: ProjectJob[]): void {
+export function seedLiveJobsForProject(
+  projectId: number,
+  jobs: ProjectJob[],
+  opts?: { allowEmpty?: boolean },
+): void {
   const cleaned = withoutDemoSeedJobs(jobs);
-  if (cleaned.length === 0 && jobsByProjectId.has(projectId)) return;
+  if (cleaned.length === 0 && jobsByProjectId.has(projectId) && !opts?.allowEmpty) return;
   jobsByProjectId.set(projectId, cleaned);
 }
 

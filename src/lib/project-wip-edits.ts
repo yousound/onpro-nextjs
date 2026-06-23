@@ -69,7 +69,7 @@ export function loadProjectJobs(projectId: number, project?: Project): ProjectJo
 export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
   const cleaned = withoutDemoSeedJobs(jobs);
   if (isClientLiveBackend()) {
-    seedLiveJobsForProject(projectId, cleaned);
+    seedLiveJobsForProject(projectId, cleaned, { allowEmpty: true });
     void (async () => {
       try {
         const { getLiveCachedOrders } = await import("@/lib/data/live-cache");
@@ -78,7 +78,7 @@ export function saveProjectJobs(projectId: number, jobs: ProjectJob[]) {
         const orders = getLiveCachedOrders(projectId);
         if (orders.length > 0) await syncOrdersToDb(projectId, orders);
         const saved = await syncJobsToDb(projectId, cleaned);
-        if (saved) seedLiveJobsForProject(projectId, saved);
+        if (saved) seedLiveJobsForProject(projectId, saved, { allowEmpty: true });
       } catch (err) {
         console.error("[saveProjectJobs] sync failed", err);
         const msg = err instanceof Error ? err.message : "Could not save jobs to the team workspace.";

@@ -22,7 +22,7 @@ export async function syncJobsToDb(
     throw new Error(data.error ?? "Could not save jobs");
   }
   if (!data.jobs) return null;
-  seedLiveJobsForProject(projectId, data.jobs);
+  seedLiveJobsForProject(projectId, data.jobs, { allowEmpty: true });
   return data.jobs;
 }
 

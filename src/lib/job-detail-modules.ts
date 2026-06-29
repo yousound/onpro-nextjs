@@ -4,7 +4,6 @@ import type { JobDetailsSection, JobType, ProjectJob } from "@/lib/types/wip";
 
 export type JobDetailModuleKind =
   | "color_sizing"
-  | "development"
   | "print_embroidery"
   | "cut_sew_samples";
 
@@ -15,14 +14,12 @@ export type JobDetailModule = {
 
 export const JOB_DETAIL_MODULE_KINDS: JobDetailModuleKind[] = [
   "color_sizing",
-  "development",
   "print_embroidery",
   "cut_sew_samples",
 ];
 
 export const JOB_DETAIL_MODULE_LABELS: Record<JobDetailModuleKind, string> = {
   color_sizing: "Color & sizing",
-  development: "Production specs",
   print_embroidery: "Print / embroidery",
   cut_sew_samples: "Colorways & samples",
 };
@@ -55,28 +52,6 @@ export function hasColorSizingData(job: ProjectJob): boolean {
   );
 }
 
-function hasDevelopmentData(job: ProjectJob): boolean {
-  const est = job.estimate;
-  const tp = job.tech_pack;
-  const costing = job.costing;
-  const hasSampleData = costing?.sample_approval_stages?.some(
-    (s) => s.requested_date || s.due_date || s.status,
-  );
-  return Boolean(
-    est?.references_sent_date ||
-      est?.mock_up_notes?.trim() ||
-      tp?.tech_pack_due_date ||
-      tp?.tech_pack_complete_date ||
-      (tp?.artwork_files?.length ?? 0) > 0 ||
-      (tp?.dropbox_links?.length ?? 0) > 0 ||
-      (costing?.trim_line_tracks?.length ?? 0) > 0 ||
-      hasSampleData ||
-      costing?.blanks_purchased_date ||
-      costing?.pg_requested_date ||
-      costing?.blanks_received_date,
-  );
-}
-
 export function inferDetailModules(job: ProjectJob): JobDetailModule[] {
   if (job.detail_modules?.length) return job.detail_modules;
 
@@ -85,9 +60,6 @@ export function inferDetailModules(job: ProjectJob): JobDetailModule[] {
 
   if (allowed.has("color_sizing") && hasColorSizingData(job)) {
     modules.push({ id: "mod-color_sizing", kind: "color_sizing" });
-  }
-  if (allowed.has("development") && hasDevelopmentData(job)) {
-    modules.push({ id: "mod-development", kind: "development" });
   }
   if (
     allowed.has("print_embroidery") &&

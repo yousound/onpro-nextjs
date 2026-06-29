@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types/project";
 import type { Contact } from "@/lib/types/contact";
 import {
+  DecorationVariant,
   JobDetailsFocus,
   JobDetailsSection,
   JobScopeKind,
@@ -43,7 +44,9 @@ import {
   applyDevelopmentPatch,
   applyTechPackPatch,
   barcodesSentDate,
+  canRemoveSampleStage,
   developmentFromJob,
+  newCustomSampleStage,
   patchBarcodesSentDate,
   techPackCompleteDate,
   techPackDueDate,
@@ -51,6 +54,7 @@ import {
   updateTrimLineTrack,
   sampleApprovalFieldLabels,
 } from "@/lib/job-development";
+import { isCutSewClassJobType } from "@/lib/job-type-migrate";
 import { duplicateJobSeed } from "@/lib/project-job-create";
 import { clientListContacts, loadContacts } from "@/lib/contacts-store";
 import { DuplicateJobDialog, type DuplicateJobFormValues } from "@/components/duplicate-job-dialog";
@@ -61,12 +65,10 @@ import {
 import { dateInputToIso, isoToDateInput } from "@/lib/format";
 import {
   ADDON_CATEGORY_OPTIONS,
-  CATEGORY_CODES,
   JOB_TYPE_OPTIONS,
   PANT_SIZE_ALPHA,
   PANT_SIZE_NUMERIC,
   SHIRT_SIZE_OPTIONS,
-  dropdownLabelForCategoryCode,
 } from "@/lib/reference/category-codes";
 import {
   defaultBulkProductionTrack,
@@ -86,7 +88,7 @@ import { WipTimeline } from "@/components/wip-timeline";
 import { JobLabelsSection } from "@/components/job-labels-section";
 import { TechPackArtworkSection } from "@/components/tech-pack-artwork-section";
 import { CostingSheetEditor } from "@/components/costing-sheet-editor";
-import { JobOverviewFields } from "@/components/job-overview-fields";
+import { JobOverviewFields, shouldAutoOpenColorSizing } from "@/components/job-overview-fields";
 import { JobDetailsSummary } from "@/components/job-details-summary";
 import { JobBrandSection } from "@/components/job-brand-section";
 import { JobPrintEmbroiderySection } from "@/components/job-print-embroidery-section";
@@ -103,6 +105,7 @@ import {
 } from "@/lib/job-detail-modules";
 import { JobDetailsModalHeader } from "@/components/job-details-modal-header";
 import { jobTypeLabel } from "@/components/job-details-modal-helpers";
+import { resolveCategoryDropdownLabel } from "@/lib/workspace-categories";
 import { useCurrentUser } from "@/components/profile-provider";
 import { newColorwayRow, syncLegacyColorwayFields } from "@/lib/job-colorways";
 import { effectiveJobPrice, priceFromCostingSheet } from "@/lib/job-price";
@@ -127,6 +130,7 @@ import {
   jobStatusDisplay,
 } from "@/lib/job-status";
 import { JobStatusBadge } from "@/components/job-status-badge";
+import { hasJobOverviewContent } from "@/lib/job-overview-content";
 
 const fieldClass = projectModalFieldClass;
 const labelClass = projectModalLabelClass;
@@ -136,7 +140,6 @@ type JobModalSection = "overview" | "timeline" | JobDetailsSection;
 
 const NESTED_JOB_DETAIL_SECTIONS = new Set<JobDetailsSection>([
   "color_sizing",
-  "development",
   "print_embroidery",
   "cut_sew_samples",
 ]);
@@ -157,13 +160,17 @@ const SECTION_LABEL: Record<JobModalSection, string> = {
   outputs: "Financials",
 };
 
-function visibleModalSections(jobType?: JobType): JobModalSection[] {
+function visibleModalSections(job: ProjectJob): JobModalSection[] {
+  const jobType = job.job_type;
   const a = new Set(accordionSectionsForJob(jobType));
-  const nav: JobModalSection[] = ["overview"];
+  const nav: JobModalSection[] = [];
+  if (hasJobOverviewContent(job)) nav.push("overview");
   if (a.has("product_details")) nav.push("product_details");
+  else if (nav.length === 0) nav.push("product_details");
   nav.push("timeline");
   if (a.has("brand")) nav.push("brand");
   if (a.has("vendor_quotes")) nav.push("vendor_quotes");
+  if (a.has("development")) nav.push("development");
   if (a.has("costing")) nav.push("costing");
   if (a.has("approvals")) nav.push("approvals");
   if (a.has("bulk")) nav.push("bulk");
@@ -171,10 +178,13 @@ function visibleModalSections(jobType?: JobType): JobModalSection[] {
   return nav;
 }
 
-function resolveInitialSection(focus?: JobDetailsFocus): JobModalSection {
-  if (!focus) return "overview";
-  if (nestedDetailSection(focus.section)) return "product_details";
-  return focus.section as JobModalSection;
+function resolveInitialSection(job: ProjectJob, focus?: JobDetailsFocus): JobModalSection {
+  if (focus) {
+    if (nestedDetailSection(focus.section)) return "product_details";
+    return focus.section as JobModalSection;
+  }
+  if (hasJobOverviewContent(job)) return "overview";
+  return "product_details";
 }
 
 function accordionSectionsForJob(jobType?: JobType): JobDetailsSection[] {
@@ -182,17 +192,7 @@ function accordionSectionsForJob(jobType?: JobType): JobDetailsSection[] {
 }
 
 function resolveCategoryDropdown(category: string): string {
-  const trimmed = category.trim();
-  if (!trimmed) return CATEGORY_CODES[0]?.dropdownLabel ?? "Tee";
-  const byLabel = CATEGORY_CODES.find(
-    (c) => c.dropdownLabel.toLowerCase() === trimmed.toLowerCase(),
-  );
-  if (byLabel) return byLabel.dropdownLabel;
-  const byCode = CATEGORY_CODES.find((c) => c.code.toLowerCase() === trimmed.toLowerCase());
-  if (byCode) return byCode.dropdownLabel;
-  const byFullLabel = CATEGORY_CODES.find((c) => c.label.toLowerCase() === trimmed.toLowerCase());
-  if (byFullLabel) return byFullLabel.dropdownLabel;
-  return dropdownLabelForCategoryCode(trimmed) !== "Custom" ? dropdownLabelForCategoryCode(trimmed) : trimmed;
+  return resolveCategoryDropdownLabel(category);
 }
 
 function cloneJob(job: ProjectJob): ProjectJob {
@@ -398,6 +398,10 @@ export type JobDetailsModalProps = {
   vendors: Contact[];
   focus?: JobDetailsFocus;
   isNew?: boolean;
+  /** When creating from Jobs list — show project picker and allow switching. */
+  allowProjectChange?: boolean;
+  projects?: Project[];
+  onProjectChange?: (projectId: number) => void;
   /** When nested inside another modal (e.g. message attachment composer). */
   overlayClassName?: string;
   onClose: () => void;
@@ -419,6 +423,9 @@ export function JobDetailsModal({
   vendors,
   focus,
   isNew,
+  allowProjectChange = false,
+  projects = [],
+  onProjectChange,
   overlayClassName = "z-[100]",
   onClose,
   onSave,
@@ -435,7 +442,9 @@ export function JobDetailsModal({
   const [categoryDropdown, setCategoryDropdown] = useState(() =>
     isNew ? "" : resolveCategoryDropdown(job.category),
   );
-  const [activeSection, setActiveSection] = useState<JobModalSection>(() => resolveInitialSection(focus));
+  const [activeSection, setActiveSection] = useState<JobModalSection>(() =>
+    resolveInitialSection(normalizeJob(job, isNew ? undefined : project), focus),
+  );
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [highlightModuleKind, setHighlightModuleKind] = useState<JobDetailModuleKind | null>(() =>
     focus?.section && isJobDetailModuleKind(focus.section) ? focus.section : null,
@@ -583,10 +592,41 @@ export function JobDetailsModal({
     patch({ category: label });
   }
 
-  function handleJobTypeChange(jobType: JobType) {
-    patch({
-      job_type: jobType,
-      type: jobTypeLabel(jobType).toUpperCase(),
+  function handleJobTypeChange(partial: Partial<ProjectJob>) {
+    setDraft((prev) => {
+      const next: ProjectJob = {
+        ...prev,
+        ...partial,
+        type: jobTypeLabel((partial.job_type ?? prev.job_type) ?? "print_production").toUpperCase(),
+      };
+      if (!shouldAutoOpenColorSizing(next)) return next;
+      const modules = ensureDetailModule(prev.detail_modules ?? [], "color_sizing");
+      if ((prev.detail_modules ?? []).some((m) => m.kind === "color_sizing")) {
+        return { ...next, detail_modules: modules };
+      }
+      const rows = prev.colorway_rows?.length ? prev.colorway_rows : [newColorwayRow()];
+      return {
+        ...next,
+        detail_modules: modules,
+        ...syncLegacyColorwayFields({ ...next, colorway_rows: rows }),
+      };
+    });
+  }
+
+  function handleDecorationVariantChange(variant: DecorationVariant | null) {
+    setDraft((prev) => {
+      const next: ProjectJob = { ...prev, decoration_variant: variant };
+      if (!shouldAutoOpenColorSizing(next)) return next;
+      const modules = ensureDetailModule(prev.detail_modules ?? [], "color_sizing");
+      if ((prev.detail_modules ?? []).some((m) => m.kind === "color_sizing")) {
+        return { ...next, detail_modules: modules };
+      }
+      const rows = prev.colorway_rows?.length ? prev.colorway_rows : [newColorwayRow()];
+      return {
+        ...next,
+        detail_modules: modules,
+        ...syncLegacyColorwayFields({ ...next, colorway_rows: rows }),
+      };
     });
   }
 
@@ -859,9 +899,6 @@ export function JobDetailsModal({
           onChange={(colorways) => patchCosting({ colorways })}
         />
       );
-    }
-    if (kind === "development") {
-      return renderDevelopmentModuleContent();
     }
     return null;
   }
@@ -1193,12 +1230,41 @@ export function JobDetailsModal({
         >
           <div className="space-y-5">
             {sampleStages.map((stage) => {
-              const fieldLabels = sampleApprovalFieldLabels(stage.key);
+              const fieldLabels = sampleApprovalFieldLabels(stage);
               return (
                 <div
                   key={stage.key}
                   className="grid gap-3 border-t border-border-light pt-4 first:border-t-0 first:pt-0 sm:grid-cols-3"
                 >
+                  {canRemoveSampleStage(stage.key) ? (
+                    <label className={`${labelClass} sm:col-span-3`}>
+                      Sample line label
+                      <div className="mt-1 flex gap-2">
+                        <input
+                          className={fieldClass}
+                          value={stage.label}
+                          onChange={(e) =>
+                            patchDevelopment({
+                              sample_approval_stages: updateSampleStage(sampleStages, stage.key, {
+                                label: e.target.value,
+                              }),
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            patchDevelopment({
+                              sample_approval_stages: sampleStages.filter((s) => s.key !== stage.key),
+                            })
+                          }
+                          className="shrink-0 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </label>
+                  ) : null}
                   <label className={labelClass}>
                     {fieldLabels.requested}
                     <input
@@ -1252,13 +1318,27 @@ export function JobDetailsModal({
                 </div>
               );
             })}
+            <button
+              type="button"
+              onClick={() =>
+                patchDevelopment({
+                  sample_approval_stages: [
+                    ...sampleStages,
+                    newCustomSampleStage("2nd PP sample"),
+                  ],
+                })
+              }
+              className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
+            >
+              + Add sample lines
+            </button>
           </div>
         </WipStepFieldBlock>
       </>
     );
   }
 
-  const sectionNavItems = visibleModalSections(draft.job_type).map((id) => ({
+  const sectionNavItems = visibleModalSections(draft).map((id) => ({
     id,
     label: SECTION_LABEL[id],
   }));
@@ -1296,6 +1376,23 @@ export function JobDetailsModal({
               highlight={highlightId === "job-section-overview"}
             >
               <div className="grid gap-3 sm:grid-cols-2">
+                {allowProjectChange && projects.length > 0 && onProjectChange ? (
+                  <label className={`${labelClass} sm:col-span-2`}>
+                    Project
+                    <select
+                      className={fieldClass}
+                      value={project.id}
+                      onChange={(e) => onProjectChange(Number(e.target.value))}
+                    >
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {p.client.name ? ` · ${p.client.name}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className={labelClass}>
                   <span className="flex items-center gap-2">
                     Status
@@ -1384,6 +1481,16 @@ export function JobDetailsModal({
                 </SectionPanel>
               </div>
 
+              <div hidden={activeSection !== "development"}>
+                <SectionPanel
+                  id="job-section-development"
+                  title="Development"
+                  highlight={highlightId === "job-section-development"}
+                >
+                  {renderDevelopmentModuleContent()}
+                </SectionPanel>
+              </div>
+
             {visibleSections.map((section) => (
               <div key={section} hidden={activeSection !== section}>
               <SectionPanel
@@ -1400,7 +1507,7 @@ export function JobDetailsModal({
                       categoryDropdown={categoryDropdown}
                       onCategoryChange={handleCategoryChange}
                       onJobTypeChange={handleJobTypeChange}
-                      isPrimaryJob={isPrimaryJob}
+                      onDecorationVariantChange={handleDecorationVariantChange}
                       fieldClass={fieldClass}
                       textareaClass={textareaClass}
                       showLeadTimesLink
@@ -1511,405 +1618,6 @@ export function JobDetailsModal({
                   </>
                 ) : null}
 
-                {section === "development" ? (
-                  <>
-                    <WipStepFieldBlock stepId="mock_up" highlight={highlightId === "job-step-mock_up"}>
-                      <label className={labelClass}>
-                        References sent
-                        <input
-                          type="date"
-                          className={fieldClass}
-                          value={isoToDateInput(estimate.references_sent_date)}
-                          onChange={(e) =>
-                            patchEstimate({ references_sent_date: dateInputToIso(e.target.value) })
-                          }
-                        />
-                      </label>
-                      <label className={`${labelClass} mt-3 block`}>
-                        Mock-up notes
-                        <textarea
-                          className={textareaClass}
-                          rows={3}
-                          value={estimate.mock_up_notes ?? ""}
-                          onChange={(e) =>
-                            patchEstimate({ mock_up_notes: e.target.value.trim() || null })
-                          }
-                        />
-                      </label>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock stepId="tp_setup" highlight={highlightId === "job-step-tp_setup"}>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className={labelClass}>
-                          Tech pack due
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(techPackDueDate(techPack))}
-                            onChange={(e) =>
-                              patchTechPack({ tech_pack_due_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Tech pack complete
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(techPackCompleteDate(techPack))}
-                            onChange={(e) =>
-                              patchTechPack({ tech_pack_complete_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                      </div>
-                      <div className="mt-4">
-                        <TechPackArtworkSection
-                          files={techPack.artwork_files ?? []}
-                          links={techPack.dropbox_links ?? []}
-                          onChangeFiles={(artwork_files) => patchTechPack({ artwork_files })}
-                          onChangeLinks={(dropbox_links) => patchTechPack({ dropbox_links })}
-                        />
-                      </div>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock
-                      stepId="blanks_lab_dip"
-                      highlight={highlightId === "job-step-blanks_lab_dip"}
-                    >
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Blanks purchasing
-                      </p>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        <label className={labelClass}>
-                          Blanks purchased
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(development.blanks_purchased_date)}
-                            onChange={(e) =>
-                              patchDevelopment({ blanks_purchased_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Products Go blanks requested
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(development.pg_requested_date)}
-                            onChange={(e) =>
-                              patchDevelopment({ pg_requested_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className={labelClass}>
-                          Blanks received
-                          <input
-                            type="date"
-                            className={fieldClass}
-                            value={isoToDateInput(development.blanks_received_date)}
-                            onChange={(e) =>
-                              patchDevelopment({ blanks_received_date: dateInputToIso(e.target.value) })
-                            }
-                          />
-                        </label>
-                      </div>
-
-                      <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Lab dip requested
-                      </p>
-                      <div className="mt-3 space-y-3">
-                        {dyeTracks.map((t, i) => (
-                          <SectionCard
-                            key={t.id}
-                            title={dyeTracks.length > 1 ? `Dye line ${i + 1}` : "Dye line"}
-                            headerExtra={
-                              dyeTracks.length > 1 ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    patchDevelopment({
-                                      dye_costing_tracks: dyeTracks.filter((x) => x.id !== t.id),
-                                    })
-                                  }
-                                  className="text-[11px] font-semibold text-red-600 hover:underline"
-                                >
-                                  Remove
-                                </button>
-                              ) : undefined
-                            }
-                          >
-                            <VendorFieldSelect
-                              label="Vendor"
-                              vendors={vendors}
-                              value={t.dye_vendor}
-                              onChange={(name) =>
-                                patchDevelopment({
-                                  dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
-                                    dye_vendor: name,
-                                  }),
-                                })
-                              }
-                            />
-                            <div className="grid gap-3 sm:grid-cols-3">
-                              <label className={labelClass}>
-                                Lab dip requested
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(t.lab_dip_request_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
-                                        lab_dip_request_date: dateInputToIso(e.target.value),
-                                      }),
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className={labelClass}>
-                                Lab dip due
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(t.lab_dip_due_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
-                                        lab_dip_due_date: dateInputToIso(e.target.value),
-                                      }),
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className={labelClass}>
-                                Lab dip received
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(t.lab_dip_received_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
-                                        lab_dip_received_date: dateInputToIso(e.target.value),
-                                      }),
-                                    })
-                                  }
-                                />
-                              </label>
-                            </div>
-                            <label className={labelClass}>
-                              Lab dip status
-                              <select
-                                className={fieldClass}
-                                value={t.lab_dip_approval_status ?? "PENDING"}
-                                onChange={(e) =>
-                                  patchDevelopment({
-                                    dye_costing_tracks: updateDyeTrack(dyeTracks, t.id, {
-                                      lab_dip_approval_status: e.target.value as ApprovalStatus,
-                                    }),
-                                  })
-                                }
-                              >
-                                {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
-                                  <option key={s} value={s}>
-                                    {s}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </SectionCard>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            patchDevelopment({ dye_costing_tracks: [...dyeTracks, defaultDyeCostingTrack()] })
-                          }
-                          className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
-                        >
-                          + Add dye line
-                        </button>
-                      </div>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock stepId="order_trims" highlight={highlightId === "job-step-order_trims"}>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
-                        Trims
-                      </p>
-                      <div className="mt-3 space-y-3">
-                        {trimLineTracks.map((t, i) => (
-                          <SectionCard
-                            key={t.id}
-                            title={trimLineTracks.length > 1 ? `Trim line ${i + 1}` : "Trim line"}
-                            headerExtra={
-                              trimLineTracks.length > 1 ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    patchDevelopment({
-                                      trim_line_tracks: trimLineTracks.filter((x) => x.id !== t.id),
-                                    })
-                                  }
-                                  className="text-[11px] font-semibold text-red-600 hover:underline"
-                                >
-                                  Remove
-                                </button>
-                              ) : undefined
-                            }
-                          >
-                            <VendorFieldSelect
-                              label="Vendor"
-                              vendors={vendors}
-                              value={t.vendor}
-                              onChange={(name) =>
-                                patchDevelopment({
-                                  trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
-                                    vendor: name,
-                                  }),
-                                })
-                              }
-                            />
-                            <label className={labelClass}>
-                              Trim type
-                              <input
-                                className={fieldClass}
-                                value={t.trim_type ?? ""}
-                                placeholder="e.g. woven label, hang tag"
-                                onChange={(e) =>
-                                  patchDevelopment({
-                                    trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
-                                      trim_type: e.target.value.trim() || null,
-                                    }),
-                                  })
-                                }
-                              />
-                            </label>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <label className={labelClass}>
-                                Trim ordered
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(t.trim_ordered_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
-                                        trim_ordered_date: dateInputToIso(e.target.value),
-                                      }),
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className={labelClass}>
-                                Trim received
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(t.trim_received_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      trim_line_tracks: updateTrimLineTrack(trimLineTracks, t.id, {
-                                        trim_received_date: dateInputToIso(e.target.value),
-                                      }),
-                                    })
-                                  }
-                                />
-                              </label>
-                            </div>
-                          </SectionCard>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            patchDevelopment({
-                              trim_line_tracks: [...trimLineTracks, defaultTrimLineTrack()],
-                            })
-                          }
-                          className="w-full rounded-xl border border-dashed border-accent/45 py-2.5 text-sm font-semibold text-accent hover:bg-violet-50/90"
-                        >
-                          + Add trim line
-                        </button>
-                      </div>
-                    </WipStepFieldBlock>
-
-                    <WipStepFieldBlock
-                      stepId="sample_approvals"
-                      title="SAMPLE APPROVALS"
-                      highlight={highlightId === "job-step-sample_approvals"}
-                    >
-                      <div className="space-y-5">
-                        {sampleStages.map((stage) => {
-                          const fieldLabels = sampleApprovalFieldLabels(stage.key);
-                          return (
-                            <div
-                              key={stage.key}
-                              className="grid gap-3 border-t border-border-light pt-4 first:border-t-0 first:pt-0 sm:grid-cols-3"
-                            >
-                              <label className={labelClass}>
-                                {fieldLabels.requested}
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(stage.requested_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      sample_approval_stages: updateSampleStage(
-                                        sampleStages,
-                                        stage.key,
-                                        { requested_date: dateInputToIso(e.target.value) },
-                                      ),
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className={labelClass}>
-                                {fieldLabels.due}
-                                <input
-                                  type="date"
-                                  className={fieldClass}
-                                  value={isoToDateInput(stage.due_date)}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      sample_approval_stages: updateSampleStage(
-                                        sampleStages,
-                                        stage.key,
-                                        { due_date: dateInputToIso(e.target.value) },
-                                      ),
-                                    })
-                                  }
-                                />
-                              </label>
-                              <label className={labelClass}>
-                                {fieldLabels.status}
-                                <select
-                                  className={fieldClass}
-                                  value={stage.status ?? "PENDING"}
-                                  onChange={(e) =>
-                                    patchDevelopment({
-                                      sample_approval_stages: updateSampleStage(
-                                        sampleStages,
-                                        stage.key,
-                                        { status: e.target.value as ApprovalStatus },
-                                      ),
-                                    })
-                                  }
-                                >
-                                  {(["PENDING", "APPROVED", "REJECTED"] as const).map((s) => (
-                                    <option key={s} value={s}>
-                                      {s}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </WipStepFieldBlock>
-                  </>
-                ) : null}
-
                 {section === "print_embroidery" ? (
                   <JobPrintEmbroiderySection
                     tracks={costing.print_embroidery_costing_tracks}
@@ -2002,23 +1710,6 @@ export function JobDetailsModal({
 
                 {section === "approvals" ? (
                   <>
-                    <WipStepFieldBlock
-                      stepId="sent_to_contractors"
-                      highlight={highlightId === "job-step-sent_to_contractors"}
-                    >
-                      <label className={labelClass}>
-                        Blanks, trims & TPs sent to contractors
-                        <input
-                          type="date"
-                          className={fieldClass}
-                          value={isoToDateInput(approvals.sent_to_contractors_date)}
-                          onChange={(e) =>
-                            patchApprovals({ sent_to_contractors_date: dateInputToIso(e.target.value) })
-                          }
-                        />
-                      </label>
-                    </WipStepFieldBlock>
-
                     <WipStepFieldBlock stepId="strike_off" highlight={highlightId === "job-step-strike_off"}>
                       <div className="grid gap-3 sm:grid-cols-3">
                         <label className={labelClass}>
@@ -2087,6 +1778,22 @@ export function JobDetailsModal({
                       </p>
                     ) : null}
                     <WipStepFieldBlock
+                      stepId="sent_to_contractors"
+                      highlight={highlightId === "job-step-sent_to_contractors"}
+                    >
+                      <label className={labelClass}>
+                        Blanks, trims & TPs sent to contractors
+                        <input
+                          type="date"
+                          className={fieldClass}
+                          value={isoToDateInput(approvals.sent_to_contractors_date)}
+                          onChange={(e) =>
+                            patchApprovals({ sent_to_contractors_date: dateInputToIso(e.target.value) })
+                          }
+                        />
+                      </label>
+                    </WipStepFieldBlock>
+                    <WipStepFieldBlock
                       stepId="barcodes"
                       title="Barcodes sent to vendor"
                       highlight={highlightId === "job-step-barcodes"}
@@ -2107,7 +1814,7 @@ export function JobDetailsModal({
                     </WipStepFieldBlock>
 
                     <WipStepFieldBlock stepId="trimming" highlight={highlightId === "job-step-trimming"}>
-                      {draft.job_type === "cut_sew" ? (
+                      {isCutSewClassJobType(draft.job_type) ? (
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className={labelClass}>
                             Bulk fabric approved
@@ -2334,7 +2041,7 @@ export function JobDetailsModal({
           onSecondary={onClose}
           middleLabel="Request quotes"
           onMiddle={() => handleJumpToSection("vendor_quotes")}
-          primaryLabel={saving ? "Saving…" : "Save job"}
+          primaryLabel={saving ? "Saving…" : isNew ? "Create job" : "Save job"}
           primaryIcon={<CheckMini />}
           primaryDisabled={deleting || saving}
         />

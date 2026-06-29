@@ -54,6 +54,7 @@ type Props = {
   onSubmit: (e: FormEvent) => void;
   onSaveNewClient: (draft: NewClientDraft) => Promise<SavedNewClient | { error: string }>;
   clientCodeNotice?: string | null;
+  poPrefixNotice?: string | null;
   onUseResolvedClientCode?: () => void | Promise<void>;
   submitError?: string | null;
   submitting?: boolean;
@@ -82,6 +83,7 @@ export function NewProjectModal({
   onSubmit,
   onSaveNewClient,
   clientCodeNotice,
+  poPrefixNotice,
   onUseResolvedClientCode,
   submitError,
   submitting = false,
@@ -292,6 +294,7 @@ export function NewProjectModal({
                         aria-invalid={projectNumberConflict}
                       />
                       <InlineFieldMessage message={projectNumberMessage ?? undefined} />
+                      <InlineFieldMessage message={poPrefixNotice ?? undefined} tone="warning" />
                       <p className="mt-1.5 text-xs font-normal normal-case text-slate-400">
                         Auto-filled as ClientCode+YYMM+Seq (e.g. DW260601 — continues 100, 101 after 99).
                         Edit anytime — counter resets each month.

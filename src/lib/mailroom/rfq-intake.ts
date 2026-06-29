@@ -1,6 +1,5 @@
-import { isOperatorWorkspaceEmail } from "@/lib/client-email";
 import {
-  extractClientPoFromSubject,
+  extractClientPoFromThread,
   inferBrandClientName,
   isWorkspaceOperatorClientName,
 } from "@/lib/mailroom/client-from-rfq";
@@ -8,76 +7,27 @@ import {
   inferClientNameForProject,
   inferProjectNameFromThread,
 } from "@/lib/mailroom/project-from-thread";
+import {
+  inferTeamContactFromThread,
+  inferVendorNameFromThread,
+  type ParticipantRole,
+} from "@/lib/mailroom/thread-participants";
+import { inferVendorNameFromThreadWithContacts } from "@/lib/mailroom/vendor-from-thread";
+import type { Contact } from "@/lib/types/contact";
 import type {
   EmailThread,
   MailroomRfqIntake,
-  MailroomRfqParticipantRole,
   MailroomWorkflow,
   MailroomWorkflowStep,
 } from "@/lib/types/agent";
 
-export type ParticipantRole = MailroomRfqParticipantRole;
-
-/** Default role on operator→vendor RFQ threads (no end client on thread). */
-export function defaultParticipantRole(email: string): ParticipantRole {
-  if (isOperatorWorkspaceEmail(email)) return "team";
-  return "vendor";
-}
-
-function resolveParticipantRole(
-  email: string,
-  overrides?: Record<string, ParticipantRole>,
-): ParticipantRole {
-  const key = email.trim().toLowerCase();
-  return overrides?.[key] ?? defaultParticipantRole(email);
-}
-
-export function threadParticipantRoles(
-  thread: EmailThread,
-  overrides?: Record<string, ParticipantRole>,
-): Array<{ name: string; email: string; role: ParticipantRole }> {
-  const seen = new Set<string>();
-  const out: Array<{ name: string; email: string; role: ParticipantRole }> = [];
-  for (const p of thread.participants) {
-    const email = p.email?.trim().toLowerCase();
-    if (!email || seen.has(email)) continue;
-    seen.add(email);
-    out.push({
-      name: p.name?.trim() || p.email.trim(),
-      email: p.email.trim(),
-      role: resolveParticipantRole(p.email, overrides),
-    });
-  }
-  const from = thread.messages[0]?.from;
-  if (from?.email) {
-    const email = from.email.trim().toLowerCase();
-    if (!seen.has(email)) {
-      out.unshift({
-        name: from.name?.trim() || from.email,
-        email: from.email.trim(),
-        role: resolveParticipantRole(from.email, overrides),
-      });
-    }
-  }
-  return out;
-}
-
-export function inferVendorNameFromThread(
-  thread: EmailThread,
-  overrides?: Record<string, ParticipantRole>,
-): string | null {
-  const vendor = threadParticipantRoles(thread, overrides).find((p) => p.role === "vendor");
-  return vendor?.name ?? null;
-}
-
-export function inferTeamContactFromThread(
-  thread: EmailThread,
-  overrides?: Record<string, ParticipantRole>,
-): { name: string; email: string } | null {
-  const team = threadParticipantRoles(thread, overrides).find((p) => p.role === "team");
-  if (!team) return null;
-  return { name: team.name, email: team.email };
-}
+export type { ParticipantRole } from "@/lib/mailroom/thread-participants";
+export {
+  defaultParticipantRole,
+  inferTeamContactFromThread,
+  inferVendorNameFromThread,
+  threadParticipantRoles,
+} from "@/lib/mailroom/thread-participants";
 
 function projectStepPayload(workflow: MailroomWorkflow): Record<string, unknown> {
   return (
@@ -89,6 +39,7 @@ export function buildRfqIntakeDraft(
   thread: EmailThread,
   workflow: MailroomWorkflow,
   existing?: MailroomRfqIntake | null,
+  contacts?: Contact[],
 ): MailroomRfqIntake {
   if (existing?.confirmed_at) return existing;
 
@@ -101,7 +52,7 @@ export function buildRfqIntakeDraft(
     jobTitle: firstJob?.title,
     jobPayload: firstJob?.payload,
   };
-  const poFromSubject = extractClientPoFromSubject(subject);
+  const poFromThread = extractClientPoFromThread(thread);
   const clientHint = String(
     projectPayload.client ?? projectPayload.client_name ?? projectPayload.company ?? "",
   ).trim();
@@ -129,7 +80,7 @@ export function buildRfqIntakeDraft(
   const payloadPo = String(projectPayload.client_po_number ?? projectPayload.po_number ?? "").trim();
   return {
     client_name: existing?.client_name?.trim() || clientName,
-    client_po: existing?.client_po?.trim() || payloadPo || poFromSubject || "",
+    client_po: existing?.client_po?.trim() || payloadPo || poFromThread || "",
     client_po_tbd: existing?.client_po_tbd ?? false,
     project_name:
       existing?.project_name?.trim() ||
@@ -141,9 +92,15 @@ export function buildRfqIntakeDraft(
     team_contact_name: existing?.team_contact_name?.trim() || null,
     team_contact_email: existing?.team_contact_email?.trim() || null,
     vendor_name:
-      existing?.vendor_name?.trim() || inferVendorNameFromThread(thread, overrides),
+      existing?.vendor_name?.trim() ||
+      (contacts?.length
+        ? inferVendorNameFromThreadWithContacts(thread, contacts, overrides)
+        : inferVendorNameFromThread(thread, overrides)),
     participant_role_overrides: overrides,
-    create_order: existing?.create_order ?? true,
+    create_estimate:
+      existing?.create_estimate ??
+      (existing as { create_order?: boolean } | undefined)?.create_order ??
+      true,
     confirmed_at: null,
   };
 }

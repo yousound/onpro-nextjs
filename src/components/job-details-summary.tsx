@@ -81,19 +81,11 @@ export function JobDetailsSummary({
           : "Not added";
 
   const costingLines = draft.costing_sheet?.lines ?? [];
-  const scopeRows =
-    costingLines.length > 0
-      ? costingLines.map((line) => ({
-          item: line.description || "Line item",
-          details: line.vendor ? `Vendor: ${line.vendor}` : line.note?.trim() || "—",
-          ready: line.price > 0,
-        }))
-      : [
-          { item: "Front print", details: "1-color screen print on front", ready: quoteReady },
-          { item: "Neck print", details: "Inside neck print", ready: false },
-          { item: "Tag removal", details: "Remove neck tag", ready: false },
-          { item: "Fold & bag", details: "Fold and polybag", ready: false },
-        ];
+  const scopeRows = costingLines.map((line) => ({
+    item: line.description || "Line item",
+    details: line.vendor ? `Vendor: ${line.vendor}` : line.note?.trim() || "—",
+    ready: line.price > 0,
+  }));
 
   const brandBlank =
     [draft.garment_brand, draft.garment_style_number].filter(Boolean).join(" ") ||
@@ -127,8 +119,13 @@ export function JobDetailsSummary({
         <section className="rounded-2xl border border-border-light bg-white p-5 shadow-sm">
           <h3 className="text-sm font-bold text-text-primary">Product summary</h3>
           <div className="mt-4 flex gap-4">
-            <div className="flex size-20 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-3xl">
-              👕
+            <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-3xl">
+              {draft.product_image?.url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={draft.product_image.url} alt="" className="size-full object-cover" />
+              ) : (
+                "👕"
+              )}
             </div>
             <dl className="min-w-0 space-y-1.5 text-sm">
               <div>
@@ -188,6 +185,7 @@ export function JobDetailsSummary({
         </section>
       </div>
 
+      {scopeRows.length > 0 ? (
       <section className="rounded-2xl border border-border-light bg-white p-5 shadow-sm">
         <h3 className="text-sm font-bold text-text-primary">Production scope</h3>
         <div className="mt-4 overflow-x-auto">
@@ -216,6 +214,7 @@ export function JobDetailsSummary({
           </table>
         </div>
       </section>
+      ) : null}
     </div>
   );
 }

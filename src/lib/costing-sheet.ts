@@ -81,8 +81,10 @@ export function costingTotals(sheet: CostingSheet): CostingTotals {
   const total_price = sheet.lines.reduce((s, l) => s + l.price * l.qty, 0);
   const aggregate_margin_percent = impliedMarginPercent(total_cost, total_price);
   const cd_profit_unit = total_price - total_cost;
-  const estimated_buy_total = sheet.estimated_qty * total_price;
-  const cd_profit_total = sheet.estimated_qty * cd_profit_unit;
+  const computed_buy_total = sheet.estimated_qty * total_price;
+  const computed_profit_total = sheet.estimated_qty * cd_profit_unit;
+  const estimated_buy_total = sheet.estimated_buy_override ?? computed_buy_total;
+  const cd_profit_total = sheet.cd_profit_override ?? computed_profit_total;
   return {
     total_cost,
     total_price,

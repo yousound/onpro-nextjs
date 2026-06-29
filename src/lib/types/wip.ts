@@ -14,12 +14,20 @@ import type { JobFinishingTask, SuppliedBy } from "@/lib/types/brand-products";
 
 export type JobType =
   | "print_production"
+  | "full_package_cut_sew"
+  | "custom_products"
+  | "artwork_design"
+  | "branding_kit"
+  | "decoration"
+  | "finishing";
+
+export type DecorationVariant =
   | "embroidery"
-  | "cut_sew"
-  | "full_package"
-  | "design"
-  | "branding"
-  | "custom";
+  | "screen_printing"
+  | "heat_transfers"
+  | "applique"
+  | "patches"
+  | "specialty";
 
 export type JobDetailsSection =
   | "overview"
@@ -121,6 +129,10 @@ export type CostingSheet = {
   aggregate_margin_mode: "percent" | "amount" | null;
   aggregate_margin_value: number;
   estimated_qty: number;
+  /** When set, overrides computed estimated buy total. */
+  estimated_buy_override?: number | null;
+  /** When set, overrides computed CD profit total. */
+  cd_profit_override?: number | null;
   notes?: string;
 };
 
@@ -304,6 +316,8 @@ export type ProjectJob = {
   custom_fields?: JobCustomField[];
   type: string;
   job_type?: JobType;
+  /** Decoration method when job_type is decoration. */
+  decoration_variant?: DecorationVariant | null;
   lead_vendor: string;
   /** Vendors assigned to this job (from People). Filters costing / quote pickers when set. */
   job_vendors?: string[];
@@ -318,6 +332,8 @@ export type ProjectJob = {
   /** PO supplied by the client; when present this becomes the effective PO. */
   client_po_number?: string | null;
   label_files?: FileRef[];
+  /** Product thumbnail for overview and header. */
+  product_image?: FileRef | null;
   label_lines?: JobLabelLine[];
   label_station?: LabelStationSheet;
   status: JobStatusLabel;
@@ -381,12 +397,19 @@ export function wipStepToSection(stepId: string, opensIn?: JobDetailsSection): J
     case "order_trims":
       return "development";
     case "sent_to_contractors":
+      return "bulk";
     case "strike_off":
       return "approvals";
     case "sample_1st":
     case "sample_2nd":
     case "sample_pp":
       return "cut_sew_samples";
+    case "development_sample_received":
+    case "pp_approved":
+    case "branding_assets_approved":
+      return "development";
+    case "branded_labels_ordered":
+    case "top_approved":
     case "trimming":
     case "packing":
     case "arrange_delivery":

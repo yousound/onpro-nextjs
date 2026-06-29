@@ -3,6 +3,11 @@ import {
   CONNECT_DOTS_PROJECT_WIP_STEPS,
   buildUpcomingJobTimeline,
 } from "@/lib/wip-project-timeline";
+import {
+  isBrandingClassJobType,
+  isCutSewClassJobType,
+  isPrintClassJobType,
+} from "@/lib/job-type-migrate";
 
 const SAMPLE_TIMELINE_STEP_IDS = new Set(["sample_1st", "sample_2nd", "sample_pp"]);
 
@@ -12,81 +17,67 @@ export function timelineStepOpensIn(stepId: string): JobDetailsSection | undefin
   return undefined;
 }
 
+const PRINT_PRODUCTION_TIMELINE = [
+  "vendor_inquiries",
+  "mock_up",
+  "cost_sheets",
+  "costing_summary",
+  "deposit_payment",
+  "tp_setup",
+  "blanks_lab_dip",
+  "order_trims",
+  "tp_completion",
+  "sent_to_contractors",
+  "strike_off",
+  "trimming",
+  "packing",
+  "arrange_delivery",
+  "completion",
+] as const;
+
+const CUT_SEW_CLASS_TIMELINE = [
+  "vendor_inquiries",
+  "cost_sheets",
+  "costing_summary",
+  "deposit_payment",
+  "tp_setup",
+  "strike_off",
+  "development_sample_received",
+  "pp_approved",
+  "branded_labels_ordered",
+  "top_approved",
+  "completion",
+] as const;
+
+const BRANDING_CLASS_TIMELINE = [
+  "costing_summary",
+  "mock_up",
+  "deposit_payment",
+  "tp_setup",
+  "branding_assets_approved",
+  "completion",
+] as const;
+
 /** Subset of the canonical step ids for each job type. Order matters. */
 export const JOB_TIMELINE_TEMPLATES: Record<JobType, string[]> = {
-  print_production: [
-    "vendor_inquiries",
-    "mock_up",
-    "cost_sheets",
-    "costing_summary",
-    "deposit_payment",
-    "tp_setup",
-    "blanks_lab_dip",
-    "order_trims",
-    "tp_completion",
-    "sent_to_contractors",
-    "strike_off",
-    "trimming",
-    "packing",
-    "arrange_delivery",
-    "completion",
-  ],
-  embroidery: [
-    "vendor_inquiries",
-    "mock_up",
-    "cost_sheets",
-    "costing_summary",
-    "deposit_payment",
-    "tp_setup",
-    "sent_to_contractors",
-    "strike_off",
-    "packing",
-    "arrange_delivery",
-    "completion",
-  ],
-  cut_sew: [
-    "vendor_inquiries",
-    "mock_up",
-    "cost_sheets",
-    "costing_summary",
-    "deposit_payment",
-    "tp_setup",
-    "blanks_lab_dip",
-    "order_trims",
-    "tp_completion",
-    "sent_to_contractors",
-    "strike_off",
-    "sample_1st",
-    "sample_2nd",
-    "sample_pp",
-    "packing",
-    "arrange_delivery",
-    "completion",
-  ],
-  full_package: [
-    "vendor_inquiries",
-    "mock_up",
-    "cost_sheets",
-    "costing_summary",
-    "deposit_payment",
-    "packing",
-    "arrange_delivery",
-    "completion",
-  ],
-  design: ["vendor_inquiries", "mock_up", "tp_setup", "tp_completion", "completion"],
-  branding: ["vendor_inquiries", "mock_up", "cost_sheets", "tp_setup", "tp_completion", "completion"],
-  custom: [
-    "vendor_inquiries",
-    "cost_sheets",
-    "costing_summary",
-    "deposit_payment",
-    "tp_setup",
-    "tp_completion",
-    "packing",
-    "arrange_delivery",
-    "completion",
-  ],
+  print_production: [...PRINT_PRODUCTION_TIMELINE],
+  decoration: [...PRINT_PRODUCTION_TIMELINE],
+  finishing: [...PRINT_PRODUCTION_TIMELINE],
+  full_package_cut_sew: [...CUT_SEW_CLASS_TIMELINE],
+  custom_products: [...CUT_SEW_CLASS_TIMELINE],
+  branding_kit: [...BRANDING_CLASS_TIMELINE],
+  artwork_design: [...BRANDING_CLASS_TIMELINE],
 };
+
+function timelineLabelForType(stepId: string, defaultLabel: string, type?: JobType): string {
+  if (stepId === "completion") {
+    return isBrandingClassJobType(type) ? "Completion Date" : "Job Completed";
+  }
+  if (stepId === "costing_summary" && isBrandingClassJobType(type)) {
+    return "Estimate Sent to Client";
+  }
+  return defaultLabel;
+}
 
 /** Build a fresh upcoming timeline for a job type. Falls back to full template. */
 export function buildUpcomingJobTimelineForType(type?: JobType): WipStep[] {
@@ -101,7 +92,7 @@ export function buildUpcomingJobTimelineForType(type?: JobType): WipStep[] {
       const opensIn = timelineStepOpensIn(def.id);
       return {
         id: def.id,
-        label: def.label,
+        label: timelineLabelForType(def.id, def.label, type),
         state: "upcoming" as const,
         ...(opensIn ? { opensIn } : {}),
       };
@@ -160,60 +151,47 @@ export type AccordionSection =
   | "vendor_quotes"
   | "outputs";
 
+const PRINT_CLASS_SECTIONS: AccordionSection[] = [
+  "product_details",
+  "brand",
+  "color_sizing",
+  "development",
+  "print_embroidery",
+  "vendor_quotes",
+  "costing",
+  "approvals",
+  "bulk",
+  "outputs",
+];
+
+const CUT_SEW_CLASS_SECTIONS: AccordionSection[] = [
+  "product_details",
+  "brand",
+  "color_sizing",
+  "development",
+  "print_embroidery",
+  "cut_sew_samples",
+  "vendor_quotes",
+  "costing",
+  "approvals",
+  "bulk",
+  "outputs",
+];
+
+const BRANDING_CLASS_SECTIONS: AccordionSection[] = [
+  "product_details",
+  "brand",
+  "color_sizing",
+  "development",
+  "print_embroidery",
+  "vendor_quotes",
+  "costing",
+  "outputs",
+];
+
 export function accordionSectionsFor(type: JobType | undefined): AccordionSection[] {
-  switch (type) {
-    case "full_package":
-      return [
-        "product_details",
-        "brand",
-        "color_sizing",
-        "print_embroidery",
-        "vendor_quotes",
-        "costing",
-        "outputs",
-      ];
-    case "design":
-      return ["product_details", "brand", "color_sizing", "development", "vendor_quotes", "outputs"];
-    case "branding":
-      return [
-        "product_details",
-        "brand",
-        "color_sizing",
-        "development",
-        "print_embroidery",
-        "vendor_quotes",
-        "costing",
-        "outputs",
-      ];
-    case "cut_sew":
-      return [
-        "product_details",
-        "brand",
-        "color_sizing",
-        "development",
-        "print_embroidery",
-        "cut_sew_samples",
-        "vendor_quotes",
-        "costing",
-        "approvals",
-        "bulk",
-        "outputs",
-      ];
-    case "print_production":
-    case "embroidery":
-    case "custom":
-    default:
-      return [
-        "product_details",
-        "brand",
-        "color_sizing",
-        "development",
-        "print_embroidery",
-        "vendor_quotes",
-        "costing",
-        "approvals",
-        "bulk",
-        "outputs",
-      ];
-  }
+  if (isCutSewClassJobType(type)) return CUT_SEW_CLASS_SECTIONS;
+  if (isBrandingClassJobType(type)) return BRANDING_CLASS_SECTIONS;
+  if (isPrintClassJobType(type)) return PRINT_CLASS_SECTIONS;
+  return PRINT_CLASS_SECTIONS;
 }

@@ -80,6 +80,32 @@ export const CONNECT_DOTS_PROJECT_WIP_STEPS: StepDef[] = [
     durationShort: "1–2d",
     durationLabel: "1–2 days after production completion",
   },
+  {
+    id: "development_sample_received",
+    label: "Development Sample Received",
+    durationShort: "1–2w",
+    durationLabel: "Development sample received from vendor",
+  },
+  {
+    id: "pp_approved",
+    label: "PP Approved",
+    durationShort: "1w",
+    durationLabel: "Pre-production sample approved",
+  },
+  {
+    id: "branded_labels_ordered",
+    label: "Branded Labels Ordered",
+  },
+  {
+    id: "top_approved",
+    label: "TOP Approved",
+    durationShort: "1w",
+    durationLabel: "Top of production approved",
+  },
+  {
+    id: "branding_assets_approved",
+    label: "Branding Assets Approved",
+  },
   { id: "completion", label: "Completion Date" },
 ];
 

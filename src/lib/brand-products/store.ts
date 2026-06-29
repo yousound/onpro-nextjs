@@ -97,6 +97,7 @@ export async function saveCatalogProductToStore(
       name: input.name.trim(),
       style_code: input.style_code?.trim() ?? "",
       color: input.color ?? null,
+      color_code: input.color_code ?? null,
       size: input.size ?? null,
       catalog_sku: input.catalog_sku ?? null,
       description: input.description ?? null,

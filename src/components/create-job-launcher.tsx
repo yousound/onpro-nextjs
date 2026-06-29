@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Project } from "@/lib/types/project";
 import type { ProjectJob } from "@/lib/types/wip";
-import { NewJobModal } from "@/components/new-job-modal";
+import { JobDetailsModal } from "@/components/job-details-modal";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { normalizeJob } from "@/lib/job-defaults";
 import { createNewJobSeed } from "@/lib/project-job-create";
+import { getOrCreateOrderForJob, loadProjectOrders } from "@/lib/project-order-edits";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 import { clientCodeByName } from "@/lib/reference/client-codes";
 import { resolveClientProjectList } from "@/lib/mock/project-session";
@@ -70,6 +71,11 @@ export function CreateJobLauncher({
     return loadProjectJobs(selectedProject.id, selectedProject);
   }, [selectedProject, open, jobSeed?.id]);
 
+  const orders = useMemo(() => {
+    if (!selectedProject) return [];
+    return loadProjectOrders(selectedProject.id, selectedProject);
+  }, [selectedProject, open]);
+
   useEffect(() => {
     if (!open) return;
     const id = defaultProjectId;
@@ -94,20 +100,25 @@ export function CreateJobLauncher({
     setOpen(true);
   }, [projects.length, setOpen]);
 
-  const handleProjectChange = useCallback(
-    (projectId: number) => {
-      setSelectedProjectId(projectId);
-    },
-    [],
-  );
+  const handleProjectChange = useCallback((projectId: number) => {
+    setSelectedProjectId(projectId);
+  }, []);
 
   const handleSave = useCallback(
     (saved: ProjectJob) => {
       const project = projects.find((p) => p.id === saved.project_id);
       if (!project) return;
+
+      let jobToSave = saved;
+      if (!saved.order_id) {
+        const existingOrders = loadProjectOrders(project.id, project);
+        const created = getOrCreateOrderForJob(project.id, project, existingOrders, "MAT", projects);
+        jobToSave = { ...saved, order_id: created.orderId };
+      }
+
       const current = loadProjectJobs(project.id, project);
-      saveProjectJobs(project.id, [...current, saved]);
-      onJobCreated?.(project.id, saved);
+      saveProjectJobs(project.id, [...current, jobToSave]);
+      onJobCreated?.(project.id, jobToSave);
       setOpen(false);
     },
     [projects, onJobCreated, setOpen],
@@ -141,15 +152,18 @@ export function CreateJobLauncher({
     <>
       {trigger}
       {open && selectedProject && jobSeed ? (
-        <NewJobModal
+        <JobDetailsModal
           key={selectedProject.id}
-          projects={projects}
           project={selectedProject}
-          onProjectChange={handleProjectChange}
           job={normalizeJob(jobSeed, selectedProject)}
           allJobs={projectJobs}
+          orders={orders}
           clientCode={clientCodeByName(selectedProject.client.name) ?? "GG"}
           vendors={vendors}
+          isNew
+          allowProjectChange
+          projects={projects}
+          onProjectChange={handleProjectChange}
           onClose={() => setOpen(false)}
           onSave={handleSave}
         />

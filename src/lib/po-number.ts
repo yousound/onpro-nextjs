@@ -122,6 +122,25 @@ export function generatePoNumber(
   return formatPoNumber(code, date, nextSeq);
 }
 
+/**
+ * Prefer a PO parsed from the email (subject/body intake). Fall back to shop sequence
+ * when missing or not a valid compact record number.
+ */
+export function resolveProjectNumber(
+  clientCode: string,
+  clientPoFromEmail: string | null | undefined,
+  existingPos: string[],
+  date: Date = new Date(),
+): string {
+  const fromEmail = clientPoFromEmail?.trim().toUpperCase();
+  if (fromEmail) {
+    if (isPoNumber(fromEmail)) return fromEmail;
+    // Email- or RFQ-confirmed PO that does not match compact record format
+    if (/^[A-Z0-9][A-Z0-9-]{2,}$/.test(fromEmail)) return fromEmail;
+  }
+  return generatePoNumber(clientCode, existingPos, date);
+}
+
 /** Keep PO when still in the same month; assign the next seq when the month changes. */
 export function rollPoNumberIfNewMonth(
   currentPo: string | null | undefined,

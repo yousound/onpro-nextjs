@@ -20,6 +20,8 @@ import {
 import { formatPayloadValue } from "@/lib/mailroom/workflow-utils";
 import { orderedPayloadEntries } from "@/lib/mailroom/payload-field-order";
 import { generatedKindFromSuggestion } from "@/lib/agent-apply";
+import { poPrefixMismatch } from "@/lib/po-client-code";
+import { resolveClientCode } from "@/lib/reference/client-codes";
 
 const SECTION_BADGE: Record<string, string> = {
   project: "bg-sky-100 text-sky-800",
@@ -74,9 +76,22 @@ function StepPayloadSummary({ step }: { step: MailroomWorkflowStep }) {
   const entries = Object.entries(step.payload).filter(
     ([k, v]) => k !== "workflow_step_id" && v !== undefined && v !== "",
   );
-  if (entries.length === 0 && !step.auto_contact) return null;
+  const clientName = String(step.payload.client ?? step.payload.client_name ?? "").trim();
+  const poNumber = String(
+    step.payload.client_po_number ?? step.payload.po_number ?? "",
+  ).trim();
+  const poPrefixNotice =
+    step.kind === "create_project" && clientName && poNumber
+      ? poPrefixMismatch(clientName, resolveClientCode(clientName), poNumber).message
+      : null;
+  if (entries.length === 0 && !step.auto_contact && !poPrefixNotice) return null;
   return (
     <ul className="mt-1.5 space-y-0.5 text-[11px]">
+      {poPrefixNotice ? (
+        <li className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-medium leading-snug text-amber-950">
+          {poPrefixNotice}
+        </li>
+      ) : null}
       {step.auto_contact ? (
         <li className="flex justify-between gap-3 text-amber-800">
           <span className="font-semibold uppercase">Will add client</span>
@@ -103,6 +118,7 @@ export function MailroomWorkflowPlan({
   onPreview,
   onApproveStep,
   onSkipStep,
+  onUnskipStep,
   onRunAllRemaining,
   onLinkExistingProject,
   onCreateNewProject,
@@ -127,6 +143,7 @@ export function MailroomWorkflowPlan({
   ) => void;
   onApproveStep: (step: MailroomWorkflowStep) => void;
   onSkipStep: (step: MailroomWorkflowStep) => void;
+  onUnskipStep?: (step: MailroomWorkflowStep) => void;
   onRunAllRemaining: () => void;
   onLinkExistingProject: (projectId: number) => void;
   onCreateNewProject: () => void;
@@ -372,6 +389,17 @@ export function MailroomWorkflowPlan({
                     Skip
                   </button>
                 </div>
+              ) : step.status === "skipped" && onUnskipStep ? (
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onUnskipStep(step)}
+                    disabled={workflowBusy}
+                    className="rounded-lg border border-accent/40 bg-white px-2.5 py-1 text-[11px] font-semibold text-accent hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Restore
+                  </button>
+                </div>
               ) : null}
             </li>
           );
@@ -504,6 +532,7 @@ type WorkflowPlanModalProps = {
   ) => void;
   onApproveStep: (step: MailroomWorkflowStep) => void;
   onSkipStep: (step: MailroomWorkflowStep) => void;
+  onUnskipStep?: (step: MailroomWorkflowStep) => void;
   onRunAllRemaining: () => void;
   onLinkExistingProject: (projectId: number) => void;
   onCreateNewProject: () => void;

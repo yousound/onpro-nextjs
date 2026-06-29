@@ -107,10 +107,10 @@ export function NewJobModal({
     patch({ category: label });
   }
 
-  function handleJobTypeChange(jobType: JobType) {
+  function handleJobTypeChange(partial: Partial<ProjectJob>) {
     patch({
-      job_type: jobType,
-      type: jobTypeLabel(jobType).toUpperCase(),
+      ...partial,
+      type: jobTypeLabel((partial.job_type ?? draft.job_type) ?? "print_production").toUpperCase(),
     });
   }
 
@@ -132,7 +132,6 @@ export function NewJobModal({
     () => draft.colorway_rows ?? normalizeColorwayRows(draft),
     [draft.colorway_rows, draft.colorway, draft.color_code],
   );
-  const isPrimaryJob = allJobs.length === 0;
 
   const canCreate = Boolean(draft.name.trim());
   const subtitleParts = [
@@ -192,7 +191,6 @@ export function NewJobModal({
             categoryDropdown={categoryDropdown}
             onCategoryChange={handleCategoryChange}
             onJobTypeChange={handleJobTypeChange}
-            isPrimaryJob={isPrimaryJob}
             fieldClass={projectModalFieldClass}
             textareaClass={projectModalTextareaClass}
           />

@@ -529,7 +529,14 @@ export function CostingSheetEditor({
                 Estimated buy
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
-                {sheet.estimated_qty || 0}
+                <input
+                  type="number"
+                  min={0}
+                  className={`${formNumFieldClass} w-20 text-right`}
+                  value={sheet.estimated_qty || ""}
+                  onChange={(e) => patch({ estimated_qty: parseNumber(e.target.value) })}
+                  placeholder="0"
+                />
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
                 {currency(totals.total_price)}
@@ -538,7 +545,24 @@ export function CostingSheetEditor({
                 colSpan={2}
                 className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-text-primary"
               >
-                {currency(totals.estimated_buy_total)}
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className={`${formNumFieldClass} w-28 text-right font-semibold`}
+                  value={
+                    sheet.estimated_buy_override != null
+                      ? sheet.estimated_buy_override
+                      : totals.estimated_buy_total || ""
+                  }
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    patch({
+                      estimated_buy_override: raw === "" ? null : parseNumber(raw),
+                    });
+                  }}
+                  placeholder="0"
+                />
               </td>
             </tr>
             <tr>
@@ -549,7 +573,14 @@ export function CostingSheetEditor({
                 Estimated CD profit
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
-                {sheet.estimated_qty || 0}
+                <input
+                  type="number"
+                  min={0}
+                  className={`${formNumFieldClass} w-20 text-right`}
+                  value={sheet.estimated_qty || ""}
+                  onChange={(e) => patch({ estimated_qty: parseNumber(e.target.value) })}
+                  placeholder="0"
+                />
               </td>
               <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-text-secondary">
                 {currency(totals.cd_profit_unit)}
@@ -558,7 +589,23 @@ export function CostingSheetEditor({
                 colSpan={2}
                 className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-text-primary"
               >
-                {currency(totals.cd_profit_total)}
+                <input
+                  type="number"
+                  step="0.01"
+                  className={`${formNumFieldClass} w-28 text-right font-semibold`}
+                  value={
+                    sheet.cd_profit_override != null
+                      ? sheet.cd_profit_override
+                      : totals.cd_profit_total || ""
+                  }
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    patch({
+                      cd_profit_override: raw === "" ? null : parseNumber(raw),
+                    });
+                  }}
+                  placeholder="0"
+                />
               </td>
             </tr>
             <tr className="bg-emerald-200/80">

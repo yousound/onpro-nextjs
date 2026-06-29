@@ -18,6 +18,9 @@ import {
   isRfqIntakeConfirmed,
   validateRfqIntakeDraft,
 } from "@/lib/mailroom/rfq-intake";
+import { poPrefixMismatch } from "@/lib/po-client-code";
+import { resolveClientCode } from "@/lib/reference/client-codes";
+import { InlineFieldMessage } from "@/components/inline-field-message";
 import { MAILROOM_Z_RFQ_OVER_WORKFLOW } from "@/lib/mailroom/modal-layers";
 import {
   contactDisplayName,
@@ -88,8 +91,9 @@ export function MailroomRfqIntakeProvider({
   const vendors = useProjectVendors();
   const teamRaw = useProjectTeam();
   const team = useMemo(() => teamContactsWithSelf(teamRaw, user), [teamRaw, user]);
+  const contacts = useMemo(() => loadContacts(), [vendors.length, teamRaw.length]);
   const [draft, setDraft] = useState<MailroomRfqIntake>(() =>
-    buildRfqIntakeDraft(thread, workflow, intake),
+    buildRfqIntakeDraft(thread, workflow, intake, contacts),
   );
   const [error, setError] = useState<string | null>(null);
   const [addTeamOpen, setAddTeamOpen] = useState(false);
@@ -101,7 +105,7 @@ export function MailroomRfqIntakeProvider({
   const teamContactAutoSetRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const next = buildRfqIntakeDraft(thread, workflow, intake);
+    const next = buildRfqIntakeDraft(thread, workflow, intake, loadContacts());
     setDraft(next);
     setError(null);
     skipPersistRef.current = true;
@@ -347,6 +351,15 @@ export function MailroomRfqIntakeForm() {
     openAddVendor,
   } = useRfqIntakeContext();
 
+  const poPrefixNotice = useMemo(() => {
+    if (draft.client_po_tbd || !draft.client_po.trim() || !draft.client_name.trim()) return null;
+    return poPrefixMismatch(
+      draft.client_name,
+      resolveClientCode(draft.client_name),
+      draft.client_po,
+    ).message;
+  }, [draft.client_name, draft.client_po, draft.client_po_tbd]);
+
   return (
     <div className="border-b border-violet-300 bg-gradient-to-b from-violet-100/80 to-white px-5 py-4">
       <div>
@@ -386,6 +399,7 @@ export function MailroomRfqIntakeForm() {
             />
             No PO yet (TBD)
           </label>
+          <InlineFieldMessage message={poPrefixNotice ?? undefined} tone="warning" />
         </label>
         <label>
           <span className={labelClass}>Due date</span>
@@ -451,11 +465,11 @@ export function MailroomRfqIntakeForm() {
       <label className="mt-3 flex items-center gap-2 text-[12px] font-medium text-text-primary">
         <input
           type="checkbox"
-          checked={draft.create_order}
-          onChange={(e) => patch({ create_order: e.target.checked })}
+          checked={draft.create_estimate}
+          onChange={(e) => patch({ create_estimate: e.target.checked })}
           className="rounded border-border-light"
         />
-        Create one production order for this RFQ
+        Create estimate for this RFQ
       </label>
     </div>
   );

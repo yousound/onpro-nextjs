@@ -52,6 +52,7 @@ import {
   clientCodeFromContact,
   clientCodeMismatchMessage,
 } from "@/lib/client-code-resolve";
+import { poPrefixMismatch } from "@/lib/po-client-code";
 import { resolveClientCode } from "@/lib/reference/client-codes";
 import { defaultPermissionsForSegment } from "@/lib/project-permissions";
 import type { Contact } from "@/lib/types/contact";
@@ -328,6 +329,16 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
     return clientCodeMismatchMessage(resolution, selectedClient.name);
   }, [selectedClient]);
 
+  const poPrefixNotice = useMemo(() => {
+    if (!selectedClient || !poNumber.trim()) return null;
+    const resolution = clientCodeFromContact(selectedClient);
+    return poPrefixMismatch(
+      selectedClient.name,
+      resolution.effectiveCode,
+      poNumber,
+    ).message;
+  }, [selectedClient, poNumber]);
+
   useEffect(() => {
     if (poTouched) return;
     setPoNumber(projectPoPreview);
@@ -585,6 +596,7 @@ export function ProjectsPageContent({ initialProjects }: { initialProjects: Proj
           setPoNumber(v);
         }}
         clientCodeNotice={clientCodeNotice}
+        poPrefixNotice={poPrefixNotice}
         onUseResolvedClientCode={
           selectedClient
             ? async () => {

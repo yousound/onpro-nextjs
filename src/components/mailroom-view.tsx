@@ -62,6 +62,13 @@ import {
 } from "@/components/mailroom-workflow-plan";
 import { MAILROOM_Z_DOC_PREVIEW } from "@/lib/mailroom/modal-layers";
 import { MailroomRfqReviewModal } from "@/components/mailroom-rfq-intake-card";
+import { ProjectDraftFields } from "@/components/project-draft-fields";
+import {
+  normalizeProjectDraftTitle,
+  projectDraftPayloadFrom,
+  projectDraftPreviewPayload,
+  PROJECT_DRAFT_FIELD_LABELS,
+} from "@/lib/mailroom/project-draft";
 import { isRfqIntakeConfirmed, mailroomNeedsRfqConfirm } from "@/lib/mailroom/rfq-intake";
 import { isClientMockBackend } from "@/lib/config/backend-mode";
 import {
@@ -292,6 +299,7 @@ function suggestionFromChatProposal(
   const payload = enrichSuggestionPayloadForThread(proposal.kind, proposal.payload ?? {}, {
     workflow,
     threadSubject: thread.subject,
+    threadBodies: thread.messages.map((m) => m.body),
   });
   return suggestionForKind(thread, proposal.kind, {
     title: proposal.title,
@@ -922,6 +930,24 @@ export function MailroomView() {
     return normalized;
   }
 
+  async function ensureThreadForSummarize(thread: EmailThread): Promise<EmailThread> {
+    if (!mailroomApiEnabled() || !thread.id.startsWith("gmail-")) return thread;
+    try {
+      const { thread: full } = await fetchMailroomThreadDetailViaApi(thread.id);
+      gmailFullThreadIdsRef.current.add(thread.id);
+      setGmailThreads((prev) => mergeGmailThreadLists(prev, [full]));
+      setGmailSearchResults((prev) =>
+        prev.some((t) => t.id === full.id)
+          ? prev.map((t) => (t.id === full.id ? full : t))
+          : prev,
+      );
+      return full;
+    } catch (e) {
+      console.warn("[mailroom] full thread fetch before summarize failed", e);
+      return thread;
+    }
+  }
+
   async function handleSummarize() {
     if (!selectedThread || summarizing) return;
     setSummarizing(true);
@@ -941,7 +967,8 @@ export function MailroomView() {
     const seededWorkflow = isMock ? workflowForThread(selectedThread) : null;
 
     try {
-      const data = await summarizeThreadViaApi(selectedThread, { forceRegenerate: isRegenerate });
+      const threadForScan = await ensureThreadForSummarize(selectedThread);
+      const data = await summarizeThreadViaApi(threadForScan, { forceRegenerate: isRegenerate });
       workflow = data.workflow ?? seededWorkflow;
       summaryText = normalizeEmailBody(data.summary);
       const list =
@@ -1170,8 +1197,15 @@ export function MailroomView() {
     s: AgentSuggestion,
     override?: { title?: string; payload?: Record<string, unknown> },
     workflowStep?: MailroomWorkflowStep,
+    threadOverride?: EmailThread,
   ): Promise<GeneratedItem | null> {
-    const workflow = selectedThread ? state?.workflows[selectedThread.id] : undefined;
+    const thread = threadOverride ?? selectedThread;
+    const workflow = thread ? state?.workflows[thread.id] : undefined;
+    const intake = thread ? state?.rfq_intake?.[thread.id] : undefined;
+    const rfqClientPo =
+      intake && isRfqIntakeConfirmed(intake) && !intake.client_po_tbd
+        ? intake.client_po
+        : null;
     const linkedProjectIdEarly =
       workflow?.link_existing_project_id ??
       (workflow ? resolveWorkflowProjectId(workflow) : undefined);
@@ -1180,9 +1214,11 @@ export function MailroomView() {
       stripPayloadFieldOrder(override?.payload ?? s.payload),
       {
         workflow,
-        threadSubject: selectedThread?.subject,
+        threadSubject: thread?.subject,
+        threadBodies: thread?.messages.map((m) => m.body),
         fallbackProjectId: linkedProjectIdEarly,
         fallbackJobId: workflow ? lastAppliedJobId(workflow) : undefined,
+        rfqClientPo,
       },
     );
     const effective: AgentSuggestion = {
@@ -1190,6 +1226,17 @@ export function MailroomView() {
       title: override?.title ?? s.title,
       payload: mergedPayload,
     };
+
+    if (workflow && workflowStep && thread && override) {
+      setState(
+        updateMailroomWorkflow(thread.id, (wf) =>
+          patchWorkflowStep(wf, workflowStep.step_id, {
+            ...(override.title ? { title: effective.title } : {}),
+            payload: mergedPayload,
+          }),
+        ),
+      );
+    }
 
     let stepContext = workflow && workflowStep
       ? buildStepExecContext(workflow, workflowStep.step_id)
@@ -1205,11 +1252,12 @@ export function MailroomView() {
 
     const execContext = {
       threadRelated: {
-        ...selectedThread?.related,
-        project_id: linkedProjectId ?? selectedThread?.related?.project_id,
-        job_id: stepContext?.job_id ?? selectedThread?.related?.job_id,
+        ...thread?.related,
+        project_id: linkedProjectId ?? thread?.related?.project_id,
+        job_id: stepContext?.job_id ?? thread?.related?.job_id,
       },
-      threadSubject: selectedThread?.subject,
+      threadSubject: thread?.subject,
+      threadBodies: thread?.messages.map((m) => m.body),
       projects: resolveClientProjectList(getLiveCachedProjects()),
       workflowStepContext: stepContext,
     };
@@ -1359,7 +1407,14 @@ export function MailroomView() {
       return;
     }
 
-    await applyOneWith(suggestionFromWorkflowStep(liveStep), override, liveStep);
+    await applyOneWith(
+      suggestionFromWorkflowStep(liveStep),
+      override,
+      liveStep,
+      liveStep.kind === "create_project" || liveStep.kind === "create_order"
+        ? await ensureThreadForSummarize(selectedThread)
+        : selectedThread,
+    );
   }
 
   async function applyWorkflowStep(
@@ -1389,6 +1444,17 @@ export function MailroomView() {
     setState(next);
   }
 
+  function unskipWorkflowStep(step: MailroomWorkflowStep) {
+    if (!selectedThread) return;
+    let next = updateMailroomWorkflow(selectedThread.id, (wf) =>
+      patchWorkflowStep(wf, step.step_id, { status: "pending" }),
+    );
+    next = appendChat(
+      makeAgentChat(selectedThread.id, `Restored step: “${step.title}”.`),
+    );
+    setState(next);
+  }
+
   function handleSaveRfqIntakeDraft(draft: MailroomRfqIntake) {
     if (!selectedThread) return;
     setState(saveRfqIntakeDraft(selectedThread.id, draft));
@@ -1398,11 +1464,11 @@ export function MailroomView() {
     if (!selectedThread) return;
     const wasConfirmed = isRfqIntakeConfirmed(state?.rfq_intake?.[selectedThread.id]);
     let next = confirmRfqIntake(selectedThread.id, draft, nowIso());
-    if (!draft.create_order) {
+    if (!draft.create_estimate) {
       next = updateMailroomWorkflow(selectedThread.id, (wf) => ({
         ...wf,
         steps: wf.steps.map((s) =>
-          s.kind === "create_order" && s.status === "pending"
+          s.kind === "generate_estimate" && s.status === "pending"
             ? { ...s, status: "skipped" as const }
             : s,
         ),
@@ -1640,6 +1706,7 @@ export function MailroomView() {
             {
               workflow: state?.workflows[selectedThread.id],
               threadSubject: selectedThread.subject,
+              threadBodies: selectedThread.messages.map((m) => m.body),
             },
           ),
         });
@@ -1775,6 +1842,7 @@ export function MailroomView() {
           }}
           onWorkflowApprove={(step) => void applyWorkflowStep(step)}
           onWorkflowSkip={(step) => void skipWorkflowStep(step)}
+          onWorkflowUnskip={(step) => unskipWorkflowStep(step)}
           onWorkflowRunAll={() => void runAllRemainingWorkflowSteps()}
           onWorkflowLinkProject={(projectId) => {
             if (!selectedThread) return;
@@ -2342,6 +2410,7 @@ function ConversationPane({
   onWorkflowPreview,
   onWorkflowApprove,
   onWorkflowSkip,
+  onWorkflowUnskip,
   onWorkflowRunAll,
   onWorkflowLinkProject,
   onWorkflowCreateNew,
@@ -2399,6 +2468,7 @@ function ConversationPane({
   ) => void;
   onWorkflowApprove: (step: MailroomWorkflowStep) => void;
   onWorkflowSkip: (step: MailroomWorkflowStep) => void;
+  onWorkflowUnskip: (step: MailroomWorkflowStep) => void;
   onWorkflowRunAll: () => void;
   onWorkflowLinkProject: (projectId: number) => void;
   onWorkflowCreateNew: () => void;
@@ -2771,6 +2841,7 @@ function ConversationPane({
           onPreview={onWorkflowPreview}
           onApproveStep={onWorkflowApprove}
           onSkipStep={onWorkflowSkip}
+          onUnskipStep={onWorkflowUnskip}
           onRunAllRemaining={onWorkflowRunAll}
           onLinkExistingProject={onWorkflowLinkProject}
           onCreateNewProject={onWorkflowCreateNew}
@@ -3343,6 +3414,9 @@ const DATE_KEY_RE = /^(date|due|delivery|expires|sent|received|created|updated|s
 const QTY_KEY_RE = /^(qty|quantity|units|count|days|weeks|months|hours)$/i;
 
 function humanLabel(key: string): string {
+  if (key in PROJECT_DRAFT_FIELD_LABELS) {
+    return PROJECT_DRAFT_FIELD_LABELS[key as keyof typeof PROJECT_DRAFT_FIELD_LABELS];
+  }
   return key
     .replaceAll("_", " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
@@ -3461,11 +3535,13 @@ function DocPreview({
   title,
   payload,
   docNumber,
+  hideDocNumber = false,
 }: {
   kind: GeneratedItemKind;
   title: string;
   payload: Record<string, unknown>;
   docNumber: string;
+  hideDocNumber?: boolean;
 }) {
   const entries = orderedPayloadEntries(payload);
   const today = new Date().toLocaleDateString(undefined, {
@@ -3488,7 +3564,9 @@ function DocPreview({
               <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400">
                 OnPro · {labelForKind(kind)}
               </p>
-              <p className="font-mono text-xs font-semibold text-slate-700">{docNumber}</p>
+              {!hideDocNumber ? (
+                <p className="font-mono text-xs font-semibold text-slate-700">{docNumber}</p>
+              ) : null}
             </div>
           </div>
           <div className="text-right">
@@ -3586,11 +3664,23 @@ function DocPreviewModal({
 }) {
   const [mounted, setMounted] = useState(false);
   const kind = generatedKindFromSuggestion(suggestion.kind);
-  const [title, setTitle] = useState(suggestion.title);
-  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({ ...suggestion.payload }));
+  const isProjectDraft = suggestion.kind === "create_project";
+  const initialTitle = useMemo(() => {
+    const fromPayload = String(
+      suggestion.payload.name ?? suggestion.payload.project_name ?? "",
+    ).trim();
+    return normalizeProjectDraftTitle(fromPayload || suggestion.title);
+  }, [suggestion.payload, suggestion.title]);
+  const [title, setTitle] = useState(initialTitle);
+  const [draft, setDraft] = useState<Record<string, unknown>>(() =>
+    isProjectDraft
+      ? { ...projectDraftPayloadFrom(suggestion.payload), ...suggestion.payload }
+      : { ...suggestion.payload },
+  );
   const [fieldOrder, setFieldOrder] = useState(() => ensurePayloadFieldOrder(suggestion.payload));
   const [generating, setGenerating] = useState(true);
   const docNumber = useMemo(() => generateDocNumber(kind), [kind]);
+  const hideDocNumber = isProjectDraft;
 
   useEffect(() => {
     setMounted(true);
@@ -3613,7 +3703,17 @@ function DocPreviewModal({
   }, [onClose]);
 
   function finalizePayload(): Record<string, unknown> {
-    return payloadWithFieldOrder(draft, fieldOrder);
+    const base = payloadWithFieldOrder(draft, fieldOrder);
+    if (isProjectDraft) {
+      const name = normalizeProjectDraftTitle(title);
+      return {
+        ...base,
+        name,
+        project_name: name,
+        client_name: base.client ?? base.client_name,
+      };
+    }
+    return base;
   }
 
   function setField(key: string, value: unknown) {
@@ -3636,12 +3736,12 @@ function DocPreviewModal({
     setFieldOrder((prev) => movePayloadField(prev, key, direction));
   }
 
-  const previewPayload = useMemo(
-    () => payloadWithFieldOrder(draft, fieldOrder),
-    [draft, fieldOrder],
-  );
+  const previewPayload = useMemo(() => {
+    if (isProjectDraft) return projectDraftPreviewPayload(draft);
+    return payloadWithFieldOrder(draft, fieldOrder);
+  }, [draft, fieldOrder, isProjectDraft]);
   const entries = orderedPayloadEntries(previewPayload);
-  const safeTitle = title.trim() || suggestion.title;
+  const safeTitle = normalizeProjectDraftTitle(title.trim() || suggestion.title);
   const emphasizeAttach = primaryMode === "attach";
 
   if (!mounted) return null;
@@ -3690,9 +3790,11 @@ function DocPreviewModal({
                 <span className="size-1.5 rounded-full bg-emerald-500" />
                 Saved drafts appear on the right
               </span>
-              <span className="hidden font-mono text-[11px] font-semibold text-slate-600 sm:inline">
-                {docNumber}
-              </span>
+              {!hideDocNumber ? (
+                <span className="hidden font-mono text-[11px] font-semibold text-slate-600 sm:inline">
+                  {docNumber}
+                </span>
+              ) : null}
               <button
                 type="button"
                 onClick={onClose}
@@ -3728,36 +3830,50 @@ function DocPreviewModal({
               </label>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Fields
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                Updates the preview live. Use ↑↓ to reorder fields.
-              </p>
-              <ul className="mt-3 space-y-2">
-                {entries.map(([k, v], index) => (
-                  <PayloadField
-                    key={k}
-                    fieldKey={k}
-                    value={v}
-                    canMoveUp={index > 0}
-                    canMoveDown={index < entries.length - 1}
-                    onMoveUp={() => moveField(k, "up")}
-                    onMoveDown={() => moveField(k, "down")}
-                    onChange={(next) => setField(k, next)}
-                    onRemove={() => removeField(k)}
+              {isProjectDraft ? (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Project details
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    Client, PO, due date, vendor, and project lead.
+                  </p>
+                  <ProjectDraftFields draft={draft} onChange={setDraft} />
+                </>
+              ) : (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Fields
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    Updates the preview live. Use ↑↓ to reorder fields.
+                  </p>
+                  <ul className="mt-3 space-y-2">
+                    {entries.map(([k, v], index) => (
+                      <PayloadField
+                        key={k}
+                        fieldKey={k}
+                        value={v}
+                        canMoveUp={index > 0}
+                        canMoveDown={index < entries.length - 1}
+                        onMoveUp={() => moveField(k, "up")}
+                        onMoveDown={() => moveField(k, "down")}
+                        onChange={(next) => setField(k, next)}
+                        onRemove={() => removeField(k)}
+                      />
+                    ))}
+                    {entries.length === 0 ? (
+                      <li className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-center text-[11px] text-slate-500">
+                        No fields yet — add one below.
+                      </li>
+                    ) : null}
+                  </ul>
+                  <AddFieldRow
+                    existing={new Set(entries.map(([k]) => k))}
+                    onAdd={(k, v) => setField(k, v)}
                   />
-                ))}
-                {entries.length === 0 ? (
-                  <li className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-center text-[11px] text-slate-500">
-                    No fields yet — add one below.
-                  </li>
-                ) : null}
-              </ul>
-              <AddFieldRow
-                existing={new Set(entries.map(([k]) => k))}
-                onAdd={(k, v) => setField(k, v)}
-              />
+                </>
+              )}
             </div>
           </aside>
 
@@ -3767,7 +3883,13 @@ function DocPreviewModal({
               <DocPreviewSkeleton kind={kind} />
             ) : (
               <div className="transition-opacity duration-300">
-                <DocPreview kind={kind} title={safeTitle} payload={previewPayload} docNumber={docNumber} />
+                <DocPreview
+                  kind={kind}
+                  title={safeTitle}
+                  payload={previewPayload}
+                  docNumber={docNumber}
+                  hideDocNumber={hideDocNumber}
+                />
               </div>
             )}
           </section>

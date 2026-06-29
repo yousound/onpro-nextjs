@@ -57,7 +57,8 @@ Rules:
 - If project_match.confidence is high, omit create_project and start with create_job or updates targeting that project.
 - Include auto_contact on create_project when the end-customer brand may not exist in workspace clients list.
 - create_project payload "client" must be the END CUSTOMER BRAND (e.g. "ZOE Conference" from subject PO#ZOE260104), NOT Connect Dots / @connectdots.la — those are the operator workspace handling the RFQ.
-- Parse client PO from the Subject line when present (e.g. Subject "PO#ZOE260104 - …" → payload client_po_number: "ZOE260104"). Always read Subject before inferring client or PO.
+- Parse client PO from the entire thread — subject first, then every message newest-to-oldest (e.g. Subject "PO#ZOE260104 - …" or a reply mentioning PO#GG260601 → payload client_po_number). Use the latest PO if the thread updates it.
+- Read ALL messages in the thread for vendor names, qty changes, color/size updates, and due dates — not only the first email. Later replies override earlier values when they conflict.
 - Email FROM @connectdots.la TO a production vendor is still an inbound client RFQ: the brand in the subject/body (ZOE) is the client.
 - auto_contact.company must match the brand client name, not Connect Dots.
 - Never put @connectdots.la / Connect Dots staff emails in auto_contact.email — omit email if only the operator forwarded the RFQ.

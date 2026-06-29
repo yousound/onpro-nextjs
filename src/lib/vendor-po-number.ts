@@ -1,3 +1,4 @@
+import { jobColorwayTotalQty } from "@/lib/mailroom/job-ingest";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { getLiveCachedProjects } from "@/lib/data/live-cache";
 import { mergeProjectLists, readSessionProjects } from "@/lib/mock/project-session";
@@ -126,7 +127,7 @@ export function vendorQuotesForSend(
       vendor,
       item_description: job.name?.trim() || job.style_name?.trim() || "Quote request",
       unit_cost: 0,
-      qty: 1,
+      qty: jobColorwayTotalQty(job) || 1,
       po_number: po,
       status: "draft",
       job_seq: jobSeq,

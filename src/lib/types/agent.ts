@@ -169,7 +169,8 @@ export type MailroomRfqIntake = {
   vendor_name: string | null;
   /** Per-email role overrides when thread heuristics are wrong. */
   participant_role_overrides?: Record<string, MailroomRfqParticipantRole>;
-  create_order: boolean;
+  /** When false, generate_estimate workflow steps are skipped at RFQ confirm. */
+  create_estimate: boolean;
   confirmed_at: ISODate | null;
 };
 

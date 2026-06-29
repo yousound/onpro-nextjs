@@ -92,8 +92,8 @@ export interface TrimLineTrack {
   trim_received_date: ISODate;
 }
 
-/** Fixed sample approval stage (Development). */
-export type SampleApprovalKey = "1st" | "2nd" | "pp";
+/** Sample approval stage key — defaults are 1st / 2nd / pp; custom rows use generated keys. */
+export type SampleApprovalKey = string;
 
 export interface SampleApprovalStage {
   key: SampleApprovalKey;

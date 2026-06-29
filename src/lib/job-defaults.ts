@@ -11,6 +11,7 @@ import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-color
 import { syncJobPriceFromCosting } from "@/lib/job-price";
 import { inferJobVendorNames } from "@/lib/job-vendors";
 import { repairJobTimelineWithTemplate } from "@/lib/job-timeline-templates";
+import { migrateJobTypeFields } from "@/lib/job-type-migrate";
 
 export function defaultJobEstimate(project?: Project): NonNullable<ProjectJob["estimate"]> {
   return {
@@ -111,62 +112,63 @@ function isDemoLabelFile(file: { id?: string; url?: string }): boolean {
 
 /** Merge persisted job with defaults for new fields (backward compat). */
 export function normalizeJob(job: ProjectJob, project?: Project): ProjectJob {
-  const labelLines = (job.label_lines ?? []).filter((l) => !isDemoLabelArtifact(l)).map((l) => ({ ...l }));
-  const labelFiles = (job.label_files ?? []).filter((f) => !isDemoLabelFile(f)).map((f) => ({ ...f }));
+  const migrated = migrateJobTypeFields(job);
+  const labelLines = (migrated.label_lines ?? []).filter((l) => !isDemoLabelArtifact(l)).map((l) => ({ ...l }));
+  const labelFiles = (migrated.label_files ?? []).filter((f) => !isDemoLabelFile(f)).map((f) => ({ ...f }));
 
-  const colorwayRows = normalizeColorwayRows(job);
-  const legacyColor = syncLegacyColorwayFields({ ...job, colorway_rows: colorwayRows });
-  const priceFields = syncJobPriceFromCosting(job);
+  const colorwayRows = normalizeColorwayRows(migrated);
+  const legacyColor = syncLegacyColorwayFields({ ...migrated, colorway_rows: colorwayRows });
+  const priceFields = syncJobPriceFromCosting(migrated);
 
   return {
-    ...job,
+    ...migrated,
     ...legacyColor,
     ...priceFields,
-    style_name: job.style_name ?? job.name ?? "",
-    price_manual_override: job.price_manual_override ?? false,
-    custom_fields: (job.custom_fields ?? []).map((cf, idx) => ({
+    style_name: migrated.style_name ?? migrated.name ?? "",
+    price_manual_override: migrated.price_manual_override ?? false,
+    custom_fields: (migrated.custom_fields ?? []).map((cf, idx) => ({
       ...cf,
       id: cf.id ?? `cf-${idx}-${cf.key || "field"}`,
     })),
-    scope_kind: job.scope_kind ?? "original",
-    job_type: job.job_type ?? (project !== undefined ? "print_production" : job.job_type),
-    colorway: job.colorway ?? "",
-    color_code: job.color_code ?? "",
-    barcode: job.barcode ?? "",
-    po_number: job.po_number ?? null,
+    scope_kind: migrated.scope_kind ?? "original",
+    job_type: migrated.job_type ?? "print_production",
+    colorway: migrated.colorway ?? "",
+    color_code: migrated.color_code ?? "",
+    barcode: migrated.barcode ?? "",
+    po_number: migrated.po_number ?? null,
     label_files: labelFiles,
     label_lines: labelLines,
-    estimate: { ...defaultJobEstimate(project), ...job.estimate },
+    estimate: { ...defaultJobEstimate(project), ...migrated.estimate },
     costing: {
       ...defaultJobCosting(project),
-      ...job.costing,
-      colorways: (job.costing?.colorways ?? []).map((cw) => ({
+      ...migrated.costing,
+      colorways: (migrated.costing?.colorways ?? []).map((cw) => ({
         ...cw,
         samples: cw.samples.map(backfillSample),
       })),
       dye_costing_tracks:
-        job.costing?.dye_costing_tracks?.length
-          ? job.costing.dye_costing_tracks
+        migrated.costing?.dye_costing_tracks?.length
+          ? migrated.costing.dye_costing_tracks
           : defaultJobCosting(project).dye_costing_tracks,
-      trim_line_tracks: job.costing?.trim_line_tracks ?? defaultJobCosting(project).trim_line_tracks,
-      sample_approval_stages: resolveSampleApprovalStages(job.costing?.sample_approval_stages),
-      print_embroidery_costing_tracks: job.costing?.print_embroidery_costing_tracks ?? [],
+      trim_line_tracks: migrated.costing?.trim_line_tracks ?? defaultJobCosting(project).trim_line_tracks,
+      sample_approval_stages: resolveSampleApprovalStages(migrated.costing?.sample_approval_stages),
+      print_embroidery_costing_tracks: migrated.costing?.print_embroidery_costing_tracks ?? [],
       costing_extra_tracks:
-        job.costing?.costing_extra_tracks?.length
-          ? job.costing.costing_extra_tracks
+        migrated.costing?.costing_extra_tracks?.length
+          ? migrated.costing.costing_extra_tracks
           : defaultJobCosting(project).costing_extra_tracks,
     },
-    approvals: { ...defaultJobApprovals(project), ...job.approvals },
-    tech_pack: { ...defaultJobTechPack(project), ...job.tech_pack },
-    fulfillment: { ...defaultJobFulfillment(project), ...job.fulfillment },
+    approvals: { ...defaultJobApprovals(project), ...migrated.approvals },
+    tech_pack: { ...defaultJobTechPack(project), ...migrated.tech_pack },
+    fulfillment: { ...defaultJobFulfillment(project), ...migrated.fulfillment },
     bulk_production_tracks:
-      job.bulk_production_tracks?.length
-        ? job.bulk_production_tracks
+      migrated.bulk_production_tracks?.length
+        ? migrated.bulk_production_tracks
         : defaultJobBulkTracks(project),
-    vendor_quotes: job.vendor_quotes ?? [],
-    job_vendors: job.job_vendors ?? inferJobVendorNames(job),
-    costing_sheet: job.costing_sheet ?? defaultCostingSheet(job),
-    estimates: job.estimates ?? [],
-    timeline: repairJobTimelineWithTemplate(job.timeline, job.job_type ?? "print_production"),
+    vendor_quotes: migrated.vendor_quotes ?? [],
+    job_vendors: migrated.job_vendors ?? inferJobVendorNames(migrated),
+    costing_sheet: migrated.costing_sheet ?? defaultCostingSheet(migrated),
+    estimates: migrated.estimates ?? [],
+    timeline: repairJobTimelineWithTemplate(migrated.timeline, migrated.job_type ?? "print_production"),
   };
 }

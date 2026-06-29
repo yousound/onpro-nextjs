@@ -42,6 +42,8 @@ export const MOCK_LS = {
   demoSeedVersion: "onpro.mock.v1.demoSeedVersion",
   /** Manufacturer blanks + workspace products catalog. */
   brandProducts: "onpro.mock.v1.brandProducts",
+  /** Custom job category codes beyond the built-in list. */
+  workspaceCategories: "onpro.mock.v1.workspaceCategories",
 } as const;
 
 /** Increment when regenerating demo projects/jobs so browsers drop stale WIP edits. */

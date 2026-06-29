@@ -15,7 +15,6 @@ import {
   jobAttachmentTitle,
 } from "@/lib/attachment-composer-job";
 import { JobDetailsModal } from "@/components/job-details-modal";
-import { NewJobModal } from "@/components/new-job-modal";
 import { normalizeJob } from "@/lib/job-defaults";
 import { MOCK_LS, readMockLs } from "@/lib/mock-local";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
@@ -46,6 +45,7 @@ import {
 import { getCalendarEvents } from "@/lib/mock/calendar-events";
 import type { CalendarEventType } from "@/lib/types/calendar";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
+import { loadProjectOrders } from "@/lib/project-order-edits";
 import { loadContacts, vendorContacts } from "@/lib/contacts-store";
 import { ContactFieldSelect, contactFieldsFromPick } from "@/components/contact-field-select";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -1901,15 +1901,18 @@ export function MessageAttachmentComposer(props: {
       </AttachmentPreviewModal>
     ) : null}
     {jobModalJob && jobModalProject && jobModal?.kind === "new" ? (
-      <NewJobModal
+      <JobDetailsModal
         key={jobModalProject.id}
-        projects={allProjects}
         project={jobModalProject}
-        onProjectChange={handleJobModalProjectChange}
         job={jobModalJob}
         allJobs={jobModalProjectJobs}
+        orders={loadProjectOrders(jobModalProject.id, jobModalProject)}
         clientCode={jobModalClientCode}
         vendors={vendors}
+        isNew
+        allowProjectChange
+        projects={allProjects}
+        onProjectChange={handleJobModalProjectChange}
         overlayClassName="z-[210]"
         onClose={() => {
           setJobModal(null);

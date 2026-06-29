@@ -2,14 +2,19 @@ import type { SampleApprovalStage, TrimLineTrack } from "@/lib/types/project";
 import type { BulkProductionTrack, DyeCostingTrack } from "@/lib/types/project";
 import type { JobDevelopmentFields, JobTechPackFields, ProjectJob } from "@/lib/types/wip";
 
-const DEFAULT_SAMPLE_STAGES: Omit<SampleApprovalStage, "requested_date" | "due_date" | "status">[] = [
+const DEFAULT_SAMPLE_STAGE_DEFS: Omit<
+  SampleApprovalStage,
+  "requested_date" | "due_date" | "status"
+>[] = [
   { key: "1st", label: "1st sample" },
   { key: "2nd", label: "2nd sample" },
   { key: "pp", label: "PP sample" },
 ];
 
+const DEFAULT_SAMPLE_KEYS = new Set(DEFAULT_SAMPLE_STAGE_DEFS.map((s) => s.key));
+
 export function defaultSampleApprovalStages(): SampleApprovalStage[] {
-  return DEFAULT_SAMPLE_STAGES.map((s) => ({
+  return DEFAULT_SAMPLE_STAGE_DEFS.map((s) => ({
     ...s,
     requested_date: null,
     due_date: null,
@@ -20,19 +25,35 @@ export function defaultSampleApprovalStages(): SampleApprovalStage[] {
 export function resolveSampleApprovalStages(stages?: SampleApprovalStage[]): SampleApprovalStage[] {
   const defaults = defaultSampleApprovalStages();
   if (!stages?.length) return defaults;
-  return defaults.map((def) => {
+  const mergedDefaults = defaults.map((def) => {
     const hit = stages.find((s) => s.key === def.key);
     return hit ? { ...def, ...hit, key: def.key, label: def.label } : def;
   });
+  const extras = stages.filter((s) => !DEFAULT_SAMPLE_KEYS.has(s.key));
+  return [...mergedDefaults, ...extras];
+}
+
+export function newCustomSampleStage(label: string): SampleApprovalStage {
+  return {
+    key: `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    label: label.trim() || "Additional sample",
+    requested_date: null,
+    due_date: null,
+    status: null,
+  };
+}
+
+export function canRemoveSampleStage(key: string): boolean {
+  return !DEFAULT_SAMPLE_KEYS.has(key);
 }
 
 /** UI labels for Development sample approval fields (team spec). */
-export function sampleApprovalFieldLabels(key: SampleApprovalStage["key"]): {
+export function sampleApprovalFieldLabels(stage: SampleApprovalStage): {
   requested: string;
   due: string;
   status: string;
 } {
-  const name = key === "1st" ? "1st sample" : key === "2nd" ? "2nd sample" : "PP sample";
+  const name = stage.label.trim() || "Sample";
   return {
     requested: `${name} requested`,
     due: `${name} due`,
@@ -150,10 +171,10 @@ export function updateTrimLineTrack(
 
 export function updateSampleStage(
   stages: SampleApprovalStage[],
-  key: SampleApprovalStage["key"],
+  key: string,
   patch: Partial<SampleApprovalStage>,
 ): SampleApprovalStage[] {
-  return stages.map((s) => (s.key === key ? { ...s, ...patch, key: s.key, label: s.label } : s));
+  return stages.map((s) => (s.key === key ? { ...s, ...patch } : s));
 }
 
 export function updateBulkTrack(
@@ -161,5 +182,5 @@ export function updateBulkTrack(
   id: string,
   patch: Partial<BulkProductionTrack>,
 ): BulkProductionTrack[] {
-  return tracks.map((t) => (t.id === id ? { ...t, ...patch, id: t.id } : t));
+  return tracks.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }

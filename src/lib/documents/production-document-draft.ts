@@ -1,4 +1,5 @@
 import { colorwayRowTotal, formatJobSizeBreakdown } from "@/lib/job-colorways";
+import { jobColorwayTotalQty } from "@/lib/mailroom/job-ingest";
 import { formatUsdDetailed, parseUsdInput } from "@/lib/ledger/format";
 import type { Contact } from "@/lib/types/contact";
 import type { Project } from "@/lib/types/project";
@@ -125,6 +126,53 @@ export function computeProductionDocumentTotals(
   };
 }
 
+function vendorDocumentLinesFromJob(input: {
+  job: ProjectJob;
+  quote: VendorQuote;
+  rate: string;
+  fallbackDescription?: string;
+}): ProductionDocumentLine[] {
+  const { job, quote, rate } = input;
+  const fallback = input.fallbackDescription ?? "Quote request";
+  const baseDesc = quote.item_description?.trim() || job.name?.trim() || fallback;
+  const styleBit = job.style_number?.trim() ? `Style ${job.style_number.trim()}` : null;
+  const rows = job.colorway_rows ?? [];
+
+  if (rows.length > 0) {
+    const lines: ProductionDocumentLine[] = [];
+    for (const row of rows) {
+      const total = colorwayRowTotal(row);
+      const colorLabel = [row.name?.trim(), row.color_code?.trim()].filter(Boolean).join(" ");
+      if (total <= 0 && !colorLabel) continue;
+      const description = [baseDesc, styleBit, colorLabel || null].filter(Boolean).join(" — ");
+      lines.push({
+        id: newLineId(),
+        description: description || baseDesc,
+        quantity: String(total || quote.qty || 1),
+        rate,
+        non_taxable: true,
+      });
+    }
+    if (lines.length > 0) return lines;
+  }
+
+  const colorSummary = formatJobSizeBreakdown(rows).replace(/\n/g, "; ");
+  const description = [baseDesc, styleBit, colorSummary || null, job.description?.trim() || null]
+    .filter(Boolean)
+    .join(" — ");
+  const qtyTotal = jobColorwayTotalQty(job) || quote.qty || 1;
+
+  return [
+    {
+      id: newLineId(),
+      description: description || baseDesc,
+      quantity: String(qtyTotal),
+      rate,
+      non_taxable: true,
+    },
+  ];
+}
+
 export function buildVendorQuoteDocument(input: {
   project: Project;
   job: ProjectJob;
@@ -137,15 +185,7 @@ export function buildVendorQuoteDocument(input: {
   const rate =
     quote.unit_cost > 0 ? formatUsdDetailed(Math.round(quote.unit_cost * 100)) : "";
 
-  const lines: ProductionDocumentLine[] = [
-    {
-      id: newLineId(),
-      description: quote.item_description?.trim() || job.name?.trim() || "Quote request",
-      quantity: String(quote.qty || 1),
-      rate,
-      non_taxable: true,
-    },
-  ];
+  const lines = vendorDocumentLinesFromJob({ job, quote, rate });
   while (lines.length < 3) lines.push(emptyProductionLine());
 
   const jobRef = job.job_number?.trim() || job.id;
@@ -176,15 +216,7 @@ export function buildVendorPoDocument(input: {
   const rate =
     quote.unit_cost > 0 ? formatUsdDetailed(Math.round(quote.unit_cost * 100)) : "";
 
-  const lines: ProductionDocumentLine[] = [
-    {
-      id: newLineId(),
-      description: quote.item_description?.trim() || job.name?.trim() || "Quote request",
-      quantity: String(quote.qty || 1),
-      rate,
-      non_taxable: true,
-    },
-  ];
+  const lines = vendorDocumentLinesFromJob({ job, quote, rate });
   while (lines.length < 3) lines.push(emptyProductionLine());
 
   return baseDocument("vendor_po", {

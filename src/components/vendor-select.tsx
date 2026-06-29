@@ -239,6 +239,7 @@ export function VendorFieldSelect({
       placeholder={emptyLabel}
       emptyMessage={vendors.length === 0 ? "No vendors yet — tap + Add" : "No vendors match"}
       listClassName="absolute z-[260] mt-1 w-full max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+      portaled
       commitOnBlur
       labelClassName={labelClassName}
       onChange={(name) => onChange(name)}

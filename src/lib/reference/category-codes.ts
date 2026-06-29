@@ -39,12 +39,21 @@ export function dropdownLabelForCategoryCode(code: string): string {
 
 export const JOB_TYPE_OPTIONS = [
   { value: "print_production", label: "Print Production" },
+  { value: "full_package_cut_sew", label: "Full Package Cut & Sew" },
+  { value: "custom_products", label: "Custom Products" },
+  { value: "artwork_design", label: "Artwork Design" },
+  { value: "branding_kit", label: "Branding Kit" },
+  { value: "decoration", label: "Decoration" },
+  { value: "finishing", label: "Finishing" },
+] as const;
+
+export const DECORATION_VARIANT_OPTIONS = [
   { value: "embroidery", label: "Embroidery" },
-  { value: "cut_sew", label: "Cut & Sew" },
-  { value: "full_package", label: "Full Package" },
-  { value: "design", label: "Design" },
-  { value: "branding", label: "Branding" },
-  { value: "custom", label: "Custom" },
+  { value: "screen_printing", label: "Screen Printing" },
+  { value: "heat_transfers", label: "Heat Transfers" },
+  { value: "applique", label: "Appliqué" },
+  { value: "patches", label: "Patches" },
+  { value: "specialty", label: "Specialty" },
 ] as const;
 
 export const ADDON_CATEGORY_OPTIONS = [

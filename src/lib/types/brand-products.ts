@@ -28,6 +28,8 @@ export type CatalogProduct = {
   name: string;
   style_code: string;
   color?: string | null;
+  /** Three-letter color code for style labels (e.g. BPK). */
+  color_code?: string | null;
   size?: string | null;
   catalog_sku?: string | null;
   description?: string | null;
@@ -97,6 +99,7 @@ export type WorkspaceProduct = {
   garment_brand?: string | null;
   garment_style_number?: string | null;
   garment_color?: string | null;
+  garment_color_code?: string | null;
   garment_size?: string | null;
   decoration_notes?: string | null;
   finishing_tasks: JobFinishingTask[];

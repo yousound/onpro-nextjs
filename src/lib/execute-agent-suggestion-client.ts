@@ -10,6 +10,7 @@ import {
   type SuggestionResolveContext,
 } from "@/lib/agent-suggestion-resolve";
 import { normalizeRfqProjectPayload } from "@/lib/mailroom/client-from-rfq";
+import { poPrefixMismatch } from "@/lib/po-client-code";
 import { orderDisplayLabel } from "@/lib/effective-po";
 import { isClientLiveBackend } from "@/lib/config/backend-mode";
 import { persistProjectToDb, updateProjectInDb } from "@/lib/data/persist-project";
@@ -37,8 +38,9 @@ import { appendSessionProject, readSessionProjects } from "@/lib/mock/project-se
 import { MOCK_LS, readMockLs, writeMockLs } from "@/lib/mock-local";
 import { resolveClientCode } from "@/lib/reference/client-codes";
 import { sanitizeClientEmail } from "@/lib/client-email";
+import { applyMailroomJobPayloadExtras } from "@/lib/mailroom/job-ingest";
 import { collectAllAppPoNumbers } from "@/lib/po-context";
-import { generatePoNumber, projectPoNumber } from "@/lib/po-number";
+import { generatePoNumber, projectPoNumber, resolveProjectNumber } from "@/lib/po-number";
 import { createPackingSlipDraft } from "@/lib/packing-slip";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 import {
@@ -120,8 +122,11 @@ function buildMockProject(
   const projects = listResolvableProjects();
   const nextId = Math.max(0, ...projects.map((p) => p.id)) + 1;
   const clientCode = resolveClientCode(client.name);
-  const po =
-    clientPoNumber?.trim() || generatePoNumber(clientCode, collectAllAppPoNumbers(projects));
+  const po = resolveProjectNumber(
+    clientCode,
+    clientPoNumber,
+    collectAllAppPoNumbers(projects),
+  );
   const status: ProjectStatus = "Development";
   return {
     id: nextId,
@@ -243,6 +248,7 @@ async function execCreateProject(
   const payload = normalizeRfqProjectPayload(
     suggestion.payload ?? {},
     ctx.threadSubject,
+    ctx.threadBodies,
   );
   const ensured = await ensureClientContact(payload);
   const clientContact =
@@ -274,11 +280,21 @@ async function execCreateProject(
   const contactNote = ensured?.created
     ? ` Added client “${contactDisplayName(clientContact)}” to Contacts.`
     : "";
+  const poMismatch = poPrefixMismatch(
+    contactDisplayName(clientContact),
+    clientContact.company_code || resolveClientCode(client.name),
+    clientPoNumber,
+  );
+  const poMismatchNote = poMismatch.message ? ` Note: ${poMismatch.message}` : "";
 
   if (isClientLiveBackend()) {
     try {
       const clientCode = clientContact.company_code || resolveClientCode(client.name);
-      const po = generatePoNumber(clientCode, collectAllAppPoNumbers());
+      const po = resolveProjectNumber(
+        clientCode,
+        clientPoNumber,
+        collectAllAppPoNumbers(),
+      );
       const saved = await persistProjectToDb({
         name,
         description: String(payload.notes ?? payload.description ?? "").trim() || null,
@@ -292,7 +308,7 @@ async function execCreateProject(
       upsertLiveProject(saved);
       return {
         ok: true,
-        message: `Created project “${saved.name}” for ${client.name}.${contactNote}`,
+        message: `Created project “${saved.name}” for ${client.name}.${contactNote}${poMismatchNote}`,
         deepLink: projectDeepLink(saved.id),
         projectId: saved.id,
         contactCreated: ensured?.created,
@@ -321,7 +337,7 @@ async function execCreateProject(
   upsertLiveProject(proj);
   return {
     ok: true,
-    message: `Created project “${proj.name}” for ${client.name}.${contactNote}`,
+    message: `Created project “${proj.name}” for ${client.name}.${contactNote}${poMismatchNote}`,
     deepLink: projectDeepLink(proj.id),
     projectId: proj.id,
     contactCreated: ensured?.created,
@@ -402,18 +418,21 @@ function execCreateJob(
         : baseName ||
           sanitizeJobDisplayName(suggestion.title.replace(/^Add .* job/i, "").trim()) ||
           "New job";
-    const job = normalizeJob(
-      {
-        ...seed,
-        name,
-        lead_vendor: vendor || seed.lead_vendor,
-        style_number: String(payload.style_number ?? "").trim() || seed.style_number,
-        subtitle:
-          String(payload.subtitle ?? payload.print_notes ?? payload.colors ?? "").trim() ||
-          seed.subtitle,
-        updated_at: nowIso(),
-      },
-      project,
+    const job = applyMailroomJobPayloadExtras(
+      normalizeJob(
+        {
+          ...seed,
+          name,
+          lead_vendor: vendor || seed.lead_vendor,
+          style_number: String(payload.style_number ?? "").trim() || seed.style_number,
+          subtitle:
+            String(payload.subtitle ?? payload.print_notes ?? "").trim() ||
+            seed.subtitle,
+          updated_at: nowIso(),
+        },
+        project,
+      ),
+      payload,
     );
     jobs = [...jobs, job];
     created.push(job);

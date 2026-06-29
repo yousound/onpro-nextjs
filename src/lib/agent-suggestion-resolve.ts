@@ -11,6 +11,8 @@ export type SuggestionResolveContext = {
   projects?: Project[];
   workflowStepContext?: { project_id?: number; job_id?: string; job_ids?: string[] };
   threadSubject?: string;
+  /** Gmail message bodies for PO extraction when subject has no PO. */
+  threadBodies?: string[];
 };
 
 function asNumber(raw: unknown): number | undefined {

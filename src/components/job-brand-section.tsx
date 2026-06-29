@@ -25,6 +25,8 @@ import { JobFinishingSection } from "@/components/job-finishing-section";
 import { VendorFieldSelect } from "@/components/vendor-select";
 import type { Contact } from "@/lib/types/contact";
 import { dispatchAppToast } from "@/lib/onpro-events";
+import { newColorwayRow, syncLegacyColorwayFields } from "@/lib/job-colorways";
+import { resolveColorCode } from "@/lib/style-number";
 
 const labelClass = "block text-xs font-semibold uppercase tracking-wide text-slate-500";
 
@@ -150,6 +152,9 @@ export function JobBrandProductsSection({
         name: `${brand} ${style}`,
         style_code: style,
         color: draft.garment_color?.trim() || null,
+        color_code:
+          draft.colorway_rows?.[0]?.color_code?.trim() ||
+          (draft.garment_color ? resolveColorCode(draft.garment_color) : null),
         size: draft.garment_size?.trim() || null,
         catalog_sku: null,
         description: null,
@@ -309,6 +314,25 @@ export function JobBrandProductsSection({
             />
           </label>
           <label className={labelClass}>
+            Color code
+            <input
+              className={fieldClass}
+              value={
+                draft.colorway_rows?.[0]?.color_code ??
+                (draft.garment_color ? resolveColorCode(draft.garment_color) : "")
+              }
+              maxLength={3}
+              placeholder="3 letters"
+              onChange={(e) => {
+                const code = e.target.value.toUpperCase().slice(0, 3);
+                const rows = draft.colorway_rows?.length
+                  ? draft.colorway_rows.map((r, i) => (i === 0 ? { ...r, color_code: code } : r))
+                  : [{ ...newColorwayRow(), color_code: code, name: draft.garment_color ?? "" }];
+                patch(syncLegacyColorwayFields({ ...draft, colorway_rows: rows }));
+              }}
+            />
+          </label>
+          <label className={labelClass}>
             Size
             <input
               className={fieldClass}
@@ -339,14 +363,6 @@ export function JobBrandProductsSection({
             a vendor.
           </p>
         </label>
-
-        <VendorFieldSelect
-          label="Blank vendor (optional)"
-          vendors={vendors}
-          value={draft.lead_vendor}
-          onChange={(name) => patch({ lead_vendor: name ?? "" })}
-          emptyLabel="Select vendor…"
-        />
 
         <div className="flex flex-wrap gap-2">
           <button

@@ -1,4 +1,7 @@
-import { extractClientPoFromSubject } from "@/lib/mailroom/client-from-rfq";
+import {
+  extractClientPoFromBodies,
+  extractClientPoFromSubject,
+} from "@/lib/mailroom/client-from-rfq";
 import { resolveWorkflowProjectId } from "@/lib/mailroom/workflow-utils";
 import type { AgentSuggestionKind, MailroomWorkflow } from "@/lib/types/agent";
 
@@ -31,8 +34,11 @@ export function enrichSuggestionPayloadForThread(
   opts: {
     workflow?: MailroomWorkflow | null;
     threadSubject?: string;
+    threadBodies?: string[];
     fallbackProjectId?: number;
     fallbackJobId?: string;
+    /** RFQ intake PO — takes precedence over thread extraction for create_project. */
+    rfqClientPo?: string | null;
   },
 ): Record<string, unknown> {
   const next = { ...payload };
@@ -57,9 +63,18 @@ export function enrichSuggestionPayloadForThread(
     next.job_id = jobId;
   }
 
-  if (kind === "update_client_po" && opts.threadSubject && !String(next.client_po_number ?? "").trim()) {
-    const po = extractClientPoFromSubject(opts.threadSubject);
+  if (
+    (kind === "update_client_po" || kind === "create_project" || kind === "create_order") &&
+    !String(next.client_po_number ?? next.po_number ?? "").trim()
+  ) {
+    const po =
+      extractClientPoFromSubject(opts.threadSubject ?? "") ??
+      extractClientPoFromBodies(opts.threadBodies ?? []);
     if (po) next.client_po_number = po;
+  }
+
+  if (kind === "create_project" && opts.rfqClientPo?.trim()) {
+    next.client_po_number = opts.rfqClientPo.trim().toUpperCase();
   }
 
   if (kind === "log_packing_list" && next.update_existing !== false) {

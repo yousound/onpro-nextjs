@@ -353,7 +353,7 @@ function execCreateOrder(
     return { ok: false, message: "Create or open a project first, then add an order." };
   }
   const opCode = resolveOperatorCompanyCode(null);
-  let orders = loadProjectOrders(project.id, project);
+  let orders = loadProjectOrders(project.id);
   if (orders.length === 0) {
     const order = createFirstProjectOrder(project.id, project, orders, opCode);
     orders = [...orders, order];
@@ -396,7 +396,7 @@ function execCreateJob(
   const vendor = String(payload.vendor ?? payload.supplier ?? ctx.threadRelated?.vendor ?? project.lead_vendor ?? "").trim();
 
   let jobs = loadProjectJobs(project.id, project);
-  let orders = loadProjectOrders(project.id, project);
+  let orders = loadProjectOrders(project.id);
   const orderBundle = getOrCreateOrderForJob(
     project.id,
     project,

@@ -1906,7 +1906,7 @@ export function MessageAttachmentComposer(props: {
         project={jobModalProject}
         job={jobModalJob}
         allJobs={jobModalProjectJobs}
-        orders={loadProjectOrders(jobModalProject.id, jobModalProject)}
+        orders={loadProjectOrders(jobModalProject.id)}
         clientCode={jobModalClientCode}
         vendors={vendors}
         isNew

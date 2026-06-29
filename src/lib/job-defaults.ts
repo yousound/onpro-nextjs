@@ -11,7 +11,7 @@ import { normalizeColorwayRows, syncLegacyColorwayFields } from "@/lib/job-color
 import { syncJobPriceFromCosting } from "@/lib/job-price";
 import { inferJobVendorNames } from "@/lib/job-vendors";
 import { repairJobTimelineWithTemplate } from "@/lib/job-timeline-templates";
-import { migrateJobTypeFields } from "@/lib/job-type-migrate";
+import { migrateJobTypeFields, isCutSewClassJobType } from "@/lib/job-type-migrate";
 
 export function defaultJobEstimate(project?: Project): NonNullable<ProjectJob["estimate"]> {
   return {
@@ -86,10 +86,8 @@ export function defaultJobBulkTracks(project?: Project): BulkProductionTrack[] {
 }
 
 export function defaultCostingSheet(job?: ProjectJob): CostingSheet {
-  return emptyCostingSheet(
-    job?.job_type === "cut_sew" ? "print_production" : "print_production",
-    "USA",
-  );
+  const costingType = isCutSewClassJobType(job?.job_type) ? "full_package" : "print_production";
+  return emptyCostingSheet(costingType, "USA");
 }
 
 function backfillSample(s: Sample): Sample {

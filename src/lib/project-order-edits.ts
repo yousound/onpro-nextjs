@@ -7,7 +7,7 @@ import { readSessionProjects } from "@/lib/mock/project-session";
 import { createNewOrderSeed } from "@/lib/project-order-create";
 import { loadProjectJobs, saveProjectJobs } from "@/lib/project-wip-edits";
 
-export function loadProjectOrders(projectId: number, _project?: Project): ProjectOrder[] {
+export function loadProjectOrders(projectId: number): ProjectOrder[] {
   if (isClientLiveBackend()) {
     return getLiveCachedOrders(projectId);
   }
@@ -64,11 +64,7 @@ export function loadWorkspaceOrders(): ProjectOrder[] {
   if (isClientLiveBackend()) {
     const projects = getLiveCachedProjects();
     if (projects.length === 0) return [];
-    return loadAllOrdersAcrossProjects(
-      projects.map((p) => p.id),
-      new Map(projects.map((p) => [p.id, p])),
-      "",
-    );
+    return loadAllOrdersAcrossProjects(projects.map((p) => p.id));
   }
   const ids = new Set<number>();
   for (const p of readSessionProjects()) ids.add(p.id);
@@ -84,8 +80,7 @@ export function loadWorkspaceOrders(): ProjectOrder[] {
       /* ignore */
     }
   }
-  const projects = readSessionProjects();
-  return loadAllOrdersAcrossProjects([...ids], new Map(projects.map((p) => [p.id, p])), "");
+  return loadAllOrdersAcrossProjects([...ids]);
 }
 
 /** Create the first order when a job is added or the user clicks + New order. */
@@ -113,11 +108,7 @@ export function createFirstProjectOrder(
 }
 
 /** @deprecated Prefer explicit createFirstProjectOrder — no longer auto-creates on project load. */
-export function ensureDefaultOrders(
-  projectId: number,
-  project: Project,
-  operatorCode = "OP",
-): ProjectOrder[] {
+export function ensureDefaultOrders(projectId: number): ProjectOrder[] {
   const existing = readStoredProjectOrders(projectId);
   if (existing.length > 0) {
     saveProjectOrders(projectId, existing);
@@ -141,14 +132,10 @@ export function getOrCreateOrderForJob(
   return { orders: [...existingOrders, order], orderId: order.id };
 }
 
-export function loadAllOrdersAcrossProjects(
-  projectIds: number[],
-  projectsById: Map<number, Project>,
-  _operatorCode: string,
-): ProjectOrder[] {
+export function loadAllOrdersAcrossProjects(projectIds: number[]): ProjectOrder[] {
   const all: ProjectOrder[] = [];
   for (const id of projectIds) {
-    all.push(...loadProjectOrders(id, projectsById.get(id)));
+    all.push(...loadProjectOrders(id));
   }
   return all;
 }

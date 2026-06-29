@@ -59,7 +59,7 @@ export function ProductionBoard({
   const jobRows = useMemo(() => {
     const rows: ProductionJobRow[] = [];
     for (const p of projects) {
-      const orders = loadProjectOrders(p.id, p);
+      const orders = loadProjectOrders(p.id);
       const orderById = new Map(orders.map((o) => [o.id, o]));
       for (const j of loadProjectJobs(p.id, p)) {
         const order: ProjectOrder | undefined = j.order_id ? orderById.get(j.order_id) : orders[0];
@@ -252,7 +252,7 @@ export function ProductionBoard({
           project={modalJob.project}
           job={normalizeJob(modalJob.job, modalJob.project)}
           allJobs={loadProjectJobs(modalJob.project.id, modalJob.project)}
-          orders={loadProjectOrders(modalJob.project.id, modalJob.project)}
+          orders={loadProjectOrders(modalJob.project.id)}
           clientCode={clientCodeByName(modalJob.project.client.name) ?? "GG"}
           vendors={vendors}
           onClose={closeJobModal}

@@ -73,7 +73,7 @@ export function CreateJobLauncher({
 
   const orders = useMemo(() => {
     if (!selectedProject) return [];
-    return loadProjectOrders(selectedProject.id, selectedProject);
+    return loadProjectOrders(selectedProject.id);
   }, [selectedProject, open]);
 
   useEffect(() => {
@@ -111,7 +111,7 @@ export function CreateJobLauncher({
 
       let jobToSave = saved;
       if (!saved.order_id) {
-        const existingOrders = loadProjectOrders(project.id, project);
+        const existingOrders = loadProjectOrders(project.id);
         const created = getOrCreateOrderForJob(project.id, project, existingOrders, "MAT", projects);
         jobToSave = { ...saved, order_id: created.orderId };
       }

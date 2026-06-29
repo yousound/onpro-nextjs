@@ -207,14 +207,14 @@ export function ProjectJobsView({
         const ordersFromServer = apiOrders ?? [];
         setJobs(jobsFromServer);
         setOrders(
-          ordersFromServer.length > 0 ? ordersFromServer : loadProjectOrders(project.id, mergedProject),
+          ordersFromServer.length > 0 ? ordersFromServer : loadProjectOrders(project.id),
         );
         setHydrated(true);
         return;
       }
 
       setJobs(loadProjectJobs(project.id, mergedProject));
-      setOrders(loadProjectOrders(project.id, mergedProject));
+      setOrders(loadProjectOrders(project.id));
       setHydrated(true);
     }
 
@@ -252,7 +252,7 @@ export function ProjectJobsView({
         return;
       }
       const mergedProject = mergedProjectForReload();
-      setOrders(loadProjectOrders(project.id, mergedProject));
+      setOrders(loadProjectOrders(project.id));
     }
     window.addEventListener("onpro-jobs-changed", reloadJobs);
     window.addEventListener("onpro-live-cache-seeded", reloadJobs);

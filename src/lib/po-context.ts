@@ -40,7 +40,7 @@ export function collectAllAppRecordNumbers(extraProjects: Project[] = []): strin
     for (const j of jobs) {
       out.push(...recordValuesFromJob(j));
     }
-    const orders = loadProjectOrders(p.id, p);
+    const orders = loadProjectOrders(p.id);
     for (const o of orders) {
       if (o.po_number?.trim()) out.push(o.po_number.trim());
       if (o.client_po_number?.trim()) out.push(o.client_po_number.trim());

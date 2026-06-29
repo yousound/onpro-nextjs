@@ -9,7 +9,7 @@ export async function fetchOrdersForProject(
   project?: Project,
 ): Promise<ProjectOrder[]> {
   if (!(await isLiveBackendEnabled())) {
-    return loadProjectOrders(projectId, project);
+    return loadProjectOrders(projectId);
   }
   return fetchOrdersForProjectFromSupabase(projectId);
 }

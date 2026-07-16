@@ -91,11 +91,13 @@ export const LEDGER_SEED: LedgerSeed = {
     {
       id: "inv-onpro-jul-2026",
       dateLabel: "July 2026",
-      label: "Development",
+      label: "Development services — January–June 2026",
       amountCents: 150_000,
       status: "pending",
       projectId: "onpro",
       kind: "retainer",
+      notes:
+        "Development work includes the iOS application foundation; Next.js workspace and operational modules; Supabase backend and data integrations; Mailroom, onboarding, contacts, projects, jobs, costing, production, messaging, documents, calendar, workspace access, and OnPro AI systems.\nDetailed task list: https://onpro-nextjs.vercel.app/ledger/financial/invoices",
     },
   ],
 

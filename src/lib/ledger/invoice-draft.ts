@@ -88,7 +88,7 @@ function lineFromLedgerInvoice(inv: LedgerInvoice): LedgerInvoiceLineDraft {
   const amount = formatUsdDetailed(inv.amountCents);
   return {
     id: newLineId(),
-    description: inv.label,
+    description: [inv.label, inv.notes].filter(Boolean).join("\n\n"),
     quantity: "1",
     rate: amount,
   };

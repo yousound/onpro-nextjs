@@ -80,18 +80,9 @@ export const LEDGER_SEED: LedgerSeed = {
 
   invoices: [
     {
-      id: "inv-fbrc-wholesale",
-      dateLabel: "TBD",
-      label: "FBRC.LA — Site transfer & wholesale order expansion",
-      amountCents: 150_000,
-      status: "pending",
-      projectId: "fbrc",
-      kind: "other",
-    },
-    {
       id: "inv-onpro-jun-2026",
       dateLabel: "June 2026",
-      label: "Monthly OnPro retainer",
+      label: "Development",
       amountCents: 150_000,
       status: "paid",
       projectId: "onpro",
@@ -100,7 +91,7 @@ export const LEDGER_SEED: LedgerSeed = {
     {
       id: "inv-onpro-jul-2026",
       dateLabel: "July 2026",
-      label: "Monthly OnPro retainer",
+      label: "Development",
       amountCents: 150_000,
       status: "pending",
       projectId: "onpro",

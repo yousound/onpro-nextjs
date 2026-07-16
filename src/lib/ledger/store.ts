@@ -11,7 +11,7 @@ import type {
   LedgerSeed,
 } from "@/lib/ledger/types";
 
-const OVERRIDES_KEY = "onpro.ledger.v12.overrides";
+const OVERRIDES_KEY = "onpro.ledger.v13.overrides";
 const AUTH_KEY = "onpro.ledger.v1.authed";
 
 export function isLedgerAuthed(): boolean {

@@ -9,7 +9,7 @@ import { costingTotals } from "@/lib/costing-sheet";
 import type { Estimate } from "@/lib/types/wip";
 
 export const DEFAULT_BILL_TO = {
-  name: "Connect Dots",
+  name: "Leave A Legacy",
   email: "jerry@connectdots.la",
   address1: "2301 E. 7th St F101",
   address2: "Los Angeles, CA 90023",
